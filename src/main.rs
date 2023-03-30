@@ -491,7 +491,7 @@ impl CreatureFile {
     fn new() -> CreatureFile {
         CreatureFile {
             name: String::new(),
-            creatures: Vec::new(),
+            creatures: vec![Creature::new()],
         }
     }
 }
@@ -499,7 +499,6 @@ impl CreatureFile {
 #[derive(Clone, Debug, Default, PartialEq)]
 enum State {
     #[default]
-    Empty,
     Default,
     Child, //todo add rest
     Custom(String),
@@ -520,6 +519,7 @@ enum LayerSet {
     #[default]
     Empty,
     Simple(Vec<SimpleLayer>),
+    Statue(Vec<SimpleLayer>),
     Layered(State, Vec<LayerGroup>),
 }
 impl LayerSet {
@@ -542,7 +542,7 @@ impl Creature {
     fn new() -> Creature {
         Creature {
             name: String::from("(new)"),
-            graphics_type: vec![LayerSet::Simple(Vec::new())],
+            graphics_type: vec![LayerSet::default()],
         }
     }
 }
@@ -558,7 +558,7 @@ struct SimpleLayer {
 impl SimpleLayer {
     fn new() -> SimpleLayer {
         SimpleLayer {
-            state: State::Empty,
+            state: State::default(),
             tile: Tile::new(),
             coords: [0, 0],
             large_coords: None,
@@ -597,7 +597,7 @@ impl LayerGroup {
     fn new() -> LayerGroup {
         LayerGroup {
             name: "new".to_string(),
-            set_state: State::Empty,
+            set_state: State::default(),
             layers: vec![Layer::new()],
         }
     }
@@ -1435,8 +1435,8 @@ struct TilePage {
 impl TilePage {
     fn new() -> TilePage {
         TilePage {
-            name: String::new(),
-            tiles: Vec::new(),
+            name: String::from("(new)"),
+            tiles: vec![Tile::new()],
         }
     }
 }
@@ -1588,6 +1588,96 @@ impl DFGraphicsHelper {
                         };
                     })
                     .body(|ui| {
+                        for (i_layer_set, layer_set) in creature.graphics_type.iter_mut().enumerate() {
+                            match layer_set {
+                                LayerSet::Empty => {
+                                    if ui.add(egui::Label::new("(empty)")
+                                        .sense(Sense::click())).clicked()
+                                        {
+                                        self.main_window = MainWindow::LayerMenu;
+                                        self.creaturefile_index = i_file;
+                                        self.creature_index = i_creature;
+                                        self.layer_set_index = i_layer_set;
+                                    }
+                                },
+                                LayerSet::Layered(state, layer_groups) => {
+                                    for (i_layer_group, layer_group) in layer_groups.iter_mut().enumerate() {
+                                        egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+                                            format!("layergroup{}{}{}",
+                                            i_file, i_creature, i_layer_group).into(),
+                                            false)
+                                            .show_header(ui, |ui|
+                                            {
+                                            if ui.add(egui::Label::new(
+                                                format!("{}", &layer_group.name))
+                                                .sense(Sense::click())).clicked()
+                                                {
+                                                self.main_window = MainWindow::LayerGroupMenu;
+                                                self.creaturefile_index = i_file;
+                                                self.creature_index = i_creature;
+                                                self.layer_set_index = i_layer_set;
+                                                self.layer_group_index = i_layer_group;
+                                            };
+                                        })
+                                            .body(|ui|
+                                            {
+                                            for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
+                                                egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+                                                    format!("layer{}{}{}{}{}",
+                                                    i_file, i_creature, i_layer_set, i_layer_group, i_layer).into(),
+                                                    false)
+                                                    .show_header(ui, |ui|
+                                                    {
+                                                    if ui.add(egui::Label::new(
+                                                        format!("{}", &layer.name))
+                                                        .sense(Sense::click())).clicked()
+                                                        {
+                                                        self.main_window = MainWindow::LayerMenu;
+                                                        self.creaturefile_index = i_file;
+                                                        self.creature_index = i_creature;
+                                                        self.layer_set_index = i_layer_set;
+                                                        self.layer_group_index = i_layer_group;
+                                                        self.layer_index = i_layer;
+                                                    };
+                                                })
+                                                    .body(|ui|
+                                                    {
+                                                    for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
+                                                        if ui.add(egui::Label::new(condition.name())
+                                                            .sense(Sense::click())).clicked()
+                                                            {
+                                                            self.main_window = MainWindow::ConditionMenu;
+                                                            self.creaturefile_index = i_file;
+                                                            self.creature_index = i_creature;
+                                                            self.layer_set_index = i_layer_set; 
+                                                            self.layer_group_index = i_layer_group;
+                                                            self.layer_index = i_layer;
+                                                            self.condition_index = i_condition;
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        });
+                                    }
+                                },
+                                LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
+                                    for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
+                                        if ui.add(egui::Label::new(
+                                            format!("[{}]{}",
+                                            layer.state.name(),
+                                            layer.sub_state.clone().unwrap_or_default().name()))
+                                            .sense(Sense::click())).clicked()
+                                            {
+                                            self.main_window = MainWindow::LayerMenu;
+                                            self.creaturefile_index = i_file;
+                                            self.creature_index = i_creature;
+                                            self.layer_index = i_layer;
+                                        }
+                                    }
+                                },
+                                _ => {ui.label("uh oh layer sets todo");}
+                            }
+                        }
                         // for (i_layergroup, layergroup) in creature.layergroups.iter_mut().enumerate() {
                         //     if creature.graphics_type.eq(&String::from("Layered")) {
                         //         egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
