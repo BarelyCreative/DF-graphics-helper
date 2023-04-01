@@ -1,6 +1,6 @@
 use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui};
-// use convert_case::{Case, Casing};
+use convert_case::{Case, Casing};
 use rfd;
 use std::io::prelude::*;
 use std::{fs, io, path, vec};
@@ -137,8 +137,6 @@ impl Graphics {
                                             }
                                             //layer_groups is a temporary variable
                                             //layer_set buffer written in match below
-                                            dbg!("breakpt new creature/set");
-                                            dbg!(&creature);
                                         },
                                         LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
                                             if !simple_layers.is_empty() {
@@ -156,8 +154,6 @@ impl Graphics {
                                         "CREATURE_GRAPHICS" => {
                                             creature.name = line_vec[1].clone();
                                             layer_set = LayerSet::Simple(Vec::new());
-                                            dbg!("creature graphics");
-                                            dbg!(&creature);
                                         },
                                         "STATUE_CREATURE_GRAPHICS" => {
                                             creature.name = line_vec[1].clone();
@@ -168,8 +164,6 @@ impl Graphics {
                                             creature.graphics_type.clear();
                                             layer_set = LayerSet::Layered(State::from(line_vec[1].clone()),
                                             Vec::new());
-                                            dbg!("layered");
-                                            dbg!(&creature);
                                         },
                                         _ => {},
                                     }
@@ -193,7 +187,10 @@ impl Graphics {
                                     match &mut layer_set {
                                         LayerSet::Layered(..) => {
                                             if layer.name.ne("") {
-                                                layer.conditions.push(condition.clone());
+                                                if condition.ne(&Condition::default()) {
+                                                    layer.conditions.push(condition.clone());
+                                                    condition = Condition::default();
+                                                }
                                                 layer_group.layers.push(layer.clone());
                                             }
                                             if line_vec[3].eq("LARGE_IMAGE") {
@@ -295,16 +292,17 @@ impl Graphics {
                     }
 
                     //push everything down at end of file
-                    layer.conditions.push(condition);
-                    layer_group.layers.push(layer);
-                    dbg!(layer_set.clone());
+                    if condition.ne(&Condition::default()) {
+                        layer.conditions.push(condition);
+                    }
+                    if layer.name.ne("") {
+                        layer_group.layers.push(layer);
+                    }
                     match &mut layer_set {
                         LayerSet::Empty => {},
                         LayerSet::Layered(_, layer_groups) => {
                             layer_groups.push(layer_group);
-                            dbg!(layer_set.clone());
                             creature.graphics_type.push(layer_set);
-                            dbg!(&creature);
                             creature_file.creatures.push(creature);
                         },
                         LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
@@ -314,6 +312,43 @@ impl Graphics {
                         }
                     }
                     creature_files.push(creature_file);
+
+                    //naming the layer groups
+                    for cf in creature_files.iter_mut() {
+                        for c in cf.creatures.iter_mut() {
+                            for gt in c.graphics_type.iter_mut() {
+                                if let LayerSet::Layered(state, lgs) = gt {
+                                    for lg in lgs.iter_mut() {
+                                        let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
+                                        dbg!(&layer_names);
+                                        layer_names.sort();
+                                        layer_names.dedup();
+                                        dbg!(&layer_names);
+
+
+                                        match layer_names.len() {
+                                            0 => lg.name = state.name().to_case(Case::Title),
+                                            1 => lg.name = layer_names[0].clone(),
+                                            _ => {
+                                                // let mut done = false;
+                                                let mut words: Vec<&str> = layer_names[0].split("_").collect();
+                                                dbg!(&words);
+
+                                                words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
+                                                dbg!(&words);
+
+                                                if words.is_empty() {
+                                                    lg.name = state.name().to_case(Case::Title);
+                                                } else {
+                                                    lg.name = words.join("_");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
