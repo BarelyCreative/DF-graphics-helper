@@ -113,80 +113,86 @@ impl Graphics {
                             creature_file.name =
                                 raw_line.replace("graphics_creatures_", "").trim().to_string();
                         } else if brackets && line_vec.len() > 0 {
+
+                            dbg!(&raw_line);
+
                             match line_vec[0].as_str() {
                                 "CREATURE_GRAPHICS" | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
-                                    match layer_set.clone() {
+                                    match &mut layer_set {
+                                        //write buffered creature/layer set before starting the new one
                                         LayerSet::Empty => {
-                                            //if nothing defined, begin new creature graphics with type initially set to simple
+                                            //nothing defined, there is nothing to push
                                         },
-                                        LayerSet::Layered(state, mut layer_groups) => {
+                                        LayerSet::Layered(_, layer_groups) => {
                                             //if a new creature graphics is encountered, then the previous one must be finished
                                             // => write everything to the vector that contains it
-                                            layer.conditions.push(condition.clone());
-                                            condition = Condition::default();
-                                            layer_group.layers.push(layer.clone());
-                                            layer.conditions.clear();
-                                            layer_groups.push(layer_group.clone());
-                                            layer_group.layers.clear();
-                                            creature.graphics_type.push(LayerSet::Layered(state, layer_groups.clone()));
-                                            layer_groups.clear();
-                                            creature_file.creatures.push(creature.clone());
-                                            creature.graphics_type.clear();
+                                            if !layer_groups.is_empty() {
+                                                layer.conditions.push(condition.clone());
+                                                condition = Condition::default();
+                                                layer_group.layers.push(layer.clone());
+                                                layer = Layer::empty();
+                                                layer_groups.push(layer_group.clone());
+                                                layer_group = LayerGroup::empty();
+                                                creature.graphics_type.push(layer_set.clone());
+                                            }
+                                            //layer_groups is a temporary variable
+                                            //layer_set buffer written in match below
+                                            dbg!("breakpt new creature/set");
+                                            dbg!(&creature);
                                         },
-                                        LayerSet::Simple(mut simple_layers) => {
+                                        LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
                                             if !simple_layers.is_empty() {
                                                 simple_layers.push(simple_layer);
                                                 simple_layer = SimpleLayer::empty();
-                                                creature.graphics_type.push(LayerSet::Simple(simple_layers));
+                                                creature.graphics_type.push(layer_set.clone());
                                                 creature_file.creatures.push(creature.clone());
+                                                creature.graphics_type.clear();
                                             }
-                                            creature.name = line_vec[1].clone();
-                                            creature.graphics_type.clear();
-                                        },
-                                        LayerSet::Statue(mut simple_layers) => {
-                                            if !simple_layers.is_empty() {
-                                                simple_layers.push(simple_layer);
-                                                simple_layer = SimpleLayer::empty();
-                                                creature.graphics_type.push(LayerSet::Statue(simple_layers));
-                                                creature_file.creatures.push(creature.clone());
-                                            }
-                                            creature.name = line_vec[1].clone();
-                                            creature.graphics_type.clear();
                                         },
                                         // _ => {panic!()}
                                     }
                                     match line_vec[0].as_str() {
                                         //set up the buffered graphics according to the current line
                                         "CREATURE_GRAPHICS" => {
+                                            creature.name = line_vec[1].clone();
                                             layer_set = LayerSet::Simple(Vec::new());
+                                            dbg!("creature graphics");
+                                            dbg!(&creature);
                                         },
                                         "STATUE_CREATURE_GRAPHICS" => {
+                                            creature.name = line_vec[1].clone();
+                                            creature.graphics_type.clear();
                                             layer_set = LayerSet::Statue(Vec::new());
                                         },
                                         "LAYER_SET" => {
+                                            creature.graphics_type.clear();
                                             layer_set = LayerSet::Layered(State::from(line_vec[1].clone()),
                                             Vec::new());
+                                            dbg!("layered");
+                                            dbg!(&creature);
                                         },
                                         _ => {},
                                     }
                                 },
-                                // "LAYER_GROUP" | "END_LAYER_GROUP" => {
-                                //     //handle explicit layer groups
-                                //     match &mut layer_set {
-                                //         LayerSet::Layered(_, layer_groups) => {
-                                //             layer.conditions.push(condition.clone());
-                                //             layer_group.layers.push(layer.clone());
-                                //             layer.conditions.clear();
-                                //             layer_groups.push(layer_group);
-                                //             layer_group = LayerGroup::empty();
-                                //         },
-                                //         _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
-                                //     }
-                                // },
+                                "LAYER_GROUP" | "END_LAYER_GROUP" => {
+                                    //handle explicit layer groups
+                                    match &mut layer_set {
+                                        LayerSet::Layered(_, layer_groups) => {
+                                            if layer.name.ne("") {
+                                                layer.conditions.push(condition.clone());
+                                                layer_group.layers.push(layer.clone());
+                                                layer = Layer::empty();
+                                                layer_groups.push(layer_group);
+                                                layer_group = LayerGroup::empty();
+                                            }
+                                        },
+                                        _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
+                                    }
+                                },
                                 "LAYER" => {
                                     match &mut layer_set {
                                         LayerSet::Layered(..) => {
-                                            if layer.name.ne("") && layer_group.name.ne("") {
+                                            if layer.name.ne("") {
                                                 layer.conditions.push(condition.clone());
                                                 layer_group.layers.push(layer.clone());
                                             }
@@ -217,7 +223,7 @@ impl Graphics {
                                         _ => { panic!("should not see layers outside of a 'layered' layer set"); }
                                     }
                                 },
-                                _ => {
+                                _ => {//if there's a bracketed tag that is not already covered
                                     match &mut layer_set {
                                         LayerSet::Simple(simple_layers) => {
                                             if simple_layer.state.ne(&State::Empty) {
@@ -278,7 +284,6 @@ impl Graphics {
                                         LayerSet::Layered(..) => {
                                             if condition.ne(&Condition::default()) {
                                                 layer.conditions.push(condition.clone());
-                                                // condition = Condition::default();
                                             }
                                             condition = Condition::from(line_vec.clone());
                                         },
@@ -292,11 +297,14 @@ impl Graphics {
                     //push everything down at end of file
                     layer.conditions.push(condition);
                     layer_group.layers.push(layer);
+                    dbg!(layer_set.clone());
                     match &mut layer_set {
                         LayerSet::Empty => {},
                         LayerSet::Layered(_, layer_groups) => {
                             layer_groups.push(layer_group);
+                            dbg!(layer_set.clone());
                             creature.graphics_type.push(layer_set);
+                            dbg!(&creature);
                             creature_file.creatures.push(creature);
                         },
                         LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
@@ -309,8 +317,6 @@ impl Graphics {
                 }
             }
         }
-
-        dbg!(&creature_files);
 
         Graphics {
             tilepages: tilepages,
@@ -532,14 +538,12 @@ impl Layer {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct LayerGroup {
     name: String,       //internal layer group name
-    set_state: State, //The state/condition that a layer is displayed for (e.g. DEFAULT, CORPSE, ANIMATED, CHILD)
     layers: Vec<Layer>, //set of layers to display for creature
 }
 impl LayerGroup {
     fn new() -> LayerGroup {
         LayerGroup {
             name: "new".to_string(),
-            set_state: State::default(),
             layers: vec![Layer::new()],
         }
     }
@@ -547,7 +551,6 @@ impl LayerGroup {
     fn empty() -> LayerGroup {
         LayerGroup {
             name: String::new(),
-            set_state: State::default(),
             layers: Vec::new(),
         }
     }
