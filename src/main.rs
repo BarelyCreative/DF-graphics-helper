@@ -3,7 +3,7 @@ use egui::{Context, Sense, Ui};
 // use convert_case::{Case, Casing};
 use rfd;
 use std::io::prelude::*;
-use std::{fs, io, path};
+use std::{fs, io, path, vec};
 
 const PADDING: f32 = 8.0;
 
@@ -50,8 +50,6 @@ impl Graphics {
                     let mut tilepage = TilePage::empty();
                     let mut tile = Tile::empty();
 
-                    dbg!(&tile);
-
                     let f =
                         fs::File::open(dir_entry.path()).expect("failed to open tile page file");
                     
@@ -67,7 +65,7 @@ impl Graphics {
                             if line_vec[0].eq("TILE_PAGE") {
                                 if !tile.name.is_empty() {
                                     tilepage.tiles.push(tile.clone());
-                                    tile = Tile::new();
+                                    tile = Tile::empty();
                                     tile.name.clear();
                                 }
                                 tile.name = line_vec[1].clone();
@@ -120,68 +118,77 @@ impl Graphics {
                                     match layer_set.clone() {
                                         LayerSet::Empty => {
                                             //if nothing defined, begin new creature graphics with type initially set to simple
-                                            creature.name = line_vec[1].clone();
                                         },
                                         LayerSet::Layered(state, mut layer_groups) => {
                                             //if a new creature graphics is encountered, then the previous one must be finished
-                                            // => write everything to the vector that contains it and re-initialize the variables
+                                            // => write everything to the vector that contains it
                                             layer.conditions.push(condition.clone());
                                             condition = Condition::default();
                                             layer_group.layers.push(layer.clone());
-                                            layer = Layer::new();
-                                            layer_groups.push(layer_group);
-                                            layer_group = LayerGroup::new();
-                                            creature.graphics_type.push(LayerSet::Layered(state, layer_groups));
+                                            layer.conditions.clear();
+                                            layer_groups.push(layer_group.clone());
+                                            layer_group.layers.clear();
+                                            creature.graphics_type.push(LayerSet::Layered(state, layer_groups.clone()));
+                                            layer_groups.clear();
                                             creature_file.creatures.push(creature.clone());
-                                            creature = Creature::new();
+                                            creature.graphics_type.clear();
                                         },
                                         LayerSet::Simple(mut simple_layers) => {
-                                            simple_layers.push(simple_layer);
-                                            simple_layer = SimpleLayer::empty();
-                                            creature.graphics_type.push(LayerSet::Simple(simple_layers));
-                                            creature_file.creatures.push(creature.clone());
-                                            creature = Creature::new();
+                                            if !simple_layers.is_empty() {
+                                                simple_layers.push(simple_layer);
+                                                simple_layer = SimpleLayer::empty();
+                                                creature.graphics_type.push(LayerSet::Simple(simple_layers));
+                                                creature_file.creatures.push(creature.clone());
+                                            }
+                                            creature.name = line_vec[1].clone();
+                                            creature.graphics_type.clear();
                                         },
                                         LayerSet::Statue(mut simple_layers) => {
-                                            simple_layers.push(simple_layer);
-                                            simple_layer = SimpleLayer::empty();
-                                            creature.graphics_type.push(LayerSet::Statue(simple_layers));
-                                            creature_file.creatures.push(creature.clone());
-                                            creature = Creature::new();
+                                            if !simple_layers.is_empty() {
+                                                simple_layers.push(simple_layer);
+                                                simple_layer = SimpleLayer::empty();
+                                                creature.graphics_type.push(LayerSet::Statue(simple_layers));
+                                                creature_file.creatures.push(creature.clone());
+                                            }
+                                            creature.name = line_vec[1].clone();
+                                            creature.graphics_type.clear();
                                         },
-                                        // _ => {}
+                                        // _ => {panic!()}
                                     }
                                     match line_vec[0].as_str() {
                                         //set up the buffered graphics according to the current line
-                                        "CREATURE_GRAPHICS" => { layer_set = LayerSet::Simple(vec![SimpleLayer::empty()]); },
-                                        "STATUE_CREATURE_GRAPHICS" => { layer_set = LayerSet::Statue(vec![SimpleLayer::empty()]); },
-                                        "LAYER_SET" => { layer_set = LayerSet::Layered(State::from(line_vec[1].clone()), vec![LayerGroup::new()]);
+                                        "CREATURE_GRAPHICS" => {
+                                            layer_set = LayerSet::Simple(Vec::new());
+                                        },
+                                        "STATUE_CREATURE_GRAPHICS" => {
+                                            layer_set = LayerSet::Statue(Vec::new());
+                                        },
+                                        "LAYER_SET" => {
+                                            layer_set = LayerSet::Layered(State::from(line_vec[1].clone()),
+                                            Vec::new());
                                         },
                                         _ => {},
                                     }
                                 },
-                                "LAYER_GROUP" | "END_LAYER_GROUP" => {
-                                    //handle explicit layer groups
-                                    match &mut layer_set {
-                                        LayerSet::Layered(_, layer_groups) => {
-                                            layer.conditions.push(condition.clone());
-                                            condition = Condition::default();
-                                            layer_group.layers.push(layer.clone());
-                                            layer = Layer::new();
-                                            layer_groups.push(layer_group);
-                                            layer_group = LayerGroup::new();
-                                        },
-                                        _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
-                                    }
-                                },
+                                // "LAYER_GROUP" | "END_LAYER_GROUP" => {
+                                //     //handle explicit layer groups
+                                //     match &mut layer_set {
+                                //         LayerSet::Layered(_, layer_groups) => {
+                                //             layer.conditions.push(condition.clone());
+                                //             layer_group.layers.push(layer.clone());
+                                //             layer.conditions.clear();
+                                //             layer_groups.push(layer_group);
+                                //             layer_group = LayerGroup::empty();
+                                //         },
+                                //         _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
+                                //     }
+                                // },
                                 "LAYER" => {
                                     match &mut layer_set {
                                         LayerSet::Layered(..) => {
-                                            if layer.name.ne("new") && layer_group.name.ne("new") {
+                                            if layer.name.ne("") && layer_group.name.ne("") {
                                                 layer.conditions.push(condition.clone());
-                                                condition = Condition::default();
                                                 layer_group.layers.push(layer.clone());
-                                                // layer = Layer::new();//completely overwrites layer already
                                             }
                                             if line_vec[3].eq("LARGE_IMAGE") {
                                                 layer = Layer{
@@ -206,20 +213,15 @@ impl Graphics {
                                                     large_coords: None,
                                                 }
                                             }
-                                            // layer.conditions.push(condition.clone());
-                                            // condition = Condition::default();
-                                            // layer_group.layers.push(layer.clone());
-                                            // layer = Layer::new();
                                         },
                                         _ => { panic!("should not see layers outside of a 'layered' layer set"); }
                                     }
                                 },
-                                other => {
+                                _ => {
                                     match &mut layer_set {
                                         LayerSet::Simple(simple_layers) => {
                                             if simple_layer.state.ne(&State::Empty) {
                                                 simple_layers.push(simple_layer.clone());
-                                                simple_layer = SimpleLayer::empty();
                                             }
                                             if line_vec[2].eq("LARGE_IMAGE") {
                                                 simple_layer = SimpleLayer {
@@ -260,7 +262,6 @@ impl Graphics {
                                         LayerSet::Statue(simple_layers) => {
                                             if simple_layer.state.ne(&State::Empty) {
                                                 simple_layers.push(simple_layer.clone());
-                                                simple_layer = SimpleLayer::empty();
                                             }
                                             simple_layer = SimpleLayer {
                                                 state: State::from(line_vec[0].clone()),
@@ -275,59 +276,41 @@ impl Graphics {
                                             }
                                         },
                                         LayerSet::Layered(..) => {
-                                            if layer.name.ne("new") && layer_group.name.ne("new") {
+                                            if condition.ne(&Condition::default()) {
                                                 layer.conditions.push(condition.clone());
-                                                condition = Condition::default();
-                                                layer_group.layers.push(layer.clone());
+                                                // condition = Condition::default();
                                             }
+                                            condition = Condition::from(line_vec.clone());
                                         },
                                         _ => {}
                                     }
                                 }                                
                             }
-                            // } else if line.contains("[") && creature.graphics_type.eq("Layered") {
-                            //     //write conditions
-                            //     if condition.cond_type.ne("") {
-                            //         layer.conditions.push(condition.clone());
-                            //         condition = Condition::new();
-                            //     }
-
-                            //     let cleanline = line
-                            //         .clone()
-                            //         .replace("[", "")
-                            //         .replace("]", "")
-                            //         .replace(":AS_IS", "");
-                            //     let linevec = cleanline.trim().split(":").collect::<Vec<&str>>();
-
-                            //     for (i_line, line_elem) in linevec.iter().enumerate() {
-                            //         if i_line.eq(&0) {
-                            //             condition.cond_type = line_elem.to_string();
-                            //         } else {
-                            //             condition.contents.push(line_elem.to_string());
-                            //         }
-                            //     }
-                            // }
                         }
                     }
-                    // layer.conditions.push(condition);
-                    // layer_group.layers.push(layer);
-                    // match layer_set {
-                    //     LayerSet::Empty => {
 
-                    //     },
-                    //     LayerSet::Layered(_, layer_groups) => {
-                    //         layer_groups.push(layer_group);
-                    //     },
-                    //     LayerSet::Simple(layer_groups) | LayerSet::Statue(layer_groups) => {
-                    //         layer_groups.push(layer_group);
-                    //     }
-                    // }
-                    // creature.graphics_type.push(layer_set);
-                    // creature_file.creatures.push(creature); //write buffered creature to creature_file buffer if file ends
-                    // creature_files.push(creature_file); //write buffered creature file to loaded_graphcis if file ends
+                    //push everything down at end of file
+                    layer.conditions.push(condition);
+                    layer_group.layers.push(layer);
+                    match &mut layer_set {
+                        LayerSet::Empty => {},
+                        LayerSet::Layered(_, layer_groups) => {
+                            layer_groups.push(layer_group);
+                            creature.graphics_type.push(layer_set);
+                            creature_file.creatures.push(creature);
+                        },
+                        LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
+                            simple_layers.push(simple_layer);
+                            creature.graphics_type.push(layer_set);
+                            creature_file.creatures.push(creature);
+                        }
+                    }
+                    creature_files.push(creature_file);
                 }
             }
         }
+
+        dbg!(&creature_files);
 
         Graphics {
             tilepages: tilepages,
@@ -336,7 +319,7 @@ impl Graphics {
         }
     }
 
-    fn export(&mut self) {
+    fn export(&self) {
         todo!("export");
         // fs::DirBuilder::new()
         //     .recursive(true)
@@ -466,7 +449,7 @@ enum LayerSet {
 }
 impl LayerSet {
     fn name(&self) -> String {
-        match *self {
+        match self {
             LayerSet::Simple(..) => "SIMPLE".to_string(),
             LayerSet::Layered(..) => "LAYERED".to_string(),
             LayerSet::Empty => "(none)".to_string(),
@@ -570,9 +553,9 @@ impl LayerGroup {
     }
 }
 
-enum MaterialType {}
-enum Material {}
-enum ItemType {}
+// enum MaterialType {}
+// enum Material {}
+// enum ItemType {}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 enum Condition {
@@ -596,14 +579,15 @@ enum Condition {
     TissueLayer,
     TissueMinLength(usize),
     TissueMaxLength(usize),
-    TissueMayHaveColor(String),
-    TissueMayHaveShaping(String),
+    TissueMayHaveColor(Vec<String>),
+    TissueMayHaveShaping(Vec<String>),
     TissueNotShaped,
-    TissueSwap(String, usize, String, usize, usize),
+    TissueSwap(String, usize, String, [usize;2], Option<[usize;2]>),
+    Custom(String),
 }
 impl Condition {
     fn name(&self) -> String {
-        match *self {
+        match self {
             Condition::Default => "(default)".to_string(),
             Condition::ItemWorn => "CONDITION_ITEM_WORN".to_string(),
             Condition::ShutOffIfItemPresent => "SHUT_OFF_IF_ITEM_PRESENT".to_string(),
@@ -627,6 +611,83 @@ impl Condition {
             Condition::TissueMayHaveShaping(..) => "TISSUE_MAY_HAVE_SHAPING".to_string(),
             Condition::TissueNotShaped => "TISSUE_NOT_SHAPED".to_string(),
             Condition::TissueSwap(..) => "TISSUE_SWAP".to_string(),
+            Condition::Custom(string) => string.clone(),
+        }
+    }
+
+    fn from(mut line_vec: Vec<String>) -> Condition {
+        match line_vec[0].as_str() {
+            "(default)" => Condition::Default,
+            "CONDITION_ITEM_WORN" => Condition::ItemWorn,
+            "SHUT_OFF_IF_ITEM_PRESENT" => Condition::ShutOffIfItemPresent,
+            "CONDITION_DYE" => Condition::Dye(
+                line_vec[1].clone()
+            ),
+            "CONDITION_NOT_DYED" => Condition::NotDyed,
+            "CONDITION_MATERIAL_FLAG" => Condition::MaterialFlag,
+            "CONDITION_MATERIAL_TYPE" => Condition::MaterialType,
+            "CONDITION_PROFESSION_CATEGORY" => Condition::ProfessionCategory(
+                line_vec.drain(1..).collect()
+            ),
+            "CONDITION_RANDOM_PART_INDEX" => Condition::RandomPartIndex(
+                line_vec[1].clone(),
+                line_vec[2].parse::<usize>().unwrap_or_default(),
+                line_vec[3].parse::<usize>().unwrap_or_default()
+            ),
+            "CONDITION_HAUL_COUNT_MIN" => Condition::HaulCountMin(
+                line_vec[1].parse::<usize>().unwrap_or_default()
+            ),
+            "CONDITION_HAUL_COUNT_MAX" => Condition::HaulCountMax(
+                line_vec[1].parse::<usize>().unwrap_or_default()
+            ),
+            "CONDITION_CHILD" => Condition::Child,
+            "CONDITION_NOT_CHILD" => Condition::NotChild,
+            "CONDITION_CASTE" => Condition::Caste(
+                line_vec[1].clone()
+            ),
+            "CONDITION_GHOST" => Condition::Ghost,
+            "CONDITION_SYN_CLASS" => Condition::SynClass(
+                line_vec[1].clone()
+            ),
+            "CONDITION_TISSUE_LAYER" => Condition::TissueLayer,
+            "TISSUE_MIN_LENGTH" => Condition::TissueMinLength(
+                line_vec[1].parse::<usize>().unwrap_or_default()
+            ),
+            "TISSUE_MAX_LENGTH" => Condition::TissueMaxLength(
+                line_vec[1].parse::<usize>().unwrap_or_default()
+            ),
+            "TISSUE_MAY_HAVE_COLOR" => Condition::TissueMayHaveColor(
+                line_vec.drain(1..).collect()
+            ),
+            "TISSUE_MAY_HAVE_SHAPING" => Condition::TissueMayHaveShaping(
+                line_vec.drain(1..).collect()
+            ),
+            "TISSUE_NOT_SHAPED" => Condition::TissueNotShaped,
+            "TISSUE_SWAP" => {
+                if line_vec[4].eq("LARGE_IMAGE") {
+                    Condition::TissueSwap(
+                        line_vec[1].clone(),
+                        line_vec[2].parse::<usize>().unwrap_or_default(),
+                        line_vec[3].clone(),
+                        [line_vec[5].parse::<usize>().unwrap_or_default(), 
+                        line_vec[6].parse::<usize>().unwrap_or_default()],
+                        Some(
+                            [line_vec[7].parse::<usize>().unwrap_or_default(), 
+                            line_vec[8].parse::<usize>().unwrap_or_default()]
+                        ),
+                    )
+                } else {
+                    Condition::TissueSwap(
+                        line_vec[1].clone(),
+                        line_vec[2].parse::<usize>().unwrap_or_default(),
+                        line_vec[3].clone(),
+                        [line_vec[4].parse::<usize>().unwrap_or_default(), 
+                        line_vec[5].parse::<usize>().unwrap_or_default()],
+                        None,
+                    )
+                }
+            },
+            other => Condition::Custom(other.to_string()),
         }
     }
 
@@ -675,18 +736,18 @@ impl Condition {
                 ui.selectable_value(self, Condition::TissueMaxLength(0), "TISSUE_MAX_LENGTH");
                 ui.selectable_value(
                     self,
-                    Condition::TissueMayHaveColor(String::new()),
+                    Condition::TissueMayHaveColor(vec![String::new()]),
                     "TISSUE_MAY_HAVE_COLOR",
                 );
                 ui.selectable_value(
                     self,
-                    Condition::TissueMayHaveShaping(String::new()),
+                    Condition::TissueMayHaveShaping(vec![String::new()]),
                     "TISSUE_MAY_HAVE_SHAPING",
                 );
                 ui.selectable_value(self, Condition::TissueNotShaped, "TISSUE_NOT_SHAPED");
                 ui.selectable_value(
                     self,
-                    Condition::TissueSwap(String::from("IF_MIN_CURLY"), 0, String::new(), 0, 0),
+                    Condition::TissueSwap(String::from("IF_MIN_CURLY"), 0, String::new(), [0,0], None),
                     "TISSUE_SWAP",
                 );
             });
@@ -1321,22 +1382,27 @@ impl Condition {
                 ui.add_space(PADDING);
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
             }
-            Condition::TissueMayHaveColor(color) => {
+            Condition::TissueMayHaveColor(colors) => {
                 ui.hyperlink_to(
                     "Color: (e.g. GRAY, RUST, MAROON)",
                     "https://dwarffortresswiki.org/index.php/Color#Color_tokens",
                 );
-                ui.text_edit_singleline(color);
+                for color in colors {
+                    ui.text_edit_singleline(color);
+                }
 
                 ui.add_space(PADDING);
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
             }
-            Condition::TissueMayHaveShaping(shaping) => {
+            Condition::TissueMayHaveShaping(shapings) => {
                 ui.hyperlink_to(
                     "Shaping: (e.g. NEATLY_COMBED, PONY_TAILS, CLEAN_SHAVEN)",
                     "https://dwarffortresswiki.org/index.php/Entity_token#TS_PREFERRED_SHAPING",
                 );
-                ui.text_edit_singleline(shaping);
+                for shaping in shapings {
+                    ui.text_edit_singleline(shaping);
+                }
+
                 ui.label("Additional shapings are used within graphics_creatures_creatures_layered.txt, but the complete list is not readily prepared.");
 
                 ui.add_space(PADDING);
@@ -1347,7 +1413,7 @@ impl Condition {
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
                 ui.label("No additional input needed.");
             }
-            Condition::TissueSwap(app_mod, amount, tile, x, y) => {
+            Condition::TissueSwap(app_mod, amount, tile, [x1,y1], mut large_coords) => {
                 egui::ComboBox::from_label(
                     "Appearance Modifier (only IF_MIN_CURLY supported (v50.05)):",
                 )
@@ -1372,9 +1438,29 @@ impl Condition {
                         }
                     });
 
-                ui.add(egui::DragValue::new(x).speed(1).prefix("Tile X: "));
-                ui.add(egui::DragValue::new(y).speed(1).prefix("Tile Y: "));
+                ui.add(egui::DragValue::new(x1).speed(1).prefix("Tile X: "));
+                ui.add(egui::DragValue::new(y1).speed(1).prefix("Tile Y: "));
 
+                let mut large = large_coords.is_some();
+                ui.checkbox(&mut large, "Large Image?:");
+
+                if large {
+                    if large_coords.is_some() {
+                        let [mut x2,mut y2] = large_coords.unwrap();
+
+                        ui.add(egui::Slider::new(&mut x2, *x1..=(*x1+2)));
+                        ui.add(egui::Slider::new(&mut y2, *y1..=(*y1+1)));
+
+                        large_coords = Some([x2,y2]);
+                    } else {
+                        large_coords = Some([*x1,*y1]);
+                    }
+                } else {
+                    if large_coords.is_some() {
+                        large_coords = None;
+                    }
+                }
+                
                 ui.add_space(PADDING);
                 ui.label("requires a TISSUE_MIN_LENGTH above.");
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
@@ -1451,6 +1537,7 @@ enum MainWindow {
     CreatureFileMenu,
     CreatureMenu,
     LayerGroupMenu,
+    LayerSetMenu,
     LayerMenu,
     ConditionMenu,
     ReferenceMenu,
@@ -1584,69 +1671,103 @@ impl DFGraphicsHelper {
                                     }
                                 },
                                 LayerSet::Layered(state, layer_groups) => {
-                                    for (i_layer_group, layer_group) in layer_groups.iter_mut().enumerate() {
-                                        egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                            format!("layer_group{}{}{}{}",
-                                            i_file, i_creature, i_layer_set, i_layer_group).into(),
-                                            false)
-                                            .show_header(ui, |ui|
+                                    egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+                                        format!("layer_group{}{}{}",
+                                        i_file, i_creature, i_layer_set).into(),
+                                        false)
+                                        .show_header(ui, |ui|
+                                        {
+                                        if ui.add(egui::Label::new(
+                                            format!("Set: {}", state.name()))
+                                            .sense(Sense::click())).clicked()
                                             {
-                                            if ui.add(egui::Label::new(
-                                                format!("Group: {}", &layer_group.name))
-                                                .sense(Sense::click())).clicked()
+                                            self.main_window = MainWindow::LayerSetMenu;
+                                            self.creaturefile_index = i_file;
+                                            self.creature_index = i_creature;
+                                            self.layer_set_index = i_layer_set;
+                                        };
+                                    })
+                                        .body(|ui|
+                                        {
+                                        for (i_layer_group, layer_group) in layer_groups.iter_mut().enumerate() {
+                                            egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+                                                format!("layer_group{}{}{}{}",
+                                                i_file, i_creature, i_layer_set, i_layer_group).into(),
+                                                false)
+                                                .show_header(ui, |ui|
                                                 {
-                                                self.main_window = MainWindow::LayerGroupMenu;
-                                                self.creaturefile_index = i_file;
-                                                self.creature_index = i_creature;
-                                                self.layer_set_index = i_layer_set;
-                                                self.layer_group_index = i_layer_group;
-                                            };
-                                        })
-                                            .body(|ui|
-                                            {
-                                            for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
-                                                egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                                    format!("layer{}{}{}{}{}",
-                                                    i_file, i_creature, i_layer_set, i_layer_group, i_layer).into(),
-                                                    false)
-                                                    .show_header(ui, |ui|
+                                                if ui.add(egui::Label::new(
+                                                    format!("Group: {}", &layer_group.name))
+                                                    .sense(Sense::click())).clicked()
                                                     {
-                                                    if ui.add(egui::Label::new(
-                                                        format!("{}", &layer.name))
-                                                        .sense(Sense::click())).clicked()
+                                                    self.main_window = MainWindow::LayerGroupMenu;
+                                                    self.creaturefile_index = i_file;
+                                                    self.creature_index = i_creature;
+                                                    self.layer_set_index = i_layer_set;
+                                                    self.layer_group_index = i_layer_group;
+                                                };
+                                            })
+                                                .body(|ui|
+                                                {
+                                                for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
+                                                    egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+                                                        format!("layer{}{}{}{}{}",
+                                                        i_file, i_creature, i_layer_set, i_layer_group, i_layer).into(),
+                                                        false)
+                                                        .show_header(ui, |ui|
                                                         {
-                                                        self.main_window = MainWindow::LayerMenu;
-                                                        self.creaturefile_index = i_file;
-                                                        self.creature_index = i_creature;
-                                                        self.layer_set_index = i_layer_set;
-                                                        self.layer_group_index = i_layer_group;
-                                                        self.layer_index = i_layer;
-                                                    };
-                                                })
-                                                    .body(|ui|
-                                                    {
-                                                    for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
-                                                        if ui.add(egui::Label::new(condition.name())
+                                                        if ui.add(egui::Label::new(
+                                                            format!("{}", &layer.name))
                                                             .sense(Sense::click())).clicked()
                                                             {
-                                                            self.main_window = MainWindow::ConditionMenu;
+                                                            self.main_window = MainWindow::LayerMenu;
                                                             self.creaturefile_index = i_file;
                                                             self.creature_index = i_creature;
-                                                            self.layer_set_index = i_layer_set; 
+                                                            self.layer_set_index = i_layer_set;
                                                             self.layer_group_index = i_layer_group;
                                                             self.layer_index = i_layer;
-                                                            self.condition_index = i_condition;
+                                                        };
+                                                    })
+                                                        .body(|ui|
+                                                        {
+                                                        for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
+                                                            if ui.add(egui::Label::new(condition.name())
+                                                                .sense(Sense::click())).clicked()
+                                                                {
+                                                                self.main_window = MainWindow::ConditionMenu;
+                                                                self.creaturefile_index = i_file;
+                                                                self.creature_index = i_creature;
+                                                                self.layer_set_index = i_layer_set; 
+                                                                self.layer_group_index = i_layer_group;
+                                                                self.layer_index = i_layer;
+                                                                self.condition_index = i_condition;
+                                                            }
                                                         }
-                                                    }
-                                                });
-                                            }
-                                        });
-                                    }
+                                                    });
+                                                }
+                                            });
+                                        }
+                                    });
                                 },
                                 LayerSet::Simple(simple_layers) => {
                                     for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
                                         if ui.add(egui::Label::new(
-                                            format!("SIMPLE: [{}]{}",
+                                            format!("\t[{}]\t{}",
+                                            layer.state.name(),
+                                            layer.sub_state.clone().unwrap_or_else(|| State::Custom("".to_string())).name()))
+                                            .sense(Sense::click())).clicked()
+                                            {
+                                            self.main_window = MainWindow::LayerMenu;
+                                            self.creaturefile_index = i_file;
+                                            self.creature_index = i_creature;
+                                            self.layer_index = i_layer;
+                                        }
+                                    }
+                                },
+                                LayerSet::Statue(simple_layers) => {
+                                    for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
+                                        if ui.add(egui::Label::new(
+                                            format!("\tStatue: [{}]\t{}",
                                             layer.state.name(),
                                             layer.sub_state.clone().unwrap_or_else(|| State::Custom("".to_string())).name()))
                                             .sense(Sense::click())).clicked()
@@ -1679,7 +1800,11 @@ impl DFGraphicsHelper {
         ui.label("Welcome!");
         ui.separator();
 
-        ui.label("Import a file or press any tree button to begin.");
+        ui.label("You have probably reached this menu due to an unfinished or buggy feature, sorry :(");
+        ui.hyperlink_to(
+            "DF Graphics Helper on GitHub",
+            "https://github.com/BarelyCreative/DF-graphics-helper/tree/main",
+        );
     }
 
     fn tilepage_default_menu(&mut self, ui: &mut Ui) {
@@ -2676,6 +2801,7 @@ impl eframe::App for DFGraphicsHelper {
                 MainWindow::CreatureDefaultMenu => self.creature_default_menu(ui),
                 MainWindow::CreatureFileMenu => self.creature_file_menu(ui),
                 MainWindow::CreatureMenu => self.creature_menu(ui),
+                MainWindow::LayerSetMenu => self.default_menu(ui),
                 MainWindow::LayerGroupMenu => self.layer_group_menu(ui),
                 MainWindow::LayerMenu => self.layer_menu(ui),
                 MainWindow::ConditionMenu => self.condition_menu(ui),
