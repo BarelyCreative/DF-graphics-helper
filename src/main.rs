@@ -114,7 +114,7 @@ impl Graphics {
                                 raw_line.replace("graphics_creatures_", "").trim().to_string();
                         } else if brackets && line_vec.len() > 0 {
 
-                            dbg!(&raw_line);
+                            // dbg!(&raw_line);
 
                             match line_vec[0].as_str() {
                                 "CREATURE_GRAPHICS" | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
@@ -126,25 +126,21 @@ impl Graphics {
                                         LayerSet::Layered(_, layer_groups) => {
                                             //if a new creature graphics is encountered, then the previous one must be finished
                                             // => write everything to the vector that contains it
-                                            if !layer_groups.is_empty() {
-                                                layer.conditions.push(condition.clone());
-                                                condition = Condition::default();
+                                            if layer.name.ne("") {// !layer_groups.is_empty() | 
+                                                if condition.ne(&Condition::default()) {
+                                                    layer.conditions.push(condition.clone());
+                                                    condition = Condition::default();
+                                                }
                                                 layer_group.layers.push(layer.clone());
                                                 layer = Layer::empty();
                                                 layer_groups.push(layer_group.clone());
                                                 layer_group = LayerGroup::empty();
-                                                creature.graphics_type.push(layer_set.clone());
                                             }
-                                            //layer_groups is a temporary variable
-                                            //layer_set buffer written in match below
                                         },
                                         LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
-                                            if !simple_layers.is_empty() {
+                                            if simple_layer.state.ne(&State::default()) {
                                                 simple_layers.push(simple_layer);
                                                 simple_layer = SimpleLayer::empty();
-                                                creature.graphics_type.push(layer_set.clone());
-                                                creature_file.creatures.push(creature.clone());
-                                                creature.graphics_type.clear();
                                             }
                                         },
                                         // _ => {panic!()}
@@ -152,18 +148,31 @@ impl Graphics {
                                     match line_vec[0].as_str() {
                                         //set up the buffered graphics according to the current line
                                         "CREATURE_GRAPHICS" => {
+                                            if creature.name.ne("") {
+                                                creature.graphics_type.push(layer_set.clone());
+                                                creature_file.creatures.push(creature.clone());
+                                                creature.graphics_type.clear();
+                                            }
                                             creature.name = line_vec[1].clone();
                                             layer_set = LayerSet::Simple(Vec::new());
                                         },
                                         "STATUE_CREATURE_GRAPHICS" => {
+                                            if creature.name.ne("") {
+                                                creature.graphics_type.push(layer_set.clone());
+                                                creature_file.creatures.push(creature.clone());
+                                                creature.graphics_type.clear();
+                                            }
                                             creature.name = line_vec[1].clone();
-                                            creature.graphics_type.clear();
                                             layer_set = LayerSet::Statue(Vec::new());
                                         },
                                         "LAYER_SET" => {
-                                            creature.graphics_type.clear();
-                                            layer_set = LayerSet::Layered(State::from(line_vec[1].clone()),
-                                            Vec::new());
+                                            if creature.name.ne("") {
+                                                creature.graphics_type.push(layer_set.clone());
+                                            }
+                                            layer_set = LayerSet::Layered(
+                                                State::from(line_vec[1].clone()),
+                                                Vec::new()
+                                            );
                                         },
                                         _ => {},
                                     }
@@ -199,11 +208,11 @@ impl Graphics {
                                                     conditions: Vec::new(),
                                                     tile: line_vec[2].clone(),
                                                     coords:
-                                                        [line_vec[4].parse::<usize>().unwrap_or_default(),
-                                                        line_vec[5].parse::<usize>().unwrap_or_default()],
+                                                        [line_vec[4].parse::<u32>().unwrap_or_default(),
+                                                        line_vec[5].parse::<u32>().unwrap_or_default()],
                                                     large_coords:
-                                                        Some([line_vec[6].parse::<usize>().unwrap_or_default(),
-                                                        line_vec[7].parse::<usize>().unwrap_or_default()]),
+                                                        Some([line_vec[6].parse::<u32>().unwrap_or_default(),
+                                                        line_vec[7].parse::<u32>().unwrap_or_default()]),
                                                 }
                                             } else {
                                                 layer = Layer{
@@ -211,8 +220,8 @@ impl Graphics {
                                                     conditions: Vec::new(),
                                                     tile: line_vec[2].clone(),
                                                     coords:
-                                                        [line_vec[3].parse::<usize>().unwrap_or_default(),
-                                                        line_vec[4].parse::<usize>().unwrap_or_default()],
+                                                        [line_vec[3].parse::<u32>().unwrap_or_default(),
+                                                        line_vec[4].parse::<u32>().unwrap_or_default()],
                                                     large_coords: None,
                                                 }
                                             }
@@ -231,11 +240,11 @@ impl Graphics {
                                                     state: State::from(line_vec[0].clone()),
                                                     tile: line_vec[1].clone(),
                                                     coords: 
-                                                        [line_vec[3].parse::<usize>().unwrap_or_default(),
-                                                        line_vec[4].parse::<usize>().unwrap_or_default()],
+                                                        [line_vec[3].parse::<u32>().unwrap_or_default(),
+                                                        line_vec[4].parse::<u32>().unwrap_or_default()],
                                                     large_coords: 
-                                                        Some([line_vec[5].parse::<usize>().unwrap_or_default(),
-                                                        line_vec[6].parse::<usize>().unwrap_or_default()]),
+                                                        Some([line_vec[5].parse::<u32>().unwrap_or_default(),
+                                                        line_vec[6].parse::<u32>().unwrap_or_default()]),
                                                     sub_state: {
                                                         if line_vec.get(7).is_some() {
                                                             Some(State::from(line_vec[7].clone()))
@@ -249,8 +258,8 @@ impl Graphics {
                                                     state: State::from(line_vec[0].clone()),
                                                     tile: line_vec[1].clone(),
                                                     coords: 
-                                                        [line_vec[2].parse::<usize>().unwrap_or_default(),
-                                                        line_vec[3].parse::<usize>().unwrap_or_default()],
+                                                        [line_vec[2].parse::<u32>().unwrap_or_default(),
+                                                        line_vec[3].parse::<u32>().unwrap_or_default()],
                                                     large_coords: None,
                                                     sub_state: {
                                                         if line_vec.get(4).is_some() {
@@ -270,11 +279,11 @@ impl Graphics {
                                                 state: State::from(line_vec[0].clone()),
                                                 tile: line_vec[1].clone(),
                                                 coords: 
-                                                    [line_vec[2].parse::<usize>().unwrap_or_default(),
-                                                    line_vec[3].parse::<usize>().unwrap_or_default()],
+                                                    [line_vec[2].parse::<u32>().unwrap_or_default(),
+                                                    line_vec[3].parse::<u32>().unwrap_or_default()],
                                                 large_coords: 
-                                                    Some([line_vec[4].parse::<usize>().unwrap_or_default(),
-                                                    line_vec[5].parse::<usize>().unwrap_or_default()]),
+                                                    Some([line_vec[4].parse::<u32>().unwrap_or_default(),
+                                                    line_vec[5].parse::<u32>().unwrap_or_default()]),
                                                 sub_state: None
                                             }
                                         },
@@ -320,10 +329,8 @@ impl Graphics {
                                 if let LayerSet::Layered(state, lgs) = gt {
                                     for lg in lgs.iter_mut() {
                                         let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
-                                        dbg!(&layer_names);
                                         layer_names.sort();
                                         layer_names.dedup();
-                                        dbg!(&layer_names);
 
 
                                         match layer_names.len() {
@@ -332,10 +339,7 @@ impl Graphics {
                                             _ => {
                                                 // let mut done = false;
                                                 let mut words: Vec<&str> = layer_names[0].split("_").collect();
-                                                dbg!(&words);
-
                                                 words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
-                                                dbg!(&words);
 
                                                 if words.is_empty() {
                                                     lg.name = state.name().to_case(Case::Title);
@@ -524,8 +528,8 @@ impl Creature {
 struct SimpleLayer {
     state: State,
     tile: String,
-    coords: [usize; 2],
-    large_coords: Option<[usize; 2]>,
+    coords: [u32; 2],
+    large_coords: Option<[u32; 2]>,
     sub_state: Option<State>,
 }
 impl SimpleLayer {
@@ -545,8 +549,8 @@ struct Layer {
     name: String,                     //LAYER_NAME for patterning
     conditions: Vec<Condition>,       //Set of condition(s) that layer displays in
     tile: String,                     //TILE_NAME of image
-    coords: [usize; 2],               //x,y coordinates of layer on image in tiles
-    large_coords: Option<[usize; 2]>, //(optional) x2,y2 coordinates of bottom right corner of layer in tiles
+    coords: [u32; 2],               //x,y coordinates of layer on image in tiles
+    large_coords: Option<[u32; 2]>, //(optional) x2,y2 coordinates of bottom right corner of layer in tiles
 }
 impl Layer {
     fn new() -> Layer {
@@ -606,21 +610,21 @@ enum Condition {
     MaterialFlag,
     MaterialType,
     ProfessionCategory(Vec<String>),
-    RandomPartIndex(String, usize, usize),
-    HaulCountMin(usize),
-    HaulCountMax(usize),
+    RandomPartIndex(String, u32, u32),
+    HaulCountMin(u32),
+    HaulCountMax(u32),
     Child,
     NotChild,
     Caste(String),
     Ghost,
     SynClass(String),
     TissueLayer,
-    TissueMinLength(usize),
-    TissueMaxLength(usize),
+    TissueMinLength(u32),
+    TissueMaxLength(u32),
     TissueMayHaveColor(Vec<String>),
     TissueMayHaveShaping(Vec<String>),
     TissueNotShaped,
-    TissueSwap(String, usize, String, [usize;2], Option<[usize;2]>),
+    TissueSwap(String, u32, String, [u32;2], Option<[u32;2]>),
     Custom(String),
 }
 impl Condition {
@@ -669,14 +673,14 @@ impl Condition {
             ),
             "CONDITION_RANDOM_PART_INDEX" => Condition::RandomPartIndex(
                 line_vec[1].clone(),
-                line_vec[2].parse::<usize>().unwrap_or_default(),
-                line_vec[3].parse::<usize>().unwrap_or_default()
+                line_vec[2].parse::<u32>().unwrap_or_default(),
+                line_vec[3].parse::<u32>().unwrap_or_default()
             ),
             "CONDITION_HAUL_COUNT_MIN" => Condition::HaulCountMin(
-                line_vec[1].parse::<usize>().unwrap_or_default()
+                line_vec[1].parse::<u32>().unwrap_or_default()
             ),
             "CONDITION_HAUL_COUNT_MAX" => Condition::HaulCountMax(
-                line_vec[1].parse::<usize>().unwrap_or_default()
+                line_vec[1].parse::<u32>().unwrap_or_default()
             ),
             "CONDITION_CHILD" => Condition::Child,
             "CONDITION_NOT_CHILD" => Condition::NotChild,
@@ -689,10 +693,10 @@ impl Condition {
             ),
             "CONDITION_TISSUE_LAYER" => Condition::TissueLayer,
             "TISSUE_MIN_LENGTH" => Condition::TissueMinLength(
-                line_vec[1].parse::<usize>().unwrap_or_default()
+                line_vec[1].parse::<u32>().unwrap_or_default()
             ),
             "TISSUE_MAX_LENGTH" => Condition::TissueMaxLength(
-                line_vec[1].parse::<usize>().unwrap_or_default()
+                line_vec[1].parse::<u32>().unwrap_or_default()
             ),
             "TISSUE_MAY_HAVE_COLOR" => Condition::TissueMayHaveColor(
                 line_vec.drain(1..).collect()
@@ -705,22 +709,22 @@ impl Condition {
                 if line_vec[4].eq("LARGE_IMAGE") {
                     Condition::TissueSwap(
                         line_vec[1].clone(),
-                        line_vec[2].parse::<usize>().unwrap_or_default(),
+                        line_vec[2].parse::<u32>().unwrap_or_default(),
                         line_vec[3].clone(),
-                        [line_vec[5].parse::<usize>().unwrap_or_default(), 
-                        line_vec[6].parse::<usize>().unwrap_or_default()],
+                        [line_vec[5].parse::<u32>().unwrap_or_default(), 
+                        line_vec[6].parse::<u32>().unwrap_or_default()],
                         Some(
-                            [line_vec[7].parse::<usize>().unwrap_or_default(), 
-                            line_vec[8].parse::<usize>().unwrap_or_default()]
+                            [line_vec[7].parse::<u32>().unwrap_or_default(), 
+                            line_vec[8].parse::<u32>().unwrap_or_default()]
                         ),
                     )
                 } else {
                     Condition::TissueSwap(
                         line_vec[1].clone(),
-                        line_vec[2].parse::<usize>().unwrap_or_default(),
+                        line_vec[2].parse::<u32>().unwrap_or_default(),
                         line_vec[3].clone(),
-                        [line_vec[4].parse::<usize>().unwrap_or_default(), 
-                        line_vec[5].parse::<usize>().unwrap_or_default()],
+                        [line_vec[4].parse::<u32>().unwrap_or_default(), 
+                        line_vec[5].parse::<u32>().unwrap_or_default()],
                         None,
                     )
                 }
@@ -1275,7 +1279,7 @@ impl Condition {
                     egui::DragValue::new(max)
                         .speed(1)
                         .prefix("Total parts: ")
-                        .clamp_range(0..=usize::MAX),
+                        .clamp_range(0..=u32::MAX),
                 );
 
                 ui.add_space(PADDING);
@@ -1543,8 +1547,8 @@ impl TilePage {
 struct Tile {
     name: String,           //all-caps NAME of tile
     filename: String,       //file path of image.png
-    image_size: [usize; 2], //size of image in pixels
-    tile_size: [usize; 2],  //size of tile in pixels
+    image_size: [u32; 2], //size of image in pixels
+    tile_size: [u32; 2],  //size of tile in pixels
 }
 impl Tile {
     fn new() -> Tile {
@@ -1601,14 +1605,14 @@ impl DFGraphicsHelper {
             main_window: MainWindow::DefaultMenu,
             loaded_graphics: Graphics::new(),
             path: path::PathBuf::from(r".\graphics"),
-            tilepage_index: usize::default(),
-            tile_index: usize::default(),
-            creaturefile_index: usize::default(),
-            creature_index: usize::default(),
-            layer_set_index: usize::default(),
-            layer_group_index: usize::default(),
-            layer_index: usize::default(),
-            condition_index: usize::default(),
+            tilepage_index: 0,
+            tile_index: 0,
+            creaturefile_index: 0,
+            creature_index: 0,
+            layer_set_index: 0,
+            layer_group_index: 0,
+            layer_index: 0,
+            condition_index: 0,
             texture: None,
             preview_image: false,
         }
@@ -1664,7 +1668,7 @@ impl DFGraphicsHelper {
             egui::collapsing_header::CollapsingState::load_with_default_open(
                 ctx,
                 format!("creature_file{}", i_file).into(),
-                false,
+                true,
             )
             .show_header(ui, |ui| {
                 if ui
@@ -1683,7 +1687,7 @@ impl DFGraphicsHelper {
                     egui::collapsing_header::CollapsingState::load_with_default_open(
                         ctx,
                         format!("creature{}{}", i_file, i_creature).into(),
-                        true,
+                        false,
                     )
                     .show_header(ui, |ui| {
                         if ui
@@ -1710,9 +1714,9 @@ impl DFGraphicsHelper {
                                 },
                                 LayerSet::Layered(state, layer_groups) => {
                                     egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                        format!("layer_group{}{}{}",
+                                        format!("layer_set{}{}{}",
                                         i_file, i_creature, i_layer_set).into(),
-                                        false)
+                                        true)
                                         .show_header(ui, |ui|
                                         {
                                         if ui.add(egui::Label::new(
@@ -1731,7 +1735,7 @@ impl DFGraphicsHelper {
                                             egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
                                                 format!("layer_group{}{}{}{}",
                                                 i_file, i_creature, i_layer_set, i_layer_group).into(),
-                                                false)
+                                                true)
                                                 .show_header(ui, |ui|
                                                 {
                                                 if ui.add(egui::Label::new(
@@ -1790,9 +1794,14 @@ impl DFGraphicsHelper {
                                 LayerSet::Simple(simple_layers) => {
                                     for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
                                         if ui.add(egui::Label::new(
-                                            format!("\t[{}]\t{}",
-                                            layer.state.name(),
-                                            layer.sub_state.clone().unwrap_or_else(|| State::Custom("".to_string())).name()))
+                                        if let Some(sub_state) = &layer.sub_state {
+                                                format!("\t{} & {}",
+                                                layer.state.name(),
+                                                sub_state.name())
+                                            } else {
+                                                format!("\t{}",
+                                                layer.state.name())
+                                            })
                                             .sense(Sense::click())).clicked()
                                             {
                                             self.main_window = MainWindow::LayerMenu;
@@ -1805,9 +1814,14 @@ impl DFGraphicsHelper {
                                 LayerSet::Statue(simple_layers) => {
                                     for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
                                         if ui.add(egui::Label::new(
-                                            format!("\tStatue: [{}]\t{}",
-                                            layer.state.name(),
-                                            layer.sub_state.clone().unwrap_or_else(|| State::Custom("".to_string())).name()))
+                                        if let Some(sub_state) = &layer.sub_state {
+                                                format!("\tStatue: {} & {}",
+                                                layer.state.name(),
+                                                sub_state.name())
+                                            } else {
+                                                format!("\tStatue: {}",
+                                                layer.state.name())
+                                            })
                                             .sense(Sense::click())).clicked()
                                             {
                                             self.main_window = MainWindow::LayerMenu;
@@ -2404,13 +2418,13 @@ impl DFGraphicsHelper {
         //         ui.add(
         //             egui::DragValue::new(&mut layer.coords[0])
         //                 .speed(1)
-        //                 .clamp_range(0..=usize::MAX)
+        //                 .clamp_range(0..=u32::MAX)
         //                 .prefix("X: "),
         //         );
         //         ui.add(
         //             egui::DragValue::new(&mut layer.coords[1])
         //                 .speed(1)
-        //                 .clamp_range(0..=usize::MAX)
+        //                 .clamp_range(0..=u32::MAX)
         //                 .prefix("Y: "),
         //         );
         //     });
@@ -2528,7 +2542,7 @@ impl DFGraphicsHelper {
         // }
     }
 
-    fn preview_image(&mut self, ui: &mut Ui, rect: Option<[[usize; 2]; 2]>) {
+    fn preview_image(&mut self, ui: &mut Ui, rect: Option<[[u32; 2]; 2]>) {
         let tile = self
             .loaded_graphics
             .tilepages
@@ -2630,7 +2644,9 @@ impl DFGraphicsHelper {
                 let pixels = image_buffer.as_flat_samples();
                 let rgba = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
 
-                tile.image_size = size.clone();
+                tile.image_size = [
+                    size[0].try_into().unwrap_or_default(),
+                    size[1].try_into().unwrap_or_default()];
                 self.texture.get_or_insert_with(|| {
                     ui.ctx()
                         .load_texture("default_image", rgba, Default::default())
