@@ -2,8 +2,9 @@ use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui};
 use convert_case::{Case, Casing};
 use rfd;
+use std::error::Error;
 use std::io::prelude::*;
-use std::{fs, io, path, vec};
+use std::{fs, io, path};
 
 const PADDING: f32 = 8.0;
 
@@ -167,7 +168,14 @@ impl Graphics {
                                         },
                                         "LAYER_SET" => {
                                             if creature.name.ne("") {
-                                                creature.graphics_type.push(layer_set.clone());
+                                                match &layer_set {
+                                                    LayerSet::Simple(simple_layers) => {
+                                                        if !simple_layers.is_empty() {
+                                                            creature.graphics_type.push(layer_set.clone());
+                                                        }
+                                                    },
+                                                    _ => {creature.graphics_type.push(layer_set.clone());}
+                                                }
                                             }
                                             layer_set = LayerSet::Layered(
                                                 State::from(line_vec[1].clone()),
@@ -364,74 +372,25 @@ impl Graphics {
         }
     }
 
-    fn export(&self) {
-        todo!("export");
-        // fs::DirBuilder::new()
-        //     .recursive(true)
-        //     .create("./graphics")
-        //     .unwrap();
-        // fs::DirBuilder::new()
-        //     .recursive(true)
-        //     .create("./graphics/images")
-        //     .unwrap();
+    fn export(&self) -> Result<(), Box<dyn Error>> {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create("./graphics")
+            .unwrap();
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create("./graphics/images")
+            .unwrap();
 
-        // for tilepage in self.tilepages.iter() {
-        //     //iterate over Tile Pages
-        //     let tilepage_name = tilepage.name.as_str();
-        //     let tilepage_file = fs::File::create(format!(
-        //         "./graphics/tile_page_{}.txt",
-        //         tilepage_name.to_case(Case::Snake)
-        //     ))
-        //     .expect("tile page file creation failed");
-        //     let mut tilepage_file = io::LineWriter::new(tilepage_file);
+        for tilepage in self.tilepages.iter() {
+            tilepage.export()?;
+        }
 
-        //     tilepage_file
-        //         .write_all(
-        //             //Heading
-        //             format!(
-        //                 "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-        //                 tilepage_name.to_case(Case::Snake)
-        //             )
-        //             .as_bytes(),
-        //         )
-        //         .expect("why here failed");
+        for creature_file in self.creature_files.iter() {
+            creature_file.export()?;
+        }
 
-        //     for tile in tilepage.tiles.iter() {
-        //         //iterate through tiles
-        //         tilepage_file
-        //             .write_all(
-        //                 format!("[TILE_PAGE:{}]\n", tile.name.to_case(Case::UpperSnake)).as_bytes(),
-        //             )
-        //             .expect("why here failed 2");
-        //         tilepage_file
-        //             .write_all(
-        //                 format!(
-        //                     "\t[FILE:image/{}.png]\n",
-        //                     tile.filename.to_case(Case::Snake).as_str()
-        //                 )
-        //                 .as_bytes(),
-        //             )
-        //             .expect("why here failed 3");
-        //         tilepage_file
-        //             .write_all(
-        //                 format!("\t[TILE_DIM:{}:{}]\n", tile.tile_size[0], tile.tile_size[1])
-        //                     .as_bytes(),
-        //             )
-        //             .expect("why here failed 4");
-        //         tilepage_file
-        //             .write_all(
-        //                 format!(
-        //                     "\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
-        //                     tile.image_size[0], tile.image_size[1]
-        //                 )
-        //                 .as_bytes(),
-        //             )
-        //             .expect("why here failed 5");
-        //     }
-        //     tilepage_file
-        //         .flush()
-        //         .expect("tile page file failed to finalize."); //finalize file writing
-        // }
+        Ok(())
     }
 }
 
@@ -453,6 +412,28 @@ impl CreatureFile {
             name: String::new(),
             creatures: Vec::new(),
         }
+    }
+
+    fn export(&self) -> Result<(), Box<dyn Error>> {
+        let creature_file = fs::File::create(format!(
+            "./graphics/test_graphics_creatures_{}.txt",
+            self.name.clone().to_case(Case::Snake)
+        )).expect("creature file creation should not fail");
+
+        let mut creature_writer = io::LineWriter::new(creature_file);
+        
+        creature_writer.write_all(format!(
+            "graphics_creatures_{}\n\n[OBJECT:GRAPHICS]\n\n",
+            self.name.to_case(Case::Snake)
+        ).as_bytes())?;
+
+        for creature in self.creatures.iter() {
+            creature_writer.write_all(creature.export()?.as_bytes()).expect("should always push a successful string");
+        }
+        
+        creature_writer.flush().expect("flush should succeed for any reasonable case");
+
+        Ok(())
     }
 }
 
@@ -493,13 +474,44 @@ enum LayerSet {
     Layered(State, Vec<LayerGroup>),
 }
 impl LayerSet {
-    fn name(&self) -> String {
+    // fn name(&self) -> String {
+    //     match self {
+    //         LayerSet::Simple(..) => "SIMPLE".to_string(),
+    //         LayerSet::Layered(..) => "LAYERED".to_string(),
+    //         LayerSet::Empty => "(none)".to_string(),
+    //         _ => "(unexpected state)".to_string(),
+    //     }
+    // }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        let mut out = String::new();
+
         match self {
-            LayerSet::Simple(..) => "SIMPLE".to_string(),
-            LayerSet::Layered(..) => "LAYERED".to_string(),
-            LayerSet::Empty => "(none)".to_string(),
-            _ => "(unexpected state)".to_string(),
+            LayerSet::Simple(simple_layers) => {
+                for simple_layer in simple_layers {
+                    out.push_str(&simple_layer.export()?);
+                }
+
+                out.push_str("\n");
+            },
+            LayerSet::Statue(simple_layers) => {
+                for simple_layer in simple_layers {
+                    out.push_str(&simple_layer.export_statue()?);
+                }
+
+                out.push_str("\n");
+            },
+            LayerSet::Layered(state, layer_groups) => {
+                out.push_str(&format!("\t[LAYER_SET:{}]\n", state.name()));
+
+                for layer_group in layer_groups {
+                    out.push_str(&layer_group.export()?);
+                }
+            },
+            LayerSet::Empty => {}
         }
+
+        Ok(out)
     }
 }
 
@@ -522,6 +534,30 @@ impl Creature {
             graphics_type: Vec::new(),
         }
     }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        let mut out = String::new();
+
+        for graphics_type in self.graphics_type.iter() {
+            if let LayerSet::Statue(_) = graphics_type {
+                if out.is_empty() && (self.graphics_type.len() == 1) {
+                    out.push_str(&format!("[STATUE_CREATURE_GRAPHICS:{}]\n", self.name.to_case(Case::UpperSnake)));
+                } else if self.graphics_type.len() > 1 {
+                    panic!("statue graphics with too many layers");
+                }
+            } else if let LayerSet::Empty = graphics_type {
+                
+            } else {
+                if out.is_empty() {
+                    out.push_str(&format!("[CREATURE_GRAPHICS:{}]\n", self.name.to_case(Case::UpperSnake)));
+                }
+            }
+            
+            out.push_str(&graphics_type.export()?);
+        }
+
+        Ok(out)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -542,6 +578,66 @@ impl SimpleLayer {
             sub_state: None,
         }
     }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        if let Some([x2, y2]) = self.large_coords {
+            if let Some(sub_state) = &self.sub_state {
+                Ok(format!(
+                    "\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS:{}]\n",
+                    self.state.name(),
+                    self.tile,
+                    self.coords[0],
+                    self.coords[1],
+                    x2,
+                    y2,
+                    sub_state.name(),
+                ))
+            } else {
+                Ok(format!(
+                    "\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
+                    self.state.name(),
+                    self.tile,
+                    self.coords[0],
+                    self.coords[1],
+                    x2,
+                    y2,
+                ))
+            }
+        } else {
+            if let Some(sub_state) = &self.sub_state {
+                Ok(format!(
+                    "\t\t[{}:{}:{}:{}:AS_IS:{}]\n",
+                    self.state.name(),
+                    self.tile,
+                    self.coords[0],
+                    self.coords[1],
+                    sub_state.name(),
+                ))
+            } else {
+                Ok(format!(
+                    "\t[{}:{}:{}:{}:AS_IS]\n",
+                    self.state.name(),
+                    self.tile,
+                    self.coords[0],
+                    self.coords[1],
+                ))
+            }
+        }
+    }
+
+    fn export_statue(&self) -> Result<String, Box<dyn Error>> {
+        let [x2, y2] = self.large_coords.ok_or("export statue without large coordinates")?;
+
+        Ok(format!(
+            "\t[{}:{}:{}:{}:{}:{}]\n",
+            self.state.name(),
+            self.tile,
+            self.coords[0],
+            self.coords[1],
+            x2,
+            y2,
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -553,15 +649,15 @@ struct Layer {
     large_coords: Option<[u32; 2]>, //(optional) x2,y2 coordinates of bottom right corner of layer in tiles
 }
 impl Layer {
-    fn new() -> Layer {
-        Layer {
-            name: "new".to_string(),
-            conditions: vec![Condition::default()],
-            tile: String::new(),
-            coords: [0, 0],
-            large_coords: None,
-        }
-    }
+    // fn new() -> Layer {
+    //     Layer {
+    //         name: "new".to_string(),
+    //         conditions: vec![Condition::default()],
+    //         tile: String::new(),
+    //         coords: [0, 0],
+    //         large_coords: None,
+    //     }
+    // }
 
     fn empty() -> Layer {
         Layer {
@@ -572,6 +668,36 @@ impl Layer {
             large_coords: None,
         }
     }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        let mut out = String::new();
+
+        if let Some([x2, y2]) = self.large_coords {
+            out.push_str(&format!(
+                "\t\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
+                self.name,
+                self.tile,
+                self.coords[0],
+                self.coords[1],
+                x2,
+                y2,
+            ));
+        } else {
+            out.push_str(&format!(
+                "\t\t\t[{}:{}:{}:{}:AS_IS]\n",
+                self.name,
+                self.tile,
+                self.coords[0],
+                self.coords[1],
+            ));
+        }
+
+        for condition in self.conditions.iter() {
+            out.push_str(&condition.export()?);
+        }
+
+        Ok(out)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -580,12 +706,12 @@ struct LayerGroup {
     layers: Vec<Layer>, //set of layers to display for creature
 }
 impl LayerGroup {
-    fn new() -> LayerGroup {
-        LayerGroup {
-            name: "new".to_string(),
-            layers: vec![Layer::new()],
-        }
-    }
+    // fn new() -> LayerGroup {
+    //     LayerGroup {
+    //         name: "new".to_string(),
+    //         layers: vec![Layer::new()],
+    //     }
+    // }
 
     fn empty() -> LayerGroup {
         LayerGroup {
@@ -593,18 +719,282 @@ impl LayerGroup {
             layers: Vec::new(),
         }
     }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        let mut out = String::new();
+
+        out.push_str(&format!("\t\t[LAYER_GROUP] ---{}---\n", self.name));
+
+        for layer in self.layers.iter() {
+            out.push_str(&layer.export()?);
+        }
+
+        out.push_str("\n");
+
+        Ok(out)
+    }
 }
 
-// enum MaterialType {}
-// enum Material {}
-// enum ItemType {}
+#[derive(Clone, Debug, Default, PartialEq)]
+enum MaterialType {
+    #[default]
+    None,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+enum MaterialFlag {
+    #[default]
+    None,
+    DivineMaterial,
+    Artifact,
+    NotArtifact,
+    Leather,
+    Bone,
+    Shell,
+    Wood,
+    Woven,
+    Silk,
+    Yarn,
+    Plant,
+    NotImproved,
+    Empty,
+    Stone,
+    Gem,
+    Tooth,
+    Horn,
+    Pearl,
+    Soap,
+    HardMat,
+    Metal,
+    Glass,
+    Sand,
+    StrandTissue,
+    Lye,
+    Potashable,
+    FoodStorage,
+    EmptyBarrel,
+    NotPressed,
+    FireSafe,
+    MagmaSafe,
+    BuildMat,
+    WorthlessStone,
+    BodyComp,
+    CanUseLocation,
+    NoEdge,
+    Edge,
+    NotEngraved,
+    WritingImprovment,
+    NotAbsorb,
+    Unrotten,
+    NotWeb,
+    Web,
+    CanArtifact,
+    OnGround,
+}
+impl MaterialFlag {
+    fn name(&self) -> String {
+        match self {
+            MaterialFlag::None => String::new(),
+            MaterialFlag::DivineMaterial => "IS_DIVINE_MATERIAL".to_string(),
+            MaterialFlag::Artifact => "IS_CRAFTED_ARTIFACT".to_string(),
+            MaterialFlag::NotArtifact => "NOT_ARTIFACT".to_string(),
+            MaterialFlag::Leather => "ANY_LEATHER_MATERIAL".to_string(),
+            MaterialFlag::Bone => "ANY_BONE_MATERIAL".to_string(),
+            MaterialFlag::Shell => "ANY_SHELL_MATERIAL".to_string(),
+            MaterialFlag::Wood => "ANY_WOOD_MATERIAL".to_string(),
+            MaterialFlag::Woven => "WOVEN_ITEM".to_string(),
+            MaterialFlag::Silk => "ANY_SILK_MATERIAL".to_string(),
+            MaterialFlag::Yarn => "ANY_YARN_MATERIAL".to_string(),
+            MaterialFlag::Plant => "ANY_PLANT_MATERIAL".to_string(),
+            MaterialFlag::NotImproved => "NOT_IMPROVED".to_string(),
+            MaterialFlag::Empty => "EMPTY".to_string(),
+            MaterialFlag::StrandTissue => "ANY_STRAND_TISSUE".to_string(),
+            MaterialFlag::Stone => "ANY_STONE_MATERIAL".to_string(),
+            MaterialFlag::Gem => "ANY_GEM_MATERIAL".to_string(),
+            MaterialFlag::Tooth => "ANY_TOOTH_MATERIAL".to_string(),
+            MaterialFlag::Horn => "ANY_HORN_MATERIAL".to_string(),
+            MaterialFlag::Pearl => "ANY_PEARL_MATERIAL".to_string(),
+            MaterialFlag::Soap => "ANY_SOAP_MATERIAL".to_string(),
+            MaterialFlag::HardMat => "HARD_ITEM_MATERIAL".to_string(),
+            MaterialFlag::Metal => "METAL_ITEM_MATERIAL".to_string(),
+            MaterialFlag::Glass => "GLASS_MATERIAL".to_string(),
+            MaterialFlag::Sand => "IS_SAND_MATERIAL".to_string(),
+            MaterialFlag::Lye => "CONTAINS_LYE".to_string(),
+            MaterialFlag::Potashable => "POTASHABLE".to_string(),
+            MaterialFlag::FoodStorage => "FOOD_STORAGE_CONTAINER".to_string(),
+            MaterialFlag::EmptyBarrel => "NOT_CONTAIN_BARREL_ITEM".to_string(),
+            MaterialFlag::NotPressed => "NOT_PRESSED".to_string(),
+            MaterialFlag::FireSafe => "FIRE_BUILD_SAFE".to_string(),
+            MaterialFlag::MagmaSafe => "MAGMA_BUILD_SAFE".to_string(),
+            MaterialFlag::BuildMat => "BUILDMAT".to_string(),
+            MaterialFlag::WorthlessStone => "WORTHLESS_STONE_ONLY".to_string(),
+            MaterialFlag::BodyComp => "USE_BODY_COMPONENT".to_string(),
+            MaterialFlag::CanUseLocation => "CAN_USE_LOCATION_RESERVED".to_string(),
+            MaterialFlag::NoEdge => "NO_EDGE_ALLOWED".to_string(),
+            MaterialFlag::Edge => "HAS_EDGE".to_string(),
+            MaterialFlag::NotEngraved => "NOT_ENGRAVED".to_string(),
+            MaterialFlag::WritingImprovment => "HAS_WRITING_IMPROVEMENT".to_string(),
+            MaterialFlag::NotAbsorb => "DOES_NOT_ABSORB".to_string(),
+            MaterialFlag::Unrotten => "UNROTTEN".to_string(),
+            MaterialFlag::NotWeb => "NOT_WEB".to_string(),
+            MaterialFlag::Web => "WEB_ONLY".to_string(),
+            MaterialFlag::CanArtifact => "CAN_USE_ARTIFACT".to_string(),
+            MaterialFlag::OnGround => "ON_GROUND".to_string(),
+        }
+    }
+
+    fn from(string: String) -> MaterialFlag {
+        match string.as_str() {
+            "IS_DIVINE_MATERIAL" => MaterialFlag::DivineMaterial,
+            "IS_CRAFTED_ARTIFACT" => MaterialFlag::Artifact,
+            "NOT_ARTIFACT" => MaterialFlag::NotArtifact,
+            "ANY_LEATHER_MATERIAL" => MaterialFlag::Leather,
+            "ANY_BONE_MATERIAL" => MaterialFlag::Bone,
+            "ANY_SHELL_MATERIAL" => MaterialFlag::Shell,
+            "ANY_WOOD_MATERIAL" => MaterialFlag::Wood,
+            "WOVEN_ITEM" => MaterialFlag::Woven,
+            "ANY_SILK_MATERIAL" => MaterialFlag::Silk,
+            "ANY_YARN_MATERIAL" => MaterialFlag::Yarn,
+            "ANY_PLANT_MATERIAL" => MaterialFlag::Plant,
+            "NOT_IMPROVED" => MaterialFlag::NotImproved,
+            "EMPTY" => MaterialFlag::Empty,
+            "ANY_STRAND_TISSUE" => MaterialFlag::StrandTissue,
+            "ANY_STONE_MATERIAL" => MaterialFlag::Stone,
+            "ANY_GEM_MATERIAL" => MaterialFlag::Gem,
+            "ANY_TOOTH_MATERIAL" => MaterialFlag::Tooth,
+            "ANY_HORN_MATERIAL" => MaterialFlag::Horn,
+            "ANY_PEARL_MATERIAL" => MaterialFlag::Pearl,
+            "ANY_SOAP_MATERIAL" => MaterialFlag::Soap,
+            "HARD_ITEM_MATERIAL" => MaterialFlag::HardMat,
+            "METAL_ITEM_MATERIAL" => MaterialFlag::Metal,
+            "GLASS_MATERIAL" => MaterialFlag::Glass,
+            "IS_SAND_MATERIAL" => MaterialFlag::Sand,
+            "CONTAINS_LYE" => MaterialFlag::Lye,
+            "POTASHABLE" => MaterialFlag::Potashable,
+            "FOOD_STORAGE_CONTAINER" => MaterialFlag::FoodStorage,
+            "NOT_CONTAIN_BARREL_ITEM" => MaterialFlag::EmptyBarrel,
+            "NOT_PRESSED" => MaterialFlag::NotPressed,
+            "FIRE_BUILD_SAFE" => MaterialFlag::FireSafe,
+            "MAGMA_BUILD_SAFE" => MaterialFlag::MagmaSafe,
+            "BUILDMAT" => MaterialFlag::BuildMat,
+            "WORTHLESS_STONE_ONLY" => MaterialFlag::WorthlessStone,
+            "USE_BODY_COMPONENT" => MaterialFlag::BodyComp,
+            "CAN_USE_LOCATION_RESERVED" => MaterialFlag::CanUseLocation,
+            "NO_EDGE_ALLOWED" => MaterialFlag::NoEdge,
+            "HAS_EDGE" => MaterialFlag::Edge,
+            "NOT_ENGRAVED" => MaterialFlag::NotEngraved,
+            "HAS_WRITING_IMPROVEMENT" => MaterialFlag::WritingImprovment,
+            "DOES_NOT_ABSORB" => MaterialFlag::NotAbsorb,
+            "UNROTTEN" => MaterialFlag::Unrotten,
+            "NOT_WEB" => MaterialFlag::NotWeb,
+            "WEB_ONLY" => MaterialFlag::Web,
+            "CAN_USE_ARTIFACT" => MaterialFlag::CanArtifact,
+            "ON_GROUND" => MaterialFlag::OnGround,
+            _ => MaterialFlag::None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+enum Material {
+    #[default]
+    None,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+enum ItemType {
+    #[default]
+    None,
+    ByCategory(String, Equipment),
+    ByToken(String, Equipment),
+    AnyHeld(Equipment),
+    Wield(Equipment),
+}
+impl ItemType {
+    fn name(&self) -> String {
+        match self {
+            ItemType::None => String::new(),
+            ItemType::ByCategory(..) => "BY_CATEGORY".to_string(),
+            ItemType::ByToken(..) => "BY_TOKEN".to_string(),
+            ItemType::AnyHeld(..) => "ANY_HELD".to_string(),
+            ItemType::Wield(..) => "WIELD".to_string(),
+        }
+    }
+
+    fn from(strings: Vec<String>) -> (ItemType, Vec<String>) {
+        match strings[0].as_str() {
+            "BY_CATEGORY" => {
+                (ItemType::ByCategory(strings[1].clone(),
+                Equipment::from(strings[2].clone())),
+                strings[3..].to_vec())
+            },
+            "BY_TOKEN" => {
+                (ItemType::ByToken(strings[1].clone(),
+                Equipment::from(strings[2].clone())),
+                strings[3..].to_vec())
+            },
+            "ANY_HELD" => {
+                (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
+                strings[2..].to_vec())
+            },
+            "WIELD" => {
+                (ItemType::Wield(Equipment::from(strings[1].clone())),
+                strings[2..].to_vec())
+            },
+            _ => {(ItemType::None, strings)}
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+enum Equipment {
+    #[default]
+    None,
+    Armor,
+    Helm,
+    Gloves,
+    Shoes,
+    Pants,
+    Shield,
+    Weapon,
+    Any,
+}
+impl Equipment {
+    fn name(&self) -> String {
+        match self {
+            Equipment::None => String::new(),
+            Equipment::Armor => "ARMOR".to_string(),
+            Equipment::Helm => "HELM".to_string(),
+            Equipment::Gloves => "GLOVES".to_string(),
+            Equipment::Shoes => "SHOES".to_string(),
+            Equipment::Pants => "PANTS".to_string(),
+            Equipment::Shield => "SHIELD".to_string(),
+            Equipment::Weapon => "WEAPON".to_string(),
+            Equipment::Any => "ANY".to_string(),
+        }
+    }
+
+    fn from(string: String) -> Equipment {
+        match string.as_str() {
+            "ARMOR" => Equipment::Armor,
+            "HELM" => Equipment::Helm,
+            "GLOVES" => Equipment::Gloves,
+            "SHOES" => Equipment::Shoes,
+            "PANTS" => Equipment::Pants,
+            "SHIELD" => Equipment::Shield,
+            "WEAPON" => Equipment::Weapon,
+            "ANY" => Equipment::Any,
+            _ => Equipment::None,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 enum Condition {
     #[default]
     Default,
-    ItemWorn,
-    ShutOffIfItemPresent,
+    ItemWorn(ItemType, Vec<String>),
+    ShutOffIfItemPresent(ItemType, Vec<String>),
     Dye(String),
     NotDyed,
     MaterialFlag,
@@ -631,8 +1021,8 @@ impl Condition {
     fn name(&self) -> String {
         match self {
             Condition::Default => "(default)".to_string(),
-            Condition::ItemWorn => "CONDITION_ITEM_WORN".to_string(),
-            Condition::ShutOffIfItemPresent => "SHUT_OFF_IF_ITEM_PRESENT".to_string(),
+            Condition::ItemWorn(..) => "CONDITION_ITEM_WORN".to_string(),
+            Condition::ShutOffIfItemPresent(..) => "SHUT_OFF_IF_ITEM_PRESENT".to_string(),
             Condition::Dye(..) => "CONDITION_DYE".to_string(),
             Condition::NotDyed => "CONDITION_NOT_DYED".to_string(),
             Condition::MaterialFlag => "CONDITION_MATERIAL_FLAG".to_string(),
@@ -647,7 +1037,7 @@ impl Condition {
             Condition::Ghost => "CONDITION_GHOST".to_string(),
             Condition::SynClass(..) => "CONDITION_SYN_CLASS".to_string(),
             Condition::TissueLayer => "CONDITION_TISSUE_LAYER".to_string(),
-            Condition::TissueMinLength(..) => "TISSUE_MIN_LENGTH".to_string(),
+            Condition::TissueMinLength(..) => "\t\t\t\tTISSUE_MIN_LENGTH".to_string(),
             Condition::TissueMaxLength(..) => "TISSUE_MAX_LENGTH".to_string(),
             Condition::TissueMayHaveColor(..) => "TISSUE_MAY_HAVE_COLOR".to_string(),
             Condition::TissueMayHaveShaping(..) => "TISSUE_MAY_HAVE_SHAPING".to_string(),
@@ -660,8 +1050,14 @@ impl Condition {
     fn from(mut line_vec: Vec<String>) -> Condition {
         match line_vec[0].as_str() {
             "(default)" => Condition::Default,
-            "CONDITION_ITEM_WORN" => Condition::ItemWorn,
-            "SHUT_OFF_IF_ITEM_PRESENT" => Condition::ShutOffIfItemPresent,
+            "CONDITION_ITEM_WORN" => {
+                let (item_type, items) = ItemType::from(line_vec[1..].to_vec());
+                Condition::ItemWorn(item_type, items)
+            },
+            "SHUT_OFF_IF_ITEM_PRESENT" => {
+                let (item_type, items) = ItemType::from(line_vec[1..].to_vec());
+                Condition::ShutOffIfItemPresent(item_type, items)
+            },
             "CONDITION_DYE" => Condition::Dye(
                 line_vec[1].clone()
             ),
@@ -738,10 +1134,14 @@ impl Condition {
             .selected_text(&self.name())
             .show_ui(ui, |ui| {
                 ui.selectable_value(self, Condition::Default, "(select)");
-                ui.selectable_value(self, Condition::ItemWorn, "CONDITION_ITEM_WORN");
                 ui.selectable_value(
                     self,
-                    Condition::ShutOffIfItemPresent,
+                    Condition::ItemWorn(ItemType::None, Vec::new()),
+                    "CONDITION_ITEM_WORN"
+                );
+                ui.selectable_value(
+                    self,
+                    Condition::ShutOffIfItemPresent(ItemType::None, Vec::new()),
                     "SHUT_OFF_IF_ITEM_PRESENT",
                 );
                 ui.selectable_value(self, Condition::Dye(String::new()), "CONDITION_DYE");
@@ -797,261 +1197,151 @@ impl Condition {
         ui.add_space(PADDING);
 
         match self {
-            Condition::ItemWorn => {
-                //todo
-                todo!();
-                // egui::ComboBox::from_label("Selection type")
-                //     .selected_text(self.contents.get(0).unwrap())
-                //     .show_ui(ui, |ui| {
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from(""),
-                //             "(select)",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("BY_CATEGORY"),
-                //             "BY_CATEGORY",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("BY_TOKEN"),
-                //             "BY_TOKEN",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("ANY_HELD"),
-                //             "ANY_HELD",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("WIELD"),
-                //             "WIELD",
-                //         );
-                //     });
-                // ui.label("Selection subtype:");
-                // match self.contents.get(0).unwrap().as_str() {
-                //     "BY_CATEGORY" => {
-                //         if self.contents.len() < 4 {
-                //             self.contents.push("".to_string());
-                //         } else {
-                //             ui.label("Category: (e.g. HEAD)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             ui.label("Item type: (e.g. HELM)");
-                //             ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //             ui.label("Item: (e.g. ITEM_HELM_HELM)");
-                //             ui.text_edit_singleline(self.contents.get_mut(3).unwrap());
-                //             if self.contents.len() > 4 {
-                //                 for i in 4..self.contents.len() {
-                //                     ui.label("Item:");
-                //                     ui.text_edit_singleline(self.contents.get_mut(i).unwrap());
-                //                 }
-                //             }
-                //             ui.horizontal(|ui| {
-                //                 if ui.button("Add item").clicked() {
-                //                     self.contents.push("".into());
-                //                 }
-                //                 if ui.button("Remove item").clicked() && self.contents.len() > 4
-                //                 {
-                //                     self.contents.pop();
-                //                 }
-                //             });
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     "BY_TOKEN" => {
-                //         if self.contents.len() < 4 {
-                //             self.contents.push("".to_string());
-                //         } else {
-                //             ui.label("Token: (e.g. RH for right hand)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             ui.label("Item type: (e.g. GLOVES)");
-                //             ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //             ui.label("Item: (e.g. ITEM_GLOVES_GAUNTLETS)");
-                //             ui.text_edit_singleline(self.contents.get_mut(3).unwrap());
-                //             if self.contents.len() > 4 {
-                //                 for i in 4..self.contents.len() {
-                //                     ui.label("Item:");
-                //                     ui.text_edit_singleline(self.contents.get_mut(i).unwrap());
-                //                 }
-                //             }
-                //             ui.horizontal(|ui| {
-                //                 if ui.button("Add item").clicked() {
-                //                     self.contents.push("".into());
-                //                 }
-                //                 if ui.button("Remove item").clicked() && self.contents.len() > 4
-                //                 {
-                //                     self.contents.pop();
-                //                 }
-                //             });
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     "ANY_HELD" => {
-                //         if self.contents.len() > 3 {
-                //             self.contents.pop();
-                //         } else if self.contents.len() < 3 {
-                //             self.contents.push("".to_string());
-                //         } else {
-                //             ui.label("Held type: (e.g. SHIELD)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             ui.label("Held item: (e.g. ITEM_SHIELD_SHIELD)");
-                //             ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     "WIELD" => {
-                //         if self.contents.len() > 3 {
-                //             self.contents.pop();
-                //         } else {
-                //             ui.label("Wielded type: (e.g. WEAPON or ANY)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             if self.contents.get(1).unwrap().ne("ANY") {
-                //                 if self.contents.len() < 3 {
-                //                     self.contents.push("".to_string());
-                //                 }
-                //                 ui.label("Wielded item: (e.g. ITEM_WEAPON_PICK)");
-                //                 ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //             } else {
-                //                 if self.contents.len() > 2 {
-                //                     self.contents.pop();
-                //                 }
-                //             }
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     _ => {
-                //         ui.add_space(PADDING);
-                //     }
-                // }
-            }
-            Condition::ShutOffIfItemPresent => {
-                //todo
-                todo!()
-                // egui::ComboBox::from_label("Selection type")
-                //     .selected_text(self.contents.get(0).unwrap())
-                //     .show_ui(ui, |ui| {
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from(""),
-                //             "(select)",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("BY_CATEGORY"),
-                //             "BY_CATEGORY",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("BY_TOKEN"),
-                //             "BY_TOKEN",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("ANY_HELD"),
-                //             "ANY_HELD",
-                //         );
-                //         ui.selectable_value(
-                //             self.contents.get_mut(0).unwrap(),
-                //             String::from("WIELD"),
-                //             "WIELD",
-                //         );
-                //     });
-                // ui.label("Selection subtype:");
-                // match self.contents.get(0).unwrap().as_str() {
-                //     "BY_CATEGORY" => {
-                //         if self.contents.len() < 4 {
-                //             self.contents.push("".to_string());
-                //         } else {
-                //             ui.label("Category: (e.g. HEAD)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             ui.label("Item type: (e.g. HELM)");
-                //             ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //             ui.label("Item: (e.g. ITEM_HELM_HELM)");
-                //             ui.text_edit_singleline(self.contents.get_mut(3).unwrap());
-                //             if self.contents.len() > 4 {
-                //                 for i in 4..self.contents.len() {
-                //                     ui.label("Item:");
-                //                     ui.text_edit_singleline(self.contents.get_mut(i).unwrap());
-                //                 }
-                //             }
-                //             ui.horizontal(|ui| {
-                //                 if ui.button("Add item").clicked() {
-                //                     self.contents.push("".into());
-                //                 }
-                //                 if ui.button("Remove item").clicked() && self.contents.len() > 4
-                //                 {
-                //                     self.contents.pop();
-                //                 }
-                //             });
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     "BY_TOKEN" => {
-                //         if self.contents.len() < 4 {
-                //             self.contents.push("".to_string());
-                //         } else {
-                //             ui.label("Token: (e.g. RH for right hand)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             ui.label("Item type: (e.g. GLOVES)");
-                //             ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //             ui.label("Item: (e.g. ITEM_GLOVES_GAUNTLETS)");
-                //             ui.text_edit_singleline(self.contents.get_mut(3).unwrap());
-                //             if self.contents.len() > 4 {
-                //                 for i in 4..self.contents.len() {
-                //                     ui.label("Item:");
-                //                     ui.text_edit_singleline(self.contents.get_mut(i).unwrap());
-                //                 }
-                //             }
-                //             ui.horizontal(|ui| {
-                //                 if ui.button("Add item").clicked() {
-                //                     self.contents.push("".into());
-                //                 }
-                //                 if ui.button("Remove item").clicked() && self.contents.len() > 4
-                //                 {
-                //                     self.contents.pop();
-                //                 }
-                //             });
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     "ANY_HELD" => {
-                //         if self.contents.len() > 3 {
-                //             self.contents.pop();
-                //         } else if self.contents.len() < 3 {
-                //             self.contents.push("".to_string());
-                //         } else {
-                //             ui.label("Held type: (e.g. SHIELD)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             ui.label("Held item: (e.g. ITEM_SHIELD_SHIELD)");
-                //             ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     "WIELD" => {
-                //         if self.contents.len() > 3 {
-                //             self.contents.pop();
-                //         } else {
-                //             ui.label("Wielded type: (e.g. WEAPON or ANY)");
-                //             ui.text_edit_singleline(self.contents.get_mut(1).unwrap());
-                //             if self.contents.get(1).unwrap().ne("ANY") {
-                //                 if self.contents.len() < 3 {
-                //                     self.contents.push("".to_string());
-                //                 }
-                //                 ui.label("Wielded item: (e.g. ITEM_WEAPON_PICK)");
-                //                 ui.text_edit_singleline(self.contents.get_mut(2).unwrap());
-                //             } else {
-                //                 if self.contents.len() > 2 {
-                //                     self.contents.pop();
-                //                 }
-                //             }
-                //         }
-                //         ui.add_space(PADDING);
-                //     }
-                //     _ => {
-                //         ui.add_space(PADDING);
-                //     }
-                // }
+            Condition::ItemWorn(item_type, items)
+            | Condition::ShutOffIfItemPresent(item_type, items)=> {
+                egui::ComboBox::from_label("Selection type")
+                    .selected_text(&item_type.name())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(item_type, ItemType::None, "(none)");
+                        ui.selectable_value(item_type, ItemType::ByCategory(String::new(), Equipment::default()), "By Category");
+                        ui.selectable_value(item_type, ItemType::ByToken(String::new(), Equipment::default()), "By Token");
+                        ui.selectable_value(item_type, ItemType::AnyHeld(Equipment::default()), "Any Held");
+                        ui.selectable_value(item_type, ItemType::Wield(Equipment::default()), "Wield");
+                });
+
+                ui.label("Selection subtype:");
+                match item_type {
+                    ItemType::None => {},
+                    ItemType::ByCategory(category, equipment) => {
+                        ui.label("Category: (e.g. HEAD)");
+                        ui.text_edit_singleline(category);
+
+                        ui.label("Item type: (e.g. HELM)");
+                        egui::ComboBox::from_label("Item type")
+                            .selected_text(&equipment.name())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(equipment, Equipment::Armor, "Armor");
+                                ui.selectable_value(equipment, Equipment::Helm, "Helm");
+                                ui.selectable_value(equipment, Equipment::Gloves, "Gloves");
+                                ui.selectable_value(equipment, Equipment::Shoes, "Shoes");
+                                ui.selectable_value(equipment, Equipment::Pants, "Pants");
+                                ui.selectable_value(equipment, Equipment::Shield, "Shield");
+                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                        });
+
+                        ui.label("Item: (e.g. ITEM_HELM_HELM)");
+
+                        for item in &mut *items {
+                            ui.text_edit_singleline(item);
+                        }
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Add item").clicked() {
+                                items.push("".into());
+                            }
+                            if ui.button("Remove item").clicked() && items.len() > 1
+                            {
+                                items.pop();
+                            }
+                        });
+                        ui.add_space(PADDING);
+                    }
+                    ItemType::ByToken(token, equipment) => {
+                        ui.label("Token: (e.g. RH for right hand)");
+                        ui.text_edit_singleline(token);
+
+                        ui.label("Item type: (e.g. GLOVES)");
+                        egui::ComboBox::from_label("Item type")
+                            .selected_text(&equipment.name())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(equipment, Equipment::Armor, "Armor");
+                                ui.selectable_value(equipment, Equipment::Helm, "Helm");
+                                ui.selectable_value(equipment, Equipment::Gloves, "Gloves");
+                                ui.selectable_value(equipment, Equipment::Shoes, "Shoes");
+                                ui.selectable_value(equipment, Equipment::Pants, "Pants");
+                                ui.selectable_value(equipment, Equipment::Shield, "Shield");
+                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                        });
+
+                        ui.label("Item: (e.g. ITEM_GLOVES_GAUNTLETS)");
+
+                        for item in &mut *items {
+                            ui.text_edit_singleline(item);
+                        }
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Add item").clicked() {
+                                items.push("".into());
+                            }
+                            if ui.button("Remove item").clicked() && items.len() > 1
+                            {
+                                items.pop();
+                            }
+                        });
+                        ui.add_space(PADDING);
+                    }
+                    ItemType::AnyHeld(equipment) => {
+                        ui.label("Item type: (e.g. SHIELD)");
+                        egui::ComboBox::from_label("Item type")
+                            .selected_text(&equipment.name())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(equipment, Equipment::Armor, "Armor");
+                                ui.selectable_value(equipment, Equipment::Helm, "Helm");
+                                ui.selectable_value(equipment, Equipment::Gloves, "Gloves");
+                                ui.selectable_value(equipment, Equipment::Shoes, "Shoes");
+                                ui.selectable_value(equipment, Equipment::Pants, "Pants");
+                                ui.selectable_value(equipment, Equipment::Shield, "Shield");
+                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                        });
+
+                        ui.label("Item: (e.g. ITEM_SHIELD_SHIELD)");
+
+                        for item in &mut *items {
+                            ui.text_edit_singleline(item);
+                        }
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Add item").clicked() {
+                                items.push("".into());
+                            }
+                            if ui.button("Remove item").clicked() && items.len() > 1
+                            {
+                                items.pop();
+                            }
+                        });
+                        ui.add_space(PADDING);
+                    }
+                    ItemType::Wield(equipment) => {
+                        ui.label("Item type: (WEAPON or ANY)");
+                        egui::ComboBox::from_label("Item type")
+                            .selected_text(&equipment.name())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(equipment, Equipment::Any, "Any");
+                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                        });
+
+                        if equipment == &Equipment::Any {
+                            items.clear();
+                        } else {
+                            ui.label("Item: (e.g. ITEM_WEAPON_PICK)");
+    
+                            for item in &mut *items {
+                                ui.text_edit_singleline(item);
+                            }
+    
+                            ui.horizontal(|ui| {
+                                if ui.button("Add item").clicked() {
+                                    items.push("".into());
+                                }
+                                if ui.button("Remove item").clicked() && items.len() > 1
+                                {
+                                    items.pop();
+                                }
+                            });
+                        }
+                        ui.add_space(PADDING);
+                    }
+                }
             }
             Condition::Dye(dye) => {
                 ui.hyperlink_to(
@@ -1192,8 +1482,8 @@ impl Condition {
                 // );
                 // ui.hyperlink_to("At least some material flags are currently unusable (v50.05 //todo recheck).", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_TYPE");
             }
-            Condition::ProfessionCategory(contents) => {
-                for profession in contents.iter_mut() {
+            Condition::ProfessionCategory(professions) => {
+                for profession in professions.iter_mut() {
                     ui.push_id(profession.to_string(), |ui| {
                         egui::ComboBox::from_label("Profession:   (dropdown contains common ones)")
                             .selected_text(profession.to_string())
@@ -1251,10 +1541,10 @@ impl Condition {
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Add profession").clicked() {
-                        contents.push("".into());
+                        professions.push("".into());
                     }
-                    if ui.button("Remove profession").clicked() && contents.len() > 1 {
-                        contents.pop();
+                    if ui.button("Remove profession").clicked() && professions.len() > 1 {
+                        professions.pop();
                     }
                 });
 
@@ -1520,6 +1810,143 @@ impl Condition {
         }
         ui.add_space(PADDING);
     }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        let mut out;
+
+        match self {
+            Condition::Default => {
+                out = String::new();
+            },
+            Condition::ItemWorn(item_type, items) => {
+                out = format!("\t\t\t\t[CONDITION_ITEM_WORN:");
+                match item_type {
+                    ItemType::ByCategory(category, equipment) => {
+                        out.push_str(&format!("BY_CATEGORY:{}:{}", category, equipment.name()));
+                    },
+                    ItemType::ByToken(token, equipment) => {
+                        out.push_str(&format!("BY_TOKEN:{}:{}", token, equipment.name()));
+                    },
+                    ItemType::AnyHeld(equipment) => {
+                        out.push_str(&format!("ANY_HELD:{}", equipment.name()));
+                    },
+                    ItemType::Wield(equipment) => {
+                        out.push_str(&format!("WIELD:{}", equipment.name()));
+                    },
+                    ItemType::None => {}
+                }
+                for item in items {
+                    out.push_str(&format!(":{}", item));
+                }
+                out.push_str(":]\n");
+            },
+            Condition::ShutOffIfItemPresent(item_type, items) => {
+                out = format!("\t\t\t\t[CONDITION_ITEM_WORN:");
+                match item_type {
+                    ItemType::ByCategory(category, equipment) => {
+                        out.push_str(&format!("BY_CATEGORY:{}:{}", category, equipment.name()));
+                    },
+                    ItemType::ByToken(token, equipment) => {
+                        out.push_str(&format!("BY_TOKEN:{}:{}", token, equipment.name()));
+                    },
+                    ItemType::AnyHeld(equipment) => {
+                        out.push_str(&format!("ANY_HELD:{}", equipment.name()));
+                    },
+                    ItemType::Wield(equipment) => {
+                        out.push_str(&format!("WIELD:{}", equipment.name()));
+                    },
+                    ItemType::None => {}
+                }
+                for item in items {
+                    out.push_str(&format!(":{}", item));
+                }
+                out.push_str(":]\n");
+            },
+            Condition::Dye(color) => {
+                out = format!("\t\t\t\t[CONDITION_DYE:{}]\n",color)
+            },
+            Condition::NotDyed => {
+                out = format!("\t\t\t\t[CONDITION_NOT_DYED]\n")
+            },
+            Condition::MaterialFlag => {
+                out = format!("\t\t\t\t[CONDITION_MATERIAL_FLAG:todo]\n")
+            },
+            Condition::MaterialType => {
+                out = format!("\t\t\t\t[CONDITION_MATERIAL_TYPE:todo]\n")
+            },
+            Condition::ProfessionCategory(professions) => {
+                out = "\t\t\t\t[CONDITION_PROFESSION_CATEGORY".to_string();
+                for profession in professions {
+                    out.push_str(&format!(":{}", profession));
+                }
+                out.push_str("]\n")
+            },
+            Condition::RandomPartIndex(id, index, max) => {
+                out = format!("\t\t\t\t[CONDITION_RANDOM_PART_INDEX:{}:{}:{}]\n", id, index, max)
+            },
+            Condition::HaulCountMin(haul_count) => {
+                out = format!("\t\t\t\t[CONDITION_HAUL_COUNT_MIN:{}]\n", haul_count)
+            },
+            Condition::HaulCountMax(haul_count) => {
+                out = format!("\t\t\t\t[CONDITION_HAUL_COUNT_MAX:{}]\n", haul_count)
+            },
+            Condition::Child => {
+                out = format!("\t\t\t\t[CONDITION_CHILD]\n")
+            },
+            Condition::NotChild => {
+                out = format!("\t\t\t\t[CONDITION_NOT_CHILD]\n")
+            },
+            Condition::Caste(caste) => {
+                out = format!("\t\t\t\t[CONDITION_CASTE:{}]\n", caste)
+            },
+            Condition::Ghost => {
+                out = format!("\t\t\t\t[CONDITION_GHOST]\n")
+            },
+            Condition::SynClass(syn_class) => {
+                out = format!("\t\t\t\t[CONDITION_SYN_CLASS:{}]\n", syn_class)
+            },
+            Condition::TissueLayer => {
+                out = format!("\t\t\t\t[CONDITION_TISSUE_LAYER]\n")
+            },
+            Condition::TissueMinLength(length) => {
+                out = format!("\t\t\t\t\t[TISSUE_MIN_LENGTH:{}]\n", length)
+            },
+            Condition::TissueMaxLength(length) => {
+                out = format!("\t\t\t\t\t[TISSUE_MAX_LENGTH:{}]\n", length)
+            },
+            Condition::TissueMayHaveColor(colors) => {
+                out = format!("\t\t\t\t\t[TISSUE_MAY_HAVE_COLOR");
+                for color in colors {
+                    out.push_str(&format!(":{}", color));
+                }
+                out.push_str("]\n");
+            },
+            Condition::TissueMayHaveShaping(shapings) => {
+                out = format!("\t\t\t\t\t[TISSUE_MAY_HAVE_SHAPING]\n");
+                for shaping in shapings {
+                    out.push_str(&format!(":{}", shaping));
+                }
+                out.push_str("]\n");
+            },
+            Condition::TissueNotShaped => {
+                out = format!("\t\t\t\t\t[TISSUE_NOT_SHAPED]\n")
+            },
+            Condition::TissueSwap(app_mod, amount, tile, [x1,y1], large_coords) => {
+                out = format!("\t\t\t\t\t[TISSUE_SWAP:{}:{}:{}:{}:{}", app_mod, amount, tile, x1, y1);
+
+                if let Some([x2,y2]) = large_coords {
+                    out.push_str(&format!(":{}:{}]\n", x2, y2))
+                } else {
+                    out.push_str("]\n");
+                }
+            },
+            Condition::Custom(string) => {
+                out = string.clone().to_case(Case::UpperSnake)
+            },
+        }
+
+        Ok(out)
+    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -1540,6 +1967,30 @@ impl TilePage {
             name: String::new(),
             tiles:Vec::new(),
         }
+    }
+
+    fn export(&self) -> Result<(), Box<dyn Error>> {
+        let tile_page_file = fs::File::create(format!(
+            "./graphics/tile_page_{}.txt",
+            self.name.clone().to_case(Case::Snake)
+        )).expect("should always be able to create a file");
+
+        let mut tile_page_writer = io::LineWriter::new(tile_page_file);
+        
+        tile_page_writer.write_all(format!(
+            "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
+            self.name.to_case(Case::Snake)
+        ).as_bytes()).expect("should always be able to write to a fresh text file");
+
+        for tile in self.tiles.iter() {
+            tile_page_writer.write_all(tile.export()?
+                .as_bytes())
+                .expect("should always be able to append a text file");
+        }
+        
+        tile_page_writer.flush().expect("should always be able to end a text file");
+
+        Ok(())
     }
 }
 
@@ -1567,6 +2018,20 @@ impl Tile {
             image_size: [0, 0],
             tile_size: [32, 32],
         }
+    }
+
+    fn export(&self) -> Result<String, Box<dyn Error>> {
+        Ok(
+            format!(
+                "[TILE_PAGE:{}]\n\t[FILE:{}]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
+                self.name.to_case(Case::UpperSnake),
+                self.filename.to_case(Case::Snake),
+                self.tile_size.get(0).expect("tile size should be populated"),
+                self.tile_size.get(1).expect("tile size should be populated"),
+                self.image_size.get(0).expect("image size should be populated"),
+                self.image_size.get(1).expect("image size should be populated")
+            )
+        )
     }
 }
 
@@ -1831,7 +2296,6 @@ impl DFGraphicsHelper {
                                         }
                                     }
                                 },
-                                _ => {ui.label("uh oh layer sets todo");}
                             }
                         }
                     });
@@ -2830,7 +3294,7 @@ impl eframe::App for DFGraphicsHelper {
                         ui.close_menu();
                     }
                     if ui.button("Export").clicked() {
-                        self.loaded_graphics.export();
+                        self.loaded_graphics.export().unwrap();
                         ui.close_menu();
                     }
                 });
