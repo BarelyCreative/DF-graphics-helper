@@ -28,11 +28,11 @@ impl Graphics {
         if brackets {
             // let clean_line = raw_line.replace("[", "").replace("]", "").trim().to_string();
             let start_line = raw_line.trim().replace("[", "");
-            let mut split_line = start_line.trim().split("]");
+            let mut split_line = start_line.split("]");
 
             line_vec = split_line.next().unwrap().split(":").map(|s| s.to_string()).collect();
             if let Some(c) = split_line.next() {
-                comments = Some(c.to_string());
+                comments = Some(c.trim().to_string());
             } else {
                 comments = None;
             }
