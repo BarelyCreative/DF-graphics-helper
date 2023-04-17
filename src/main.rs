@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui};
 use convert_case::{Case, Casing};
@@ -527,6 +529,8 @@ impl From<String> for State {
             "LIST_ICON" => State::ListIcon,
             "TRAINED_HUNTER" => State::TrainedHunter,
             "TRAINED_WAR" => State::TrainedWar,
+            "SKELETON" => State::Skeleton,
+            "SKELETON_WITH_SKULL" => State::SkeletonWithSkull,
             other => { State::Custom(other.to_string()) }
         }
     }
