@@ -697,6 +697,16 @@ impl SimpleLayer {
         }
     }
 
+    fn new() -> SimpleLayer {
+        SimpleLayer {
+            state: State::Default,
+            tile: String::new(),
+            coords: [0, 0],
+            large_coords: None,
+            sub_state: None,
+        }
+    }
+
     fn layer_menu(&mut self, ui: &mut Ui, tile_names: Vec<String>) {
         let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
@@ -2397,10 +2407,80 @@ enum MainWindow {
     ConditionMenu,
     ReferenceMenu,
 }
-struct DFGraphicsHelper {
-    main_window: MainWindow,
-    loaded_graphics: Graphics,
-    path: path::PathBuf,
+
+#[derive(Debug, Default, Clone)]
+enum ContextData {
+    #[default]
+    None,
+    TilePage(TilePage),
+    Tile(Tile),
+    CreatureFile(CreatureFile),
+    Creature(Creature),
+    LayerSet(LayerSet),
+    LayerGroup(LayerGroup),
+    Layer(Layer),
+    SimpleLayer(SimpleLayer),
+    Condition(Condition),
+}
+impl From<TilePage> for ContextData {
+    fn from(value: TilePage) -> Self {
+        ContextData::TilePage(value)
+    }
+}
+impl From<Tile> for ContextData {
+    fn from(value: Tile) -> Self {
+        ContextData::Tile(value)
+    }
+}
+impl From<CreatureFile> for ContextData {
+    fn from(value: CreatureFile) -> Self {
+        ContextData::CreatureFile(value)
+    }
+}
+impl From<Creature> for ContextData {
+    fn from(value: Creature) -> Self {
+        ContextData::Creature(value)
+    }
+}
+impl From<LayerSet> for ContextData {
+    fn from(value: LayerSet) -> Self {
+        ContextData::LayerSet(value)
+    }
+}
+impl From<LayerGroup> for ContextData {
+    fn from(value: LayerGroup) -> Self {
+        ContextData::LayerGroup(value)
+    }
+}
+impl From<Layer> for ContextData {
+    fn from(value: Layer) -> Self {
+        ContextData::Layer(value)
+    }
+}
+impl From<SimpleLayer> for ContextData {
+    fn from(value: SimpleLayer) -> Self {
+        ContextData::SimpleLayer(value)
+    }
+}
+impl From<Condition> for ContextData {
+    fn from(value: Condition) -> Self {
+        ContextData::Condition(value)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+enum Response {
+    #[default]
+    None,
+    Copy(ContextData),
+    Cut(ContextData),
+    Paste,
+    // Split,
+    // MergeDown,
+    Insert(ContextData),
+}
+
+struct GraphicsIndices {
     tilepage_index: usize,
     tile_index: usize,
     creaturefile_index: usize,
@@ -2409,16 +2489,10 @@ struct DFGraphicsHelper {
     layer_group_index: usize,
     layer_index: usize,
     condition_index: usize,
-    texture_file_name: String,
-    texture: Option<egui::TextureHandle>,
-    preview_image: bool,
 }
-impl DFGraphicsHelper {
-    fn new() -> Self {
+impl GraphicsIndices {
+    fn new() -> GraphicsIndices {
         Self {
-            main_window: MainWindow::DefaultMenu,
-            loaded_graphics: Graphics::new(),
-            path: path::PathBuf::from(".\\graphics"),
             tilepage_index: 0,
             tile_index: 0,
             creaturefile_index: 0,
@@ -2427,20 +2501,428 @@ impl DFGraphicsHelper {
             layer_group_index: 0,
             layer_index: 0,
             condition_index: 0,
-            texture_file_name: String::new(),
-            texture: None,
-            preview_image: false,
         }
     }
 
+    fn from(array: [usize; 8]) -> GraphicsIndices {
+        GraphicsIndices {
+            tilepage_index: array[0],
+            tile_index: array[1],
+            creaturefile_index: array[2],
+            creature_index: array[3],
+            layer_set_index: array[4],
+            layer_group_index: array[5],
+            layer_index: array[6],
+            condition_index: array[7]
+        }
+    }
+}
+
+struct DFGraphicsHelper {
+    main_window: MainWindow,
+    loaded_graphics: Graphics,
+    indices: GraphicsIndices,
+    path: path::PathBuf,
+    texture_file_name: String,
+    texture: Option<egui::TextureHandle>,
+    preview_image: bool,
+    context_response: Response,
+    copied: ContextData,
+}
+impl DFGraphicsHelper {
+    fn new() -> Self {
+        Self {
+            main_window: MainWindow::DefaultMenu,
+            loaded_graphics: Graphics::new(),
+            indices: GraphicsIndices::new(),
+            path: path::PathBuf::from(".\\graphics"),
+            texture_file_name: String::new(),
+            texture: None,
+            preview_image: false,
+            context_response: Response::default(),
+            copied: ContextData::default(),
+        }
+    }
+
+    fn copy(&mut self, selected: ContextData) {
+        self.copied = ContextData::from(selected);
+        self.context_response = Response::None;
+    }
+
+    fn cut(&mut self, selected: ContextData) {
+        let graphics = &mut self.loaded_graphics;
+        let indices = &mut self.indices;
+
+        self.copied = ContextData::from(selected.clone());
+        match selected {
+            ContextData::TilePage(_) => {
+                graphics.tilepages.remove(indices.tilepage_index);
+                if indices.tilepage_index >=1 {
+                    indices.tilepage_index -= 1;
+                } else {
+                    self.main_window = MainWindow::TilePageDefaultMenu;
+                }
+            },
+            ContextData::Tile(_) => {
+                graphics.tilepages
+                    .get_mut(indices.tilepage_index)
+                    .unwrap()
+                    .tiles
+                    .remove(indices.tile_index);
+                if indices.tile_index >=1 {
+                    indices.tile_index -= 1;
+                } else {
+                    self.main_window = MainWindow::TilePageMenu;
+                }
+            },
+            ContextData::CreatureFile(_) => {
+                graphics.creature_files.remove(indices.creaturefile_index);
+                if indices.creaturefile_index >=1 {
+                    indices.creaturefile_index -= 1;
+                } else {
+                    self.main_window = MainWindow::CreatureDefaultMenu;
+                }
+            },
+            ContextData::Creature(_) => {
+                graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .remove(indices.creature_index);
+                if indices.creature_index >=1 {
+                    indices.creature_index -= 1;
+                } else {
+                    self.main_window = MainWindow::CreatureFileMenu;
+                }
+            },
+            ContextData::LayerSet(_) => {
+                graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .remove(indices.layer_set_index);
+                if indices.layer_set_index >=1 {
+                    indices.layer_set_index -= 1;
+                } else {
+                    self.main_window = MainWindow::CreatureMenu;
+                }
+            },
+            ContextData::LayerGroup(_) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    layer_groups
+                    .remove(indices.layer_group_index);
+                    if indices.layer_group_index >=1 {
+                        indices.layer_group_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::LayerSetMenu;
+                    }
+                }
+            },
+            ContextData::SimpleLayer(_) => {
+                if let LayerSet::Simple(simple_layers) |
+                    LayerSet::Statue(simple_layers) = 
+                    graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    simple_layers
+                    .remove(indices.layer_index);
+                    if indices.layer_index >=1 {
+                        indices.layer_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::CreatureMenu;
+                    }
+                }
+            },
+            ContextData::Layer(_) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    layer_groups
+                    .get_mut(indices.layer_group_index)
+                    .unwrap()
+                    .layers
+                    .remove(indices.layer_index);
+                    if indices.layer_index >=1 {
+                        indices.layer_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::LayerGroupMenu;
+                    }
+                }
+            },
+            ContextData::Condition(_) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    layer_groups
+                    .get_mut(indices.layer_group_index)
+                    .unwrap()
+                    .layers
+                    .get_mut(indices.layer_index)
+                    .unwrap()
+                    .conditions
+                    .remove(indices.condition_index);
+                    if indices.condition_index >=1 {
+                        indices.condition_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::LayerMenu;
+                    }
+                }
+            },
+            ContextData::None => {},
+        }
+        self.context_response = Response::None;
+    }
+
+    fn paste(&mut self) {
+        let data = self.copied.clone();
+        self.insert(data);
+    }
+    
+    // fn split(&mut self) {
+
+    //     self.context_response = Response::None;
+    // }
+
+    // fn merge_down(&mut self) {
+        
+    //     self.context_response = Response::None;
+    // }
+
+    fn insert(&mut self, data: ContextData) {
+        let graphics = &mut self.loaded_graphics;
+        let indices = &mut self.indices;
+
+        match data {
+            ContextData::TilePage(tile_page) => {
+                graphics.tilepages.insert(indices.tilepage_index, tile_page);
+                self.main_window = MainWindow::TilePageMenu;
+            },
+            ContextData::Tile(tile) => {
+                graphics.tilepages
+                    .get_mut(indices.tilepage_index)
+                    .unwrap()
+                    .tiles
+                    .insert(indices.tile_index, tile);
+                self.main_window = MainWindow::TileMenu;
+            },
+            ContextData::CreatureFile(creature_file) => {
+                graphics.creature_files.insert(indices.creaturefile_index, creature_file);
+                self.main_window = MainWindow::CreatureFileMenu;
+            },
+            ContextData::Creature(creature) => {
+                graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .insert(indices.creature_index, creature);
+                self.main_window = MainWindow::CreatureMenu;
+            },
+            ContextData::LayerSet(layer_set) => {
+                graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .insert(indices.layer_set_index, layer_set);
+                self.main_window = MainWindow::LayerSetMenu;
+            },
+            ContextData::LayerGroup(layer_group) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    layer_groups
+                    .insert(indices.layer_group_index, layer_group);
+                self.main_window = MainWindow::LayerGroupMenu;
+                }
+            },
+            ContextData::SimpleLayer(simple_layer) => {
+                if let LayerSet::Simple(simple_layers) |
+                    LayerSet::Statue(simple_layers) = 
+                    graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    simple_layers
+                    .insert(indices.layer_index, simple_layer);
+                self.main_window = MainWindow::LayerMenu;
+                }
+            },
+            ContextData::Layer(layer) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    layer_groups
+                    .get_mut(indices.layer_group_index)
+                    .unwrap()
+                    .layers
+                    .insert(indices.layer_index, layer);
+                    self.main_window = MainWindow::LayerMenu;
+                }
+            },
+            ContextData::Condition(condition) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creaturefile_index)
+                    .unwrap()
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .unwrap()
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .unwrap() {
+                    layer_groups
+                    .get_mut(indices.layer_group_index)
+                    .unwrap()
+                    .layers
+                    .get_mut(indices.layer_index)
+                    .unwrap()
+                    .conditions
+                    .insert(indices.condition_index, condition);
+                    self.main_window = MainWindow::ConditionMenu;
+                }
+            },
+            ContextData::None => {},
+        }
+        self.context_response = Response::None;
+    }
+
+    fn context(ui: &mut Ui, selected: ContextData) -> Response {
+        let response;
+        if ui.button("Copy").clicked() {
+            ui.close_menu();
+            response = Response::Copy(selected);
+        } else if ui.button("Cut").clicked() {
+            ui.close_menu();
+            response = Response::Cut(selected);
+        } else if ui.button("Paste").clicked() {
+            ui.close_menu();
+            response = Response::Paste;
+        } else {
+            let mut inner_response = Response::None;
+            ui.menu_button("Insert...", |ui| {
+                match selected {
+                    ContextData::TilePage(_) | ContextData::Tile(_) => {
+                        if ui.button("Tile Page").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(TilePage::new());
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Tile").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(Tile::new());
+                            inner_response = Response::Insert(data);
+                        }
+                    },
+                    ContextData::CreatureFile(_) |
+                    ContextData::Creature(_) |
+                    ContextData::LayerSet(_) |
+                    ContextData::LayerGroup(_) |
+                    ContextData::Layer(_) |
+                    ContextData::SimpleLayer(_) |
+                    ContextData::Condition(_) => {
+                        if ui.button("Creature File").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(CreatureFile::new());
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Creature").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(Creature::new());
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Simple Layer").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(SimpleLayer::new());
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Layer Set").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(LayerSet::Layered(State::Default, vec![LayerGroup::new()]));
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Layer Group").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(LayerGroup::new());
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Layer").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(Layer::new());
+                            inner_response = Response::Insert(data);
+                        } else if ui.button("Condition").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(Condition::default());
+                            inner_response = Response::Insert(data);
+                        }
+                    },
+                    ContextData::None => {inner_response = Response::None;},
+                }
+            });
+            response = inner_response;
+
+            // else if ui.button("Split").clicked() {
+            //     ui.close_menu();
+            //     response = Response::Split;
+            // } else if ui.button("Merge Down").clicked() {
+            //     ui.close_menu();
+            //     response = Response::MergeDown;
+            // }
+        }
+
+        return response
+    }
+
     fn main_tree(&mut self, ui: &mut Ui, ctx: &Context) {
+        let graphics = &mut self.loaded_graphics;
+
         if ui
             .add(egui::Label::new("Tile Pages").sense(Sense::click()))
             .clicked()
         {
             self.main_window = MainWindow::TilePageDefaultMenu;
         };
-        for (i_tilepage, tilepage) in self.loaded_graphics.tilepages.iter_mut().enumerate() {
+        for (i_tilepage, tilepage) in graphics.tilepages.iter_mut().enumerate() {
             let id_t = ui.make_persistent_id(
                 format!("tilepage{}", i_tilepage)
             );
@@ -2450,27 +2932,27 @@ impl DFGraphicsHelper {
                 false,
             )
             .show_header(ui, |ui| {
-                if ui
-                    .add(
-                        egui::Label::new(format!("Tile Page: {}", &tilepage.name))
-                            .sense(Sense::click()),
-                    )
-                    .clicked()
-                {
+                if ui.add(egui::Label::new(
+                    format!("Tile Page: {}", &tilepage.name))
+                    .sense(Sense::click()))
+                    .context_menu(|ui| {
+                    self.indices = GraphicsIndices::from([i_tilepage, 0, 0, 0, 0, 0, 0, 0]);
+                    self.context_response = Self::context(ui, ContextData::from(tilepage.clone()));
+                }).clicked() {
+                    self.indices = GraphicsIndices::from([i_tilepage, 0, 0, 0, 0, 0, 0, 0]);
                     self.main_window = MainWindow::TilePageMenu;
-                    self.tilepage_index = i_tilepage;
-                };
+                }
             })
             .body(|ui| {
                 for (i_tile, tile) in tilepage.tiles.iter_mut().enumerate() {
-                    if ui
-                        .add(egui::Label::new(&tile.name).sense(Sense::click()))
-                        .clicked()
-                    {
+                    if ui.add(egui::Label::new(&tile.name).sense(Sense::click()))
+                        .context_menu(|ui| {
+                        self.indices = GraphicsIndices::from([i_tilepage, i_tile, 0, 0, 0, 0, 0, 0]);
+                        self.context_response = Self::context(ui, ContextData::from(tile.clone()));
+                    }).clicked() {
+                        self.indices = GraphicsIndices::from([i_tilepage, i_tile, 0, 0, 0, 0, 0, 0]);
                         self.main_window = MainWindow::TileMenu;
-                        self.tilepage_index = i_tilepage;
-                        self.tile_index = i_tile;
-                    };
+                    }
                 }
             });
         }
@@ -2493,15 +2975,15 @@ impl DFGraphicsHelper {
                 true,
             )
             .show_header(ui, |ui| {
-                if ui
-                    .add(
-                        egui::Label::new(format!("File: {}", &creature_file.name))
-                            .sense(Sense::click()),
-                    )
-                    .clicked()
-                {
+                if ui.add(egui::Label::new(
+                    format!("File: {}", &creature_file.name))
+                    .sense(Sense::click()))
+                    .context_menu(|ui| {
+                    self.indices = GraphicsIndices::from([0, 0, i_file, 0, 0, 0, 0, 0]);
+                    self.context_response = Self::context(ui, ContextData::from(creature_file.clone()));
+                }).clicked() {
+                    self.indices = GraphicsIndices::from([0, 0, i_file, 0, 0, 0, 0, 0]);
                     self.main_window = MainWindow::CreatureFileMenu;
-                    self.creaturefile_index = i_file;
                 };
             })
             .body(|ui| {
@@ -2516,14 +2998,15 @@ impl DFGraphicsHelper {
                         false,
                     )
                     .show_header(ui, |ui| {
-                        if ui
-                            .add(egui::Label::new(format!("Creature: {}", &creature.name))
+                        if ui .add(egui::Label::new(
+                            format!("Creature: {}", &creature.name))
                             .sense(Sense::click()))
-                            .clicked()
-                        {
+                            .context_menu(|ui| {
+                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, 0, 0, 0, 0]);
+                            self.context_response = Self::context(ui, ContextData::from(creature.clone()));
+                        }).clicked() {
+                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, 0, 0, 0, 0]);
                             self.main_window = MainWindow::CreatureMenu;
-                            self.creaturefile_index = i_file;
-                            self.creature_index = i_creature;
                         };
                     })
                     .body(|ui| {
@@ -2531,12 +3014,13 @@ impl DFGraphicsHelper {
                             match layer_set {
                                 LayerSet::Empty => {
                                     if ui.add(egui::Label::new("(empty)")
-                                        .sense(Sense::click())).clicked()
-                                        {
+                                        .sense(Sense::click()))
+                                        .context_menu(|ui| {
+                                        self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
+                                        self.context_response = Self::context(ui, ContextData::from(layer_set.clone()));
+                                    }).clicked() {
+                                        self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
                                         self.main_window = MainWindow::LayerSetMenu;
-                                        self.creaturefile_index = i_file;
-                                        self.creature_index = i_creature;
-                                        self.layer_set_index = i_layer_set;
                                     }
                                 },
                                 LayerSet::Layered(state, layer_groups) => {
@@ -2551,13 +3035,14 @@ impl DFGraphicsHelper {
                                         {
                                         if ui.add(egui::Label::new(
                                             format!("Set: {}", state.name()))
-                                            .sense(Sense::click())).clicked()
-                                            {
+                                            .sense(Sense::click()))
+                                            .context_menu(|ui| {
+                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
+                                            self.context_response = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
+                                        }).clicked() {
+                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
                                             self.main_window = MainWindow::LayerSetMenu;
-                                            self.creaturefile_index = i_file;
-                                            self.creature_index = i_creature;
-                                            self.layer_set_index = i_layer_set;
-                                        };
+                                        }
                                     })
                                         .body(|ui|
                                         {
@@ -2573,13 +3058,12 @@ impl DFGraphicsHelper {
                                                 {
                                                 if ui.add(egui::Label::new(
                                                     format!("Group: {}", &layer_group.name))
-                                                    .sense(Sense::click())).clicked()
-                                                    {
+                                                    .sense(Sense::click())).context_menu(|ui| {
+                                                    self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0]);
+                                                    self.context_response = Self::context(ui, ContextData::from(layer_group.clone()));
+                                                }).clicked() {
+                                                    self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0]);
                                                     self.main_window = MainWindow::LayerGroupMenu;
-                                                    self.creaturefile_index = i_file;
-                                                    self.creature_index = i_creature;
-                                                    self.layer_set_index = i_layer_set;
-                                                    self.layer_group_index = i_layer_group;
                                                 };
                                             })
                                                 .body(|ui|
@@ -2596,29 +3080,26 @@ impl DFGraphicsHelper {
                                                         {
                                                         if ui.add(egui::Label::new(
                                                             format!("Layer: {}", &layer.name))
-                                                            .sense(Sense::click())).clicked()
-                                                            {
+                                                            .sense(Sense::click()))
+                                                            .context_menu(|ui| {
+                                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0]);
+                                                            self.context_response = Self::context(ui, ContextData::from(layer.clone()));
+                                                        }).clicked() {
+                                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0]);
                                                             self.main_window = MainWindow::LayerMenu;
-                                                            self.creaturefile_index = i_file;
-                                                            self.creature_index = i_creature;
-                                                            self.layer_set_index = i_layer_set;
-                                                            self.layer_group_index = i_layer_group;
-                                                            self.layer_index = i_layer;
-                                                        };
+                                                        }
                                                     })
                                                         .body(|ui|
                                                         {
                                                         for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
                                                             if ui.add(egui::Label::new(condition.name())
-                                                                .sense(Sense::click())).clicked()
-                                                                {
+                                                                .sense(Sense::click()))
+                                                                .context_menu(|ui| {
+                                                                self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition]);
+                                                                self.context_response = Self::context(ui, ContextData::from(condition.clone()));
+                                                            }).clicked() {
+                                                                self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition]);
                                                                 self.main_window = MainWindow::ConditionMenu;
-                                                                self.creaturefile_index = i_file;
-                                                                self.creature_index = i_creature;
-                                                                self.layer_set_index = i_layer_set; 
-                                                                self.layer_group_index = i_layer_group;
-                                                                self.layer_index = i_layer;
-                                                                self.condition_index = i_condition;
                                                             }
                                                         }
                                                     });
@@ -2628,44 +3109,44 @@ impl DFGraphicsHelper {
                                     });
                                 },
                                 LayerSet::Simple(simple_layers) => {
-                                    for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
+                                    for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
                                         if ui.add(egui::Label::new(
-                                        if let Some(sub_state) = &layer.sub_state {
+                                        if let Some(sub_state) = &simple_layer.sub_state {
                                                 format!("\t{} & {}",
-                                                layer.state.name(),
+                                                simple_layer.state.name(),
                                                 sub_state.name())
                                             } else {
                                                 format!("\t{}",
-                                                layer.state.name())
+                                                simple_layer.state.name())
                                             })
-                                            .sense(Sense::click())).clicked()
-                                            {
+                                            .sense(Sense::click()))
+                                            .context_menu(|ui| {
+                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
+                                            self.context_response = Self::context(ui, ContextData::from(simple_layer.clone()));
+                                        }).clicked() {
+                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
                                             self.main_window = MainWindow::LayerMenu;
-                                            self.creaturefile_index = i_file;
-                                            self.creature_index = i_creature;
-                                            self.layer_set_index = i_layer_set;
-                                            self.layer_index = i_layer;
                                         }
                                     }
                                 },
                                 LayerSet::Statue(simple_layers) => {
-                                    for (i_layer, layer) in simple_layers.iter_mut().enumerate() {
+                                    for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
                                         if ui.add(egui::Label::new(
-                                        if let Some(sub_state) = &layer.sub_state {
+                                        if let Some(sub_state) = &simple_layer.sub_state {
                                                 format!("\tStatue: {} & {}",
-                                                layer.state.name(),
+                                                simple_layer.state.name(),
                                                 sub_state.name())
                                             } else {
                                                 format!("\tStatue: {}",
-                                                layer.state.name())
+                                                simple_layer.state.name())
                                             })
-                                            .sense(Sense::click())).clicked()
-                                            {
+                                            .sense(Sense::click()))
+                                            .context_menu(|ui| {
+                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
+                                            self.context_response = Self::context(ui, ContextData::from(simple_layer.clone()));
+                                        }).clicked() {
+                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
                                             self.main_window = MainWindow::LayerMenu;
-                                            self.creaturefile_index = i_file;
-                                            self.creature_index = i_creature;
-                                            self.layer_set_index = i_layer_set;
-                                            self.layer_index = i_layer;
                                         }
                                     }
                                 },
@@ -2718,13 +3199,16 @@ impl DFGraphicsHelper {
 
     fn creature_file_menu(&mut self, ui: &mut Ui) {
         ui.label("Creature File Menu");
+
+        let indices = &mut self.indices;
+
         if self.loaded_graphics.creature_files.is_empty() {
             self.main_window = MainWindow::CreatureDefaultMenu;
         } else {
             let creaturefile = self
                 .loaded_graphics
                 .creature_files
-                .get_mut(self.creaturefile_index)
+                .get_mut(indices.creaturefile_index)
                 .unwrap();
 
             ui.separator();
@@ -2740,36 +3224,38 @@ impl DFGraphicsHelper {
             if ui.button("Delete").clicked() {
                 self.loaded_graphics
                     .creature_files
-                    .remove(self.creaturefile_index);
-                if self.creaturefile_index > 0 {
-                    self.creaturefile_index = self.creaturefile_index - 1;
+                    .remove(indices.creaturefile_index);
+                if indices.creaturefile_index > 0 {
+                    indices.creaturefile_index = indices.creaturefile_index - 1;
                 } else if self.loaded_graphics.creature_files.is_empty() {
                     self.main_window = MainWindow::CreatureDefaultMenu;
                 } else {
-                    self.creaturefile_index = 0;
+                    indices.creaturefile_index = 0;
                 }
             }
         }
     }
 
-    fn creature_menu(&mut self, ui: &mut Ui) {//todo
+    fn creature_menu(&mut self, ui: &mut Ui) {
         ui.label("Creature Menu");
+
+        let indices = &mut self.indices;
 
         let creatures = &mut self
             .loaded_graphics
             .creature_files
-            .get_mut(self.creaturefile_index)
+            .get_mut(indices.creaturefile_index)
             .unwrap()
             .creatures;
         
         if creatures.is_empty() {
             if ui.small_button("Create Creature").clicked() {
                 creatures.push(Creature::new());
-                self.creature_index = 0;
+                indices.creature_index = 0;
             }
         } else {
             let creature = creatures
-                .get_mut(self.creature_index)
+                .get_mut(indices.creature_index)
                 .unwrap();
 
             creature.creature_menu(ui);
@@ -2777,10 +3263,10 @@ impl DFGraphicsHelper {
             ui.add_space(PADDING);
             ui.add_space(PADDING);
             if ui.button("Delete").clicked() {
-                creatures.remove(self.creature_index);
+                creatures.remove(indices.creature_index);
 
-                if self.creature_index >= 1 {
-                    self.creature_index = self.creature_index - 1;
+                if indices.creature_index >= 1 {
+                    indices.creature_index = indices.creature_index - 1;
                 } else if creatures.is_empty() {
                     self.main_window = MainWindow::CreatureFileMenu;
                 }
@@ -2789,26 +3275,27 @@ impl DFGraphicsHelper {
     }
 
     fn layer_set_menu(&mut self, ui: &mut Ui) {//todo
-        ui.label("Creature Menu");
+        ui.label("Layer set Menu");
+        let indices = &mut self.indices;
 
         let layer_sets = &mut self
             .loaded_graphics
             .creature_files
-            .get_mut(self.creaturefile_index)
+            .get_mut(indices.creaturefile_index)
             .unwrap()
             .creatures
-            .get_mut(self.creature_index)
+            .get_mut(indices.creature_index)
             .unwrap()
             .graphics_type;
         
         if layer_sets.is_empty() {
-            if ui.small_button("Create Creature").clicked() {
+            if ui.small_button("Create Layer Set").clicked() {
                 layer_sets.push(LayerSet::default());
-                self.creature_index = 0;
+                indices.creature_index = 0;
             }
         } else {
             let layer_set = layer_sets
-                .get_mut(self.layer_set_index)
+                .get_mut(indices.layer_set_index)
                 .unwrap();
 
             layer_set.layer_set_menu(ui);
@@ -2816,10 +3303,10 @@ impl DFGraphicsHelper {
             ui.add_space(PADDING);
             ui.add_space(PADDING);
             if ui.button("Delete").clicked() {
-                layer_sets.remove(self.layer_set_index);
+                layer_sets.remove(indices.layer_set_index);
 
-                if self.layer_set_index >= 1 {
-                    self.layer_set_index = self.layer_set_index - 1;
+                if indices.layer_set_index >= 1 {
+                    indices.layer_set_index = indices.layer_set_index - 1;
                 } else if layer_sets.is_empty() {
                     self.main_window = MainWindow::CreatureFileMenu;
                 }
@@ -2829,13 +3316,16 @@ impl DFGraphicsHelper {
 
     fn tilepage_menu(&mut self, ui: &mut Ui) {
         ui.label("Tile Page Menu");
+        let indices = &mut self.indices;
+
         if self.loaded_graphics.tilepages.is_empty() {
             self.main_window = MainWindow::TilePageDefaultMenu;
+            indices.tilepage_index = 0;
         } else {
             let tilepage = self
                 .loaded_graphics
                 .tilepages
-                .get_mut(self.tilepage_index)
+                .get_mut(indices.tilepage_index)
                 .unwrap();
 
             ui.separator();
@@ -2849,13 +3339,11 @@ impl DFGraphicsHelper {
             ui.add_space(PADDING);
 
             if ui.button("Delete").clicked() {
-                self.loaded_graphics.tilepages.remove(self.tilepage_index);
-                if self.tilepage_index > 0 {
-                    self.tilepage_index = self.tilepage_index - 1;
+                self.loaded_graphics.tilepages.remove(indices.tilepage_index);
+                if indices.tilepage_index > 0 {
+                    indices.tilepage_index = indices.tilepage_index - 1;
                 } else if self.loaded_graphics.tilepages.is_empty() {
                     self.main_window = MainWindow::TilePageDefaultMenu;
-                } else {
-                    self.tilepage_index = 0;
                 }
             }
         }
@@ -2863,21 +3351,23 @@ impl DFGraphicsHelper {
 
     fn tile_menu(&mut self, ui: &mut Ui) {
         ui.label("Tile Menu");
+        
+        let indices = &mut self.indices;
 
         let tiles = &mut self
             .loaded_graphics
             .tilepages
-            .get_mut(self.tilepage_index)
+            .get_mut(indices.tilepage_index)
             .unwrap()
             .tiles;
 
         if tiles.is_empty() {
             if ui.small_button("Create Tile").clicked() {
                 tiles.push(Tile::new());
-                self.tile_index = 0;
+                indices.tile_index = 0;
             }
         } else {
-            let tile = tiles.get_mut(self.tile_index).unwrap();
+            let tile = tiles.get_mut(indices.tile_index).unwrap();
             let file_name = tile.filename.clone();
 
             tile.tile_menu(ui);
@@ -2885,20 +3375,22 @@ impl DFGraphicsHelper {
             ui.add_space(PADDING);
             self.preview_image(ui, file_name, None);
 
+            let indices = &mut self.indices;
+
             let tiles = &mut self
                 .loaded_graphics
                 .tilepages
-                .get_mut(self.tilepage_index)
+                .get_mut(indices.tilepage_index)
                 .unwrap()
                 .tiles;
 
             ui.add_space(PADDING);
             ui.add_space(PADDING);
             if ui.button("Delete").clicked() {
-                tiles.remove(self.tile_index);
+                tiles.remove(indices.tile_index);
 
-                if self.tile_index >= 1 {
-                    self.tile_index = self.tile_index - 1;
+                if indices.tile_index >= 1 {
+                    indices.tile_index = indices.tile_index - 1;
                 } else if tiles.is_empty() {
                     self.main_window = MainWindow::TilePageMenu;
                 }
@@ -2908,28 +3400,30 @@ impl DFGraphicsHelper {
 
     fn layer_group_menu(&mut self, ui: &mut Ui) {
         ui.label("Layer Group Menu");
+        
+        let indices = &mut self.indices;
 
         let graphics_type = self
             .loaded_graphics
             .creature_files
-            .get_mut(self.creaturefile_index)
+            .get_mut(indices.creaturefile_index)
             .unwrap()
             .creatures
-            .get_mut(self.creature_index)
+            .get_mut(indices.creature_index)
             .unwrap()
             .graphics_type
-            .get_mut(self.layer_set_index)
+            .get_mut(indices.layer_set_index)
             .unwrap();
 
         if let LayerSet::Layered(_, layer_groups) = graphics_type {
             if layer_groups.is_empty() {
                 if ui.small_button("Create Layer Group").clicked() {
                     layer_groups.push(LayerGroup::new());
-                    self.layer_group_index = 0;
+                    indices.layer_group_index = 0;
                 }
             } else {
                 let layer_group = layer_groups
-                    .get_mut(self.layer_group_index)
+                    .get_mut(indices.layer_group_index)
                     .unwrap();
 
                 layer_group.layer_group_menu(ui);
@@ -2937,10 +3431,10 @@ impl DFGraphicsHelper {
                 ui.add_space(PADDING);
                 ui.add_space(PADDING);
                 if ui.button("Delete").clicked() {
-                    layer_groups.remove(self.layer_group_index);
+                    layer_groups.remove(indices.layer_group_index);
     
-                    if self.layer_group_index >= 1 {
-                        self.layer_group_index = self.layer_group_index - 1;
+                    if indices.layer_group_index >= 1 {
+                        indices.layer_group_index = indices.layer_group_index - 1;
                     } else if layer_groups.is_empty() {
                         self.main_window = MainWindow::LayerSetMenu;
                     }
@@ -2953,17 +3447,19 @@ impl DFGraphicsHelper {
         ui.label("Layer Menu");
 
         let tile_names = self.tile_names();
+        
+        let indices = &mut self.indices;
 
         let layer_groups = self
             .loaded_graphics
             .creature_files
-            .get_mut(self.creaturefile_index)
+            .get_mut(indices.creaturefile_index)
             .unwrap()
             .creatures
-            .get_mut(self.creature_index)
+            .get_mut(indices.creature_index)
             .unwrap()
             .graphics_type
-            .get_mut(self.layer_set_index)
+            .get_mut(indices.layer_set_index)
             .unwrap();
 
         let tiles: Vec<&Tile> = self
@@ -2979,10 +3475,10 @@ impl DFGraphicsHelper {
                     //if there are no layers defined show create layer button only
                     if ui.small_button("Create Layer").clicked() {
                         simple_layers.push(SimpleLayer::default());
-                        self.layer_index = 0;
+                        indices.layer_index = 0;
                     }
                 } else {
-                    let simple_layer = simple_layers.get_mut(self.layer_index).unwrap();
+                    let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
 
                     simple_layer.layer_menu(ui, tile_names);
 
@@ -3003,10 +3499,10 @@ impl DFGraphicsHelper {
                     //if there are no layers defined show create layer button only
                     if ui.small_button("Create Layer").clicked() {
                         simple_layers.push(SimpleLayer::default());
-                        self.layer_index = 0;
+                        indices.layer_index = 0;
                     }
                 } else {
-                    let simple_layer = simple_layers.get_mut(self.layer_index).unwrap();
+                    let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
 
                     simple_layer.statue_layer_menu(ui, tile_names);
 
@@ -3025,7 +3521,7 @@ impl DFGraphicsHelper {
             LayerSet::Layered(_, layer_groups) => {
                 let layers = 
                     &mut layer_groups
-                    .get_mut(self.layer_group_index)
+                    .get_mut(indices.layer_group_index)
                     .unwrap()
                     .layers;
 
@@ -3033,10 +3529,10 @@ impl DFGraphicsHelper {
                     //if there are no layers defined show create layer button only
                     if ui.small_button("Create Layer").clicked() {
                         layers.push(Layer::default());
-                        self.layer_index = 0;
+                        indices.layer_index = 0;
                     }
                 } else {
-                    let layer = layers.get_mut(self.layer_index).unwrap();
+                    let layer = layers.get_mut(indices.layer_index).unwrap();
 
                     layer.layer_menu(ui, tile_names);
 
@@ -3058,16 +3554,18 @@ impl DFGraphicsHelper {
             },
         }
 
+        let indices = &mut self.indices;
+
         let layer_groups = self
             .loaded_graphics
             .creature_files
-            .get_mut(self.creaturefile_index)
+            .get_mut(indices.creaturefile_index)
             .unwrap()
             .creatures
-            .get_mut(self.creature_index)
+            .get_mut(indices.creature_index)
             .unwrap()
             .graphics_type
-            .get_mut(self.layer_set_index)
+            .get_mut(indices.layer_set_index)
             .unwrap();
 
         match layer_groups {
@@ -3075,10 +3573,10 @@ impl DFGraphicsHelper {
                 ui.add_space(PADDING);
                 ui.add_space(PADDING);
                 if ui.button("Delete").clicked() {
-                    simple_layers.remove(self.layer_index);
+                    simple_layers.remove(indices.layer_index);
         
-                    if self.layer_index >= 1 {
-                        self.layer_index = self.layer_index - 1;
+                    if indices.layer_index >= 1 {
+                        indices.layer_index = indices.layer_index - 1;
                     } else if simple_layers.is_empty() {
                         self.main_window = MainWindow::CreatureMenu;
                     }
@@ -3087,17 +3585,17 @@ impl DFGraphicsHelper {
             LayerSet::Layered(_, layer_groups) => {
                 let layers = 
                     &mut layer_groups
-                    .get_mut(self.layer_group_index)
+                    .get_mut(indices.layer_group_index)
                     .unwrap()
                     .layers;
 
                 ui.add_space(PADDING);
                 ui.add_space(PADDING);
                 if ui.button("Delete").clicked() {
-                    layers.remove(self.layer_index);
+                    layers.remove(indices.layer_index);
         
-                    if self.layer_index >= 1 {
-                        self.layer_index = self.layer_index - 1;
+                    if indices.layer_index >= 1 {
+                        indices.layer_index = indices.layer_index - 1;
                     } else if layers.is_empty() {
                         self.main_window = MainWindow::CreatureMenu;
                     }
@@ -3254,25 +3752,27 @@ impl DFGraphicsHelper {
         ui.label("Condition Menu");
 
         let tile_names = self.tile_names();
+        
+        let indices = &mut self.indices;
 
         let graphics_type = self
             .loaded_graphics
             .creature_files
-            .get_mut(self.creaturefile_index)
+            .get_mut(indices.creaturefile_index)
             .unwrap()
             .creatures
-            .get_mut(self.creature_index)
+            .get_mut(indices.creature_index)
             .unwrap()
             .graphics_type
-            .get_mut(self.layer_set_index)
+            .get_mut(indices.layer_set_index)
             .unwrap();
 
         if let LayerSet::Layered(_, layergroups) = graphics_type {
             let conditions = &mut layergroups
-                .get_mut(self.layer_group_index)
+                .get_mut(indices.layer_group_index)
                 .unwrap()
                 .layers
-                .get_mut(self.layer_index)
+                .get_mut(indices.layer_index)
                 .unwrap()
                 .conditions;
 
@@ -3283,7 +3783,7 @@ impl DFGraphicsHelper {
                 }
             } else {
                 let condition = conditions
-                    .get_mut(self.condition_index)
+                    .get_mut(indices.condition_index)
                     .unwrap();
 
                 ui.separator();
@@ -3293,14 +3793,12 @@ impl DFGraphicsHelper {
                 ui.add_space(PADDING);
                 ui.add_space(PADDING);
                 if ui.button("Delete").clicked() {
-                    conditions.remove(self.condition_index);
+                    conditions.remove(indices.condition_index);
 
-                    if self.condition_index > 0 {
-                        self.condition_index = self.condition_index - 1;
+                    if indices.condition_index > 0 {
+                        indices.condition_index = indices.condition_index - 1;
                     } else if conditions.is_empty() {
                         self.main_window = MainWindow::LayerMenu;
-                    } else {
-                        self.condition_index = 0;
                     }
                 }
             }
@@ -3378,6 +3876,29 @@ impl eframe::App for DFGraphicsHelper {
                 MainWindow::DefaultMenu => self.default_menu(ui),
             });
         });
+
+        match &self.context_response { //respond to the context menus
+            Response::Copy(selected) => {
+                self.copy(selected.clone());
+            },
+            Response::Cut(selected) => {
+                self.cut(selected.clone());
+            },
+            Response::Paste => {
+                self.paste();
+            },
+            // Response::Split => {
+            //     self.split();
+            // },
+            // Response::MergeDown => {
+            //     self.merge_down();
+            // },
+            Response::Insert(data) => {
+                self.insert(data.clone());
+            },
+            Response::None => {},
+            // _ => {self.context_response = Response::None},
+        }
     }
 }
 
