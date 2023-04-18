@@ -2846,7 +2846,7 @@ impl DFGraphicsHelper {
             response = Response::Paste;
         } else {
             let mut inner_response = Response::None;
-            ui.menu_button("Insert...", |ui| {
+            ui.menu_button("Insert..", |ui| {
                 match selected {
                     ContextData::TilePage(_) | ContextData::Tile(_) => {
                         if ui.button("Tile Page").clicked() {
@@ -3830,7 +3830,7 @@ impl eframe::App for DFGraphicsHelper {
                         self.loaded_graphics = Graphics::new();
                         ui.close_menu();
                     }
-                    if ui.button("Set Path..").clicked() {
+                    if ui.button("Import From..").clicked() {
                         self.path = rfd::FileDialog::new()
                             .set_title(r"Choose graphics folder")
                             .pick_folder()
