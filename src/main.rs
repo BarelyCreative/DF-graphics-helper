@@ -2471,8 +2471,8 @@ enum Response {
     Copy(ContextData),
     Cut(ContextData),
     Paste,
-    Split,
-    MergeDown,
+    // Split,
+    // MergeDown,
     Insert(ContextData),
 }
 
@@ -3893,7 +3893,7 @@ impl eframe::App for DFGraphicsHelper {
                 self.insert(data.clone());
             },
             Response::None => {},
-            _ => {self.context_response = Response::None},
+            // _ => {self.context_response = Response::None},
         }
     }
 }
