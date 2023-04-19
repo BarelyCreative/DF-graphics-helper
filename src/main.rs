@@ -379,7 +379,6 @@ impl Graphics {
                                                 0 => lg.name = state.name().to_case(Case::Title),
                                                 1 => lg.name = layer_names[0].clone(),
                                                 _ => {
-                                                    // let mut done = false;
                                                     let mut words: Vec<&str> = layer_names[0].split("_").collect();
                                                     words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
     
@@ -773,7 +772,9 @@ impl SimpleLayer {
 
         ui.add_space(PADDING);
         ui.label("Preview:");
-        ui.label(self.export().expect("should always make a valid layer"));
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+        });
     }
 
     fn statue_layer_menu(&mut self, ui: &mut Ui, tile_names: Vec<String>) {
@@ -820,7 +821,9 @@ impl SimpleLayer {
 
         ui.add_space(PADDING);
         ui.label("Preview:");
-        ui.label(self.export().expect("should always make a valid layer"));
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+        });
     }
 
     fn export(&self) -> Result<String, Box<dyn Error>> {
@@ -966,7 +969,9 @@ impl Layer {
 
         ui.add_space(PADDING);
         ui.label("Preview:");
-        ui.label(self.export().expect("should always make a valid layer"));
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+        });
     }
 
     fn export(&self) -> Result<String, Box<dyn Error>> {
@@ -1032,7 +1037,9 @@ impl LayerGroup {
 
         ui.add_space(PADDING);
         ui.label("Preview:");
-        ui.label(self.export().expect("should always create valid layer group"));
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+        });
     }
 
     fn export(&self) -> Result<String, Box<dyn Error>> {
@@ -2105,7 +2112,9 @@ impl Condition {
 
         ui.add_space(PADDING);
         ui.label("Preview:");
-        ui.label(self.export().expect("should always make a valid condition"));
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+        });
     }
 
     fn export(&self) -> Result<String, Box<dyn Error>> {
@@ -2375,7 +2384,9 @@ impl Tile {
 
         ui.add_space(PADDING);
         ui.label("Preview:");
-        ui.label(self.export().expect("should always make a valid tile"));
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+        });
     }
 
     fn export(&self) -> Result<String, Box<dyn Error>> {
@@ -2929,7 +2940,7 @@ impl DFGraphicsHelper {
             egui::collapsing_header::CollapsingState::load_with_default_open(
                 ctx,
                 id_t,
-                false,
+                true,
             )
             .show_header(ui, |ui| {
                 if ui.add(egui::Label::new(
@@ -2995,7 +3006,7 @@ impl DFGraphicsHelper {
                     egui::collapsing_header::CollapsingState::load_with_default_open(
                         ctx,
                         id_c,
-                        false,
+                        true,
                     )
                     .show_header(ui, |ui| {
                         if ui .add(egui::Label::new(
@@ -3075,7 +3086,7 @@ impl DFGraphicsHelper {
                                                     );
                                                     egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
                                                         id_l,
-                                                        false)
+                                                        true)
                                                         .show_header(ui, |ui|
                                                         {
                                                         if ui.add(egui::Label::new(
@@ -3693,14 +3704,21 @@ impl DFGraphicsHelper {
                 .into();
 
             if imagepath.exists() {
-                let image = image::io::Reader::open(imagepath)
+                let dyn_image = image::io::Reader::open(imagepath)
                     .unwrap()
                     .decode()
                     .unwrap();
-                let size = [image.width() as _, image.height() as _];
-                let image_buffer = image.to_rgba8();
-                let pixels = image_buffer.as_flat_samples();
-                let rgba = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                let size: [usize; 2] = [dyn_image.width() as _, dyn_image.height() as _];
+                let image = dyn_image.as_bytes();
+                let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
+
+                self.loaded_graphics.tilepages
+                    .get_mut(self.indices.tilepage_index)
+                    .unwrap()
+                    .tiles
+                    .get_mut(self.indices.tile_index)
+                    .unwrap()
+                    .image_size = [dyn_image.width(), dyn_image.height()];
                 
                 self.texture.get_or_insert_with(|| {
                     ui.ctx()
