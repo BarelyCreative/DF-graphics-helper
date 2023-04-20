@@ -46,7 +46,7 @@ impl Graphics {
         (brackets, line_vec, comments) //retain first bracket to ignore commented-out lines
     }
 
-    fn import(folder: path::PathBuf) -> Graphics {
+    fn import(folder: path::PathBuf) -> Result<Graphics, Box<dyn Error>> {
         let mut tilepages: Vec<TilePage> = Vec::new();
         let mut creature_files: Vec<CreatureFile> = Vec::new();
 
@@ -86,15 +86,26 @@ impl Graphics {
                                 tile.filename = line_vec[1].clone()
                                     .replace(".png", "")
                                     .replace("images", "")
-                                    .replace("\\", "")
+                                    .replace("/", "")
                                     .replace("/", "");
+
+                                let image_path: path::PathBuf = folder.join(format!("/images/{}.png", tile.filename));
+
+                                if let Ok(file) = fs::File::open(image_path) {
+                                    let reader = std::io::BufReader::new(file);
+                                    let image = image::io::Reader::with_format(reader, image::ImageFormat::Png);
+                                    let (x, y) = image.into_dimensions()?;
+                                    
+                                    tile.image_size = [x, y];
+                                    dbg!(&tile.image_size);
+                                }
                                 
                             } else if line_vec[0].eq("TILE_DIM") {
                                 tile.tile_size = 
                                     [line_vec[1].parse().unwrap_or_default(),
                                     line_vec[2].parse().unwrap_or_default()];
-
-                            } else if line_vec[0].eq("PAGE_DIM_PIXELS") {
+ 
+                            } else if line_vec[0].eq("PAGE_DIM_PIXELS") & tile.image_size.ne(&[0, 0]) {
                                 tile.image_size = 
                                     [line_vec[1].parse().unwrap_or_default(),
                                     line_vec[2].parse().unwrap_or_default()];
@@ -104,21 +115,6 @@ impl Graphics {
                     }
                     tilepage.tiles.push(tile);
                     tilepages.push(tilepage);
-
-                    for tp in tilepages.iter_mut() {
-                        for t in tp.tiles.iter_mut() {
-                            let image_path: path::PathBuf = folder.join(format!("\\images\\{}.png",
-                                t.filename,
-                            ));
-                
-                            if image_path.exists() {
-                                let (x, y) = image::image_dimensions(image_path)
-                                    .expect("should get valid size from a valid .png file")
-                                    .into();
-                                t.image_size = [x, y];
-                            }
-                        }
-                    }
 
                 } else if entry_name.starts_with("graphics_creatures_") {
                     let mut creature_file = CreatureFile::empty();
@@ -245,16 +241,17 @@ impl Graphics {
                                                 layer_group.layers.push(layer.clone());
                                             }
                                             if line_vec[3].eq("LARGE_IMAGE") {
+                                                let c = [line_vec[4].parse::<u32>().unwrap_or_default(),
+                                                    line_vec[5].parse::<u32>().unwrap_or_default()];
+                                                let l_c = [line_vec[6].parse::<u32>().unwrap_or_default(),
+                                                    line_vec[7].parse::<u32>().unwrap_or_default()];
+                                                let large = [l_c[0]-c[0], l_c[1]-c[1]];
                                                 layer = Layer{
                                                     name: line_vec[1].clone(),
                                                     conditions: Vec::new(),
                                                     tile: line_vec[2].clone(),
-                                                    coords:
-                                                        [line_vec[4].parse::<u32>().unwrap_or_default(),
-                                                        line_vec[5].parse::<u32>().unwrap_or_default()],
-                                                    large_coords:
-                                                        Some([line_vec[6].parse::<u32>().unwrap_or_default(),
-                                                        line_vec[7].parse::<u32>().unwrap_or_default()]),
+                                                    coords: c,
+                                                    large_coords: Some(large),
                                                 }
                                             } else {
                                                 layer = Layer{
@@ -278,15 +275,16 @@ impl Graphics {
                                                 simple_layers.push(simple_layer.clone());
                                             }
                                             if line_vec[2].eq("LARGE_IMAGE") {
+                                                let c = [line_vec[3].parse::<u32>().unwrap_or_default(),
+                                                    line_vec[4].parse::<u32>().unwrap_or_default()];
+                                                let l_c = [line_vec[5].parse::<u32>().unwrap_or_default(),
+                                                    line_vec[6].parse::<u32>().unwrap_or_default()];
+                                                let large = [l_c[0]-c[0], l_c[1]-c[1]];
                                                 simple_layer = SimpleLayer {
                                                     state: State::from(line_vec[0].clone()),
                                                     tile: line_vec[1].clone(),
-                                                    coords: 
-                                                        [line_vec[3].parse::<u32>().unwrap_or_default(),
-                                                        line_vec[4].parse::<u32>().unwrap_or_default()],
-                                                    large_coords: 
-                                                        Some([line_vec[5].parse::<u32>().unwrap_or_default(),
-                                                        line_vec[6].parse::<u32>().unwrap_or_default()]),
+                                                    coords: c,
+                                                    large_coords: Some(large),
                                                     sub_state: {
                                                         if line_vec.get(7).is_some() {
                                                             Some(State::from(line_vec[7].clone()))
@@ -317,15 +315,16 @@ impl Graphics {
                                             if simple_layer.state.ne(&State::Empty) {
                                                 simple_layers.push(simple_layer.clone());
                                             }
+                                            let c = [line_vec[2].parse::<u32>().unwrap_or_default(),
+                                                line_vec[3].parse::<u32>().unwrap_or_default()];
+                                            let l_c = [line_vec[4].parse::<u32>().unwrap_or_default(),
+                                                line_vec[5].parse::<u32>().unwrap_or_default()];
+                                            let large = [l_c[0]-c[0], l_c[1]-c[1]];
                                             simple_layer = SimpleLayer {
                                                 state: State::from(line_vec[0].clone()),
                                                 tile: line_vec[1].clone(),
-                                                coords: 
-                                                    [line_vec[2].parse::<u32>().unwrap_or_default(),
-                                                    line_vec[3].parse::<u32>().unwrap_or_default()],
-                                                large_coords: 
-                                                    Some([line_vec[4].parse::<u32>().unwrap_or_default(),
-                                                    line_vec[5].parse::<u32>().unwrap_or_default()]),
+                                                coords: c,
+                                                large_coords: Some(large),
                                                 sub_state: None
                                             }
                                         },
@@ -399,21 +398,21 @@ impl Graphics {
             }
         }
 
-        Graphics {
+        Ok(Graphics {
             tilepages: tilepages,
             creature_files: creature_files,
             ..Default::default()
-        }
+        })
     }
 
     fn export(&self) -> Result<(), Box<dyn Error>> {
         fs::DirBuilder::new()
             .recursive(true)
-            .create(".\\graphics")
+            .create("./graphics")
             .unwrap();
         fs::DirBuilder::new()
             .recursive(true)
-            .create(".\\graphics\\images")
+            .create("./graphics/images")
             .unwrap();
 
         for tilepage in self.tilepages.iter() {
@@ -450,7 +449,7 @@ impl CreatureFile {
 
     fn export(&self) -> Result<(), Box<dyn Error>> {
         let creature_file = fs::File::create(format!(
-            ".\\graphics\\graphics_creatures_{}.txt",
+            "./graphics/graphics_creatures_{}.txt",
             self.name.clone().to_case(Case::Snake)
         )).expect("creature file creation should not fail");
 
@@ -706,10 +705,11 @@ impl SimpleLayer {
         }
     }
 
-    fn layer_menu(&mut self, ui: &mut Ui, tile_names: Vec<String>) {
+    fn layer_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32;2])>) {
         let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
         let sub_state = &mut self.sub_state;
+        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile);
         
         egui::ComboBox::from_label("State")
             .selected_text(state.name())
@@ -729,6 +729,7 @@ impl SimpleLayer {
         egui::ComboBox::from_label("Second state (optional)")
             .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
             .show_ui(ui, |ui| {
+            ui.selectable_value(sub_state, Some(State::Empty), State::Empty.name());
             for s in State::iterator() {
                 ui.selectable_value(sub_state, Some(s.clone()), s.name());
             }
@@ -744,7 +745,7 @@ impl SimpleLayer {
         egui::ComboBox::from_label("Tile")
             .selected_text(&self.tile)
             .show_ui(ui, |ui| {
-            for t in &tile_names {
+            for (t, _) in &tile_info {
                 ui.selectable_value(&mut self.tile, t.clone(), t);
             }
             ui.selectable_value(&mut self.tile, String::new(), "Custom");
@@ -755,19 +756,23 @@ impl SimpleLayer {
         }
 
         ui.add_space(PADDING);
-        ui.add(egui::DragValue::new(x1).speed(1).prefix("Tile X: "));
-        ui.add(egui::DragValue::new(y1).speed(1).prefix("Tile Y: "));
-
         let mut large = self.large_coords.is_some();
         ui.checkbox(&mut large, "Large Image:");
 
         if large {
-            let [x2, y2] = self.large_coords.get_or_insert([*x1, *y1]);
+            let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
 
-            ui.add(egui::Slider::new(x2, *x1..=(*x1+2)));
-            ui.add(egui::Slider::new(y2, *y1..=(*y1+1)));
+            ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+            ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
         } else {
-            self.large_coords.take();
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("Tile X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("Tile Y: "));
+
+            if self.large_coords.is_some() {
+                self.large_coords.take();
+            }
         }
 
         ui.add_space(PADDING);
@@ -777,9 +782,10 @@ impl SimpleLayer {
         });
     }
 
-    fn statue_layer_menu(&mut self, ui: &mut Ui, tile_names: Vec<String>) {
+    fn statue_layer_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32;2])>) {
         let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
+        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile);
         
         egui::ComboBox::from_label("State")
             .selected_text(state.name())
@@ -811,13 +817,13 @@ impl SimpleLayer {
         }
 
         ui.add_space(PADDING);
-        ui.add(egui::DragValue::new(x1).speed(1).prefix("Tile X: "));
-        ui.add(egui::DragValue::new(y1).speed(1).prefix("Tile Y: "));
+        let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
 
-        let [x2, y2] = self.large_coords.get_or_insert([*x1, *y1]);
+        ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
+        ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
 
-        ui.add(egui::Slider::new(x2, *x1..=(*x1+2)));
-        ui.add(egui::Slider::new(y2, *y1..=(*y1+1)));
+        ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+        ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
 
         ui.add_space(PADDING);
         ui.label("Preview:");
@@ -835,8 +841,8 @@ impl SimpleLayer {
                     self.tile,
                     self.coords[0],
                     self.coords[1],
-                    x2,
-                    y2,
+                    self.coords[0] + x2,
+                    self.coords[0] + y2,
                     sub_state.name(),
                 ))
             } else {
@@ -846,8 +852,8 @@ impl SimpleLayer {
                     self.tile,
                     self.coords[0],
                     self.coords[1],
-                    x2,
-                    y2,
+                    self.coords[0] + x2,
+                    self.coords[0] + y2,
                 ))
             }
         } else {
@@ -881,8 +887,8 @@ impl SimpleLayer {
             self.tile,
             self.coords[0],
             self.coords[1],
-            x2,
-            y2,
+            self.coords[0] + x2,
+            self.coords[1] + y2,
         ))
     }
 }
@@ -916,9 +922,10 @@ impl Layer {
         }
     }
 
-    fn layer_menu(&mut self, ui: &mut Ui, tile_names: Vec<String>) {
+    fn layer_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32; 2])>) {
         let [x1, y1] = &mut self.coords;
         let conditions = &mut self.conditions;
+        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile);
 
         ui.separator();
 
@@ -940,21 +947,25 @@ impl Layer {
             ui.selectable_value(&mut self.tile, String::new(), "New Tile");
         });
         ui.text_edit_singleline(&mut self.tile);
+
         ui.add_space(PADDING);
-
-        ui.add(egui::DragValue::new(x1).speed(1).prefix("Tile X: "));
-        ui.add(egui::DragValue::new(y1).speed(1).prefix("Tile Y: "));
-
         let mut large = self.large_coords.is_some();
         ui.checkbox(&mut large, "Large Image:");
 
         if large {
-            let [x2, y2] = self.large_coords.get_or_insert([*x1, *y1]);
+            let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
 
-            ui.add(egui::Slider::new(x2, *x1..=(*x1+2)));
-            ui.add(egui::Slider::new(y2, *y1..=(*y1+1)));
+            ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+            ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
         } else {
-            self.large_coords.take();
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("Tile X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("Tile Y: "));
+
+            if self.large_coords.is_some() {
+                self.large_coords.take();
+            }
         }
 
         ui.add_space(PADDING);
@@ -984,8 +995,8 @@ impl Layer {
                 self.tile,
                 self.coords[0],
                 self.coords[1],
-                x2,
-                y2,
+                self.coords[0] + x2,
+                self.coords[1] + y2,
             ));
         } else {
             out.push_str(&format!(
@@ -1532,16 +1543,17 @@ impl Condition {
             "TISSUE_NOT_SHAPED" => Condition::TissueNotShaped,
             "TISSUE_SWAP" => {
                 if line_vec[4].eq("LARGE_IMAGE") {
+                    let c = [line_vec[5].parse::<u32>().unwrap_or_default(),
+                        line_vec[6].parse::<u32>().unwrap_or_default()];
+                    let l_c = [line_vec[7].parse::<u32>().unwrap_or_default(),
+                        line_vec[8].parse::<u32>().unwrap_or_default()];
+                    let large = [l_c[0]-c[0], l_c[1]-c[1]];
                     Condition::TissueSwap(
                         line_vec[1].clone(),
                         line_vec[2].parse::<u32>().unwrap_or_default(),
                         line_vec[3].clone(),
-                        [line_vec[5].parse::<u32>().unwrap_or_default(), 
-                        line_vec[6].parse::<u32>().unwrap_or_default()],
-                        Some(
-                            [line_vec[7].parse::<u32>().unwrap_or_default(), 
-                            line_vec[8].parse::<u32>().unwrap_or_default()]
-                        ),
+                        c,
+                        Some(large),
                     )
                 } else {
                     Condition::TissueSwap(
@@ -1558,7 +1570,7 @@ impl Condition {
         }
     }
 
-    fn condition_menu(&mut self, ui: &mut Ui, tile_names: Vec<String>) {
+    fn condition_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32; 2])>) {
         egui::ComboBox::from_label("Condition type")
             .selected_text(&self.name())
             .show_ui(ui, |ui| {
@@ -2055,6 +2067,7 @@ impl Condition {
                 ui.label("No additional input needed.");
             }
             Condition::TissueSwap(app_mod, amount, tile, [x1,y1], large_coords) => {
+                let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &tile);
                 egui::ComboBox::from_label(
                     "Appearance Modifier (only IF_MIN_CURLY supported (v50.05)):",
                 )
@@ -2073,25 +2086,30 @@ impl Condition {
                 egui::ComboBox::from_label("Tile for swapped layer: ")
                     .selected_text(tile.clone())
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(tile, String::from(""), "(select)");
-                        for tile_name in tile_names {
-                            ui.selectable_value(tile, tile_name.to_string(), tile_name);
-                        }
-                    });
+                    ui.selectable_value(tile, String::from(""), "(select)");
+                    for tile_name in tile_names {
+                        ui.selectable_value(tile, tile_name.to_string(), tile_name);
+                    }
+                });
 
-                ui.add(egui::DragValue::new(x1).speed(1).prefix("Tile X: "));
-                ui.add(egui::DragValue::new(y1).speed(1).prefix("Tile Y: "));
-
+                ui.add_space(PADDING);
                 let mut large = large_coords.is_some();
                 ui.checkbox(&mut large, "Large Image:");
-        
-                if large {
-                    let [x2, y2] = large_coords.get_or_insert([*x1, *y1]);
 
-                    ui.add(egui::Slider::new(x2, *x1..=(*x1+2)));
-                    ui.add(egui::Slider::new(y2, *y1..=(*y1+1)));
+                if large {
+                    let [x2, y2] = large_coords.get_or_insert([0, 0]);
+                    ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
+                    ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
+
+                    ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+                    ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
                 } else {
-                    large_coords.take();
+                    ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("Tile X: "));
+                    ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("Tile Y: "));
+
+                    if large_coords.is_some() {
+                        large_coords.take();
+                    }
                 }
                 
                 ui.add_space(PADDING);
@@ -2266,11 +2284,12 @@ impl Condition {
                     app_mod.to_case(Case::UpperSnake),
                     amount,
                     tile.to_case(Case::UpperSnake),
-                    x1, y1
+                    x1,
+                    y1,
                 );
 
                 if let Some([x2,y2]) = large_coords {
-                    out.push_str(&format!(":{}:{}]\n", x2, y2))
+                    out.push_str(&format!(":{}:{}]\n", x1 + x2, y1 + y2))
                 } else {
                     out.push_str("]\n");
                 }
@@ -2306,7 +2325,7 @@ impl TilePage {
 
     fn export(&self) -> Result<(), Box<dyn Error>> {
         let tile_page_file = fs::File::create(format!(
-            ".\\graphics\\tile_page_{}.txt",
+            "./graphics/tile_page_{}.txt",
             self.name.clone().to_case(Case::Snake)
         )).expect("should always be able to create a file");
 
@@ -2363,7 +2382,7 @@ impl Tile {
 
         ui.label("Image file path");
         ui.horizontal(|ui| {
-            ui.label("\\graphics\\images\\");
+            ui.label("/graphics/images/");
             ui.text_edit_singleline(&mut self.filename);
             ui.label(".png");
         });
@@ -2546,7 +2565,7 @@ impl DFGraphicsHelper {
             main_window: MainWindow::DefaultMenu,
             loaded_graphics: Graphics::new(),
             indices: GraphicsIndices::new(),
-            path: path::PathBuf::from(".\\graphics"),
+            path: path::PathBuf::from("./graphics"),
             texture_file_name: String::new(),
             texture: None,
             preview_image: false,
@@ -3457,7 +3476,7 @@ impl DFGraphicsHelper {
     fn layer_menu(&mut self, ui: &mut Ui) {
         ui.label("Layer Menu");
 
-        let tile_names = self.tile_names();
+        let tile_info = self.tile_info();
         
         let indices = &mut self.indices;
 
@@ -3491,7 +3510,7 @@ impl DFGraphicsHelper {
                 } else {
                     let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
 
-                    simple_layer.layer_menu(ui, tile_names);
+                    simple_layer.layer_menu(ui, tile_info);
 
                     ui.add_space(PADDING);
                     let mut file_name = String::new();
@@ -3501,7 +3520,7 @@ impl DFGraphicsHelper {
                             break;
                         }
                     }
-                    let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| simple_layer.coords)]);
+                    let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
                     self.preview_image(ui, file_name, rect);
                 }
             },
@@ -3515,7 +3534,7 @@ impl DFGraphicsHelper {
                 } else {
                     let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
 
-                    simple_layer.statue_layer_menu(ui, tile_names);
+                    simple_layer.statue_layer_menu(ui, tile_info);
 
                     ui.add_space(PADDING);
                     let mut file_name = String::new();
@@ -3525,7 +3544,7 @@ impl DFGraphicsHelper {
                             break;
                         }
                     }
-                    let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| simple_layer.coords)]);
+                    let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
                     self.preview_image(ui, file_name, rect);
                 }
             },
@@ -3545,7 +3564,7 @@ impl DFGraphicsHelper {
                 } else {
                     let layer = layers.get_mut(indices.layer_index).unwrap();
 
-                    layer.layer_menu(ui, tile_names);
+                    layer.layer_menu(ui, tile_info);
 
                     ui.add_space(PADDING);
                     let mut file_name = String::new();
@@ -3555,7 +3574,7 @@ impl DFGraphicsHelper {
                             break;
                         }
                     }
-                    let rect = Some([layer.coords, layer.large_coords.unwrap_or_else(|| layer.coords)]);
+                    let rect = Some([layer.coords, layer.large_coords.unwrap_or_else(|| [0, 0])]);
                     self.preview_image(ui, file_name, rect);
                 }
 
@@ -3616,7 +3635,7 @@ impl DFGraphicsHelper {
         }
     }
 
-    fn preview_image(&mut self, ui: &mut Ui, file_name: String, rect: Option<[[u32; 2]; 2]>) {
+    fn preview_image(&mut self, ui: &mut Ui, file_name: String, rectangle: Option<[[u32; 2]; 2]>) {
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.preview_image, "View Image"); //determine if preview image is desired
             if ui.button("Refresh").clicked() {
@@ -3674,17 +3693,14 @@ impl DFGraphicsHelper {
                 .label_formatter(label_fmt);
             plot.show(ui, |plot_ui| {
                 plot_ui.image(image.name("Image"));
-                if rect.is_some() {
-                    let rect = rect.unwrap();
-
+                if let Some(rect) = rectangle {
+                    let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
+                    let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
                     let points = vec![
-                        [rect[0][0] as f64 * 32.0, rect[0][1] as f64 * -32.0],
-                        [rect[1][0] as f64 * 32.0 + 32.0, rect[0][1] as f64 * -32.0],
-                        [
-                            rect[1][0] as f64 * 32.0 + 32.0,
-                            rect[1][1] as f64 * -32.0 - 32.0,
-                        ],
-                        [rect[0][0] as f64 * 32.0, rect[1][1] as f64 * -32.0 - 32.0],
+                        [x1 * 32.0, y1 * -32.0],
+                        [x2 * 32.0 + 32.0, y1 * -32.0],
+                        [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
+                        [x1 * 32.0, y2 * -32.0 - 32.0],
                     ];
 
                     let rectangle = egui::plot::Polygon::new(points);
@@ -3697,18 +3713,18 @@ impl DFGraphicsHelper {
             }
         } else if self.preview_image && self.texture.is_none() {
             //load texture from path
-            let imagepath: path::PathBuf = format!(
+            let image_path: path::PathBuf = format!(
                 "{}/images/{}.png",
                 self.path.to_string_lossy(),
                 file_name)
                 .into();
 
-            if imagepath.exists() {
-                let dyn_image = image::io::Reader::open(imagepath)
+            if image_path.exists() {
+                let dyn_image = image::io::Reader::open(image_path)
                     .unwrap()
                     .decode()
                     .unwrap();
-                let size: [usize; 2] = [dyn_image.width() as _, dyn_image.height() as _];
+                let size = [dyn_image.width() as _, dyn_image.height() as _];
                 let image = dyn_image.as_bytes();
                 let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
 
@@ -3769,7 +3785,7 @@ impl DFGraphicsHelper {
     fn condition_menu(&mut self, ui: &mut Ui) {
         ui.label("Condition Menu");
 
-        let tile_names = self.tile_names();
+        let tile_info = self.tile_info();
         
         let indices = &mut self.indices;
 
@@ -3806,7 +3822,7 @@ impl DFGraphicsHelper {
 
                 ui.separator();
     
-                condition.condition_menu(ui, tile_names);
+                condition.condition_menu(ui, tile_info);
     
                 ui.add_space(PADDING);
                 ui.add_space(PADDING);
@@ -3823,17 +3839,40 @@ impl DFGraphicsHelper {
         }
     }
 
-    fn tile_names(&self) -> Vec<String> {
-        let mut tile_names: Vec<String> = self
+    fn tile_info(&self) -> Vec<(String, [u32; 2])> {
+        let mut tile_info: Vec<(String, [u32; 2])> = self
             .loaded_graphics
             .tilepages
             .iter()
-            .flat_map(|tilepage| tilepage.tiles.iter().map(|tile| tile.name.to_string()))
+            .flat_map(|tilepage| {
+                tilepage.tiles.iter().map(|t| {
+                    if t.tile_size[0]*t.tile_size[1]*t.image_size[0]*t.image_size[1] != 0 {
+                        (t.name.clone(),
+                        [t.image_size[0]/t.tile_size[0] - 1,
+                        t.image_size[1]/t.tile_size[1] - 1])
+                    } else{
+                        (t.name.clone(), [100, 100])
+                    }
+                })
+            })
             .collect();
-        tile_names.sort();
-        tile_names.dedup();
 
-        tile_names
+        tile_info.sort();
+        tile_info.dedup();
+        
+        tile_info
+    }
+
+    fn tile_read(tile_info: &Vec<(String, [u32; 2])>, name: &String) -> (Vec<String>, [u32; 2]) {
+        let tile_names: Vec<String> = tile_info.iter().map(|ti| ti.0.clone()).collect();
+        let max_coords: [u32; 2];
+        if let Some(idx_name) = tile_names.iter().position(|n| n == name) {
+            max_coords = tile_info[idx_name].1;
+        } else {
+            max_coords = [100, 100];
+        }
+
+        (tile_names, max_coords)
     }
 }
 
@@ -3852,12 +3891,12 @@ impl eframe::App for DFGraphicsHelper {
                         self.path = rfd::FileDialog::new()
                             .set_title(r"Choose graphics folder")
                             .pick_folder()
-                            .unwrap_or(path::PathBuf::from(".\\graphics"));
-                        self.loaded_graphics = Graphics::import(self.path.clone());
+                            .unwrap_or(path::PathBuf::from("./graphics"));
+                        self.loaded_graphics = Graphics::import(self.path.clone()).unwrap();
                         ui.close_menu();
                     }
                     if ui.button("Import").clicked() {
-                        self.loaded_graphics = Graphics::import(self.path.clone());
+                        self.loaded_graphics = Graphics::import(self.path.clone()).unwrap();
                         ui.close_menu();
                     }
                     if ui.button("Export").clicked() {
