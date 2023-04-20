@@ -580,24 +580,36 @@ impl LayerSet {
     fn layer_set_menu(&mut self, ui: &mut Ui) {
         ui.separator();
 
-        if let LayerSet::Layered(state, layer_groups) = self {
-            egui::ComboBox::from_label("State")
-                .selected_text(state.name())
-                .show_ui(ui, |ui| {
-                for s in State::iterator() {
-                    ui.selectable_value(state, s.clone(), s.name());
+        match self {
+            LayerSet::Layered(state, layer_groups) => {
+                egui::ComboBox::from_label("State")
+                    .selected_text(state.name())
+                    .show_ui(ui, |ui| {
+                    for s in State::iterator() {
+                        ui.selectable_value(state, s.clone(), s.name());
+                    }
+                    ui.selectable_value(state, State::Custom(String::new()), "Custom");
+                });
+                if let State::Custom(s) = state {
+                    ui.text_edit_singleline(s);
                 }
-                ui.selectable_value(state, State::Custom(String::new()), "Custom");
-            });
-            if let State::Custom(s) = state {
-                ui.text_edit_singleline(s);
-            }
-            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
+                ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
 
-            ui.add_space(PADDING);
-            if ui.button("Add layer group").clicked() {
-                layer_groups.push(LayerGroup::new());
+                ui.add_space(PADDING);
+                if ui.button("Add layer group").clicked() {
+                    layer_groups.push(LayerGroup::new());
+                }
+            },
+            LayerSet::Empty => {
+                egui::ComboBox::from_label("Graphics Type")
+                    .selected_text("(none)")
+                    .show_ui(ui, |ui| {
+                    ui.selectable_value(self, LayerSet::Layered(State::Default, Vec::new()), "Layered");
+                    ui.selectable_value(self, LayerSet::Simple(vec![SimpleLayer::new()]), "Simple");
+                    ui.selectable_value(self, LayerSet::Statue(vec![SimpleLayer::new()]), "Statue");
+                });
             }
+            _ => {},
         }
     }
 
@@ -642,7 +654,7 @@ impl Creature {
     fn new() -> Creature {
         Creature {
             name: String::from("(new)"),
-            graphics_type: vec![LayerSet::default()],
+            graphics_type: Vec::new(),
         }
     }
 
@@ -669,9 +681,11 @@ impl Creature {
             self.graphics_type.push(LayerSet::Layered(State::Default, Vec::new()));
         }
         if self.graphics_type.is_empty() {
-            if ui.button("Add statue layer to top of file").clicked() {
+            if ui.button("Add statue graphics (requires empty creature)").clicked() {
                 self.graphics_type.push(LayerSet::Statue(vec![SimpleLayer::empty()]));
             }
+        } else {
+            ui.label("Statue graphics require an empty creature.");
         }
     }
 
@@ -2587,6 +2601,7 @@ struct DFGraphicsHelper {
     texture_file_name: String,
     texture: Option<egui::TextureHandle>,
     preview_image: bool,
+    cursor_coords: Option<[u32; 2]>,
     context_response: Response,
     copied: ContextData,
 }
@@ -2599,7 +2614,8 @@ impl DFGraphicsHelper {
             path: path::PathBuf::new(),
             texture_file_name: String::new(),
             texture: None,
-            preview_image: false,
+            preview_image: true,
+            cursor_coords: None,
             context_response: Response::default(),
             copied: ContextData::default(),
         }
@@ -3128,7 +3144,7 @@ impl DFGraphicsHelper {
                                                     );
                                                     egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
                                                         id_l,
-                                                        true)
+                                                        false)
                                                         .show_header(ui, |ui|
                                                         {
                                                         if ui.add(egui::Label::new(
@@ -3500,6 +3516,8 @@ impl DFGraphicsHelper {
         ui.label("Layer Menu");
 
         let tile_info = self.tile_info();
+
+        let cursor_coords = self.cursor_coords;
         
         let indices = &mut self.indices;
 
@@ -3533,6 +3551,10 @@ impl DFGraphicsHelper {
                 } else {
                     let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
 
+                    if let Some(coords) = cursor_coords {
+                        simple_layer.coords = coords;
+                    }
+
                     simple_layer.layer_menu(ui, tile_info);
 
                     ui.add_space(PADDING);
@@ -3556,6 +3578,10 @@ impl DFGraphicsHelper {
                     }
                 } else {
                     let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
+
+                    if let Some(coords) = cursor_coords {
+                        simple_layer.coords = coords;
+                    }
 
                     simple_layer.statue_layer_menu(ui, tile_info);
 
@@ -3587,6 +3613,10 @@ impl DFGraphicsHelper {
                 } else {
                     let layer = layers.get_mut(indices.layer_index).unwrap();
 
+                    if let Some(coords) = cursor_coords {
+                        layer.coords = coords;
+                    }
+
                     layer.layer_menu(ui, tile_info);
 
                     ui.add_space(PADDING);
@@ -3606,6 +3636,8 @@ impl DFGraphicsHelper {
                 
             },
         }
+
+        // self.cursor_coords.take();
 
         let indices = &mut self.indices;
 
@@ -3730,6 +3762,12 @@ impl DFGraphicsHelper {
                         .color(egui::Color32::LIGHT_BLUE)
                         .fill_alpha(0.01);
                     plot_ui.polygon(rectangle);
+                }
+                self.cursor_coords.take();
+                if plot_ui.plot_secondary_clicked() {
+                    if let Some(pointer) = plot_ui.pointer_coordinate() {
+                        self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
+                    }
                 }
             });
 
