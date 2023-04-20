@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
 use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui};
@@ -74,42 +74,41 @@ impl Graphics {
                             tilepage.name = raw_line.replace("tile_page_", "").trim().to_string();
 
                         } else if brackets && line_vec.len() > 0 {
-                            if line_vec[0].eq("TILE_PAGE") {
-                                if !tile.name.is_empty() {
-                                    tilepage.tiles.push(tile.clone());
-                                    tile = Tile::empty();
-                                    tile.name.clear();
-                                }
-                                tile.name = line_vec[1].clone();
-
-                            } else if line_vec[0].eq("FILE") {
+                            match line_vec[0].as_str() {
+                                "TILE_PAGE" => {
+                                    if !tile.name.is_empty() {
+                                        tilepage.tiles.push(tile.clone());
+                                        tile = Tile::empty();
+                                        tile.name.clear();
+                                    }
+                                    tile.name = line_vec[1].clone();
+                                },
+                                "FILE" => {
                                 tile.filename = line_vec[1].clone()
                                     .replace(".png", "")
                                     .replace("images", "")
                                     .replace("/", "")
                                     .replace("/", "");
+                                },
+                                "TILE_DIM" => {
+                                    tile.tile_size = 
+                                        [line_vec[1].parse().unwrap_or_default(),
+                                        line_vec[2].parse().unwrap_or_default()];
+                                },
+                                "PAGE_DIM_PIXELS" => {
+                                    let image_path: path::PathBuf = folder
+                                        .join("images")
+                                        .join(format!("{}.png", tile.filename));
 
-                                let image_path: path::PathBuf = folder.join(format!("/images/{}.png", tile.filename));
-
-                                if let Ok(file) = fs::File::open(image_path) {
-                                    let reader = std::io::BufReader::new(file);
-                                    let image = image::io::Reader::with_format(reader, image::ImageFormat::Png);
-                                    let (x, y) = image.into_dimensions()?;
-                                    
-                                    tile.image_size = [x, y];
-                                    dbg!(&tile.image_size);
-                                }
-                                
-                            } else if line_vec[0].eq("TILE_DIM") {
-                                tile.tile_size = 
-                                    [line_vec[1].parse().unwrap_or_default(),
-                                    line_vec[2].parse().unwrap_or_default()];
- 
-                            } else if line_vec[0].eq("PAGE_DIM_PIXELS") & tile.image_size.ne(&[0, 0]) {
-                                tile.image_size = 
-                                    [line_vec[1].parse().unwrap_or_default(),
-                                    line_vec[2].parse().unwrap_or_default()];
-
+                                    if let Ok((x, y)) = image::image_dimensions(image_path) {
+                                        tile.image_size = [x, y];
+                                    } else {
+                                        tile.image_size = 
+                                            [line_vec[1].parse().unwrap_or_default(),
+                                            line_vec[2].parse().unwrap_or_default()];
+                                    }
+                                },
+                                _ => {},
                             }
                         }
                     }
@@ -2930,14 +2929,6 @@ impl DFGraphicsHelper {
                 }
             });
             response = inner_response;
-
-            // else if ui.button("Split").clicked() {
-            //     ui.close_menu();
-            //     response = Response::Split;
-            // } else if ui.button("Merge Down").clicked() {
-            //     ui.close_menu();
-            //     response = Response::MergeDown;
-            // }
         }
 
         return response
@@ -3674,9 +3665,9 @@ impl DFGraphicsHelper {
             };
             let label_fmt = |_s: &str, val: &PlotPoint| {
                 format!(
-                    "{x}, {y}",
-                    x = (val.x / 32.0).floor(),
-                    y = (val.y / -32.0).floor()
+                    "{}, {}",
+                    (val.x / 32.0).floor(),
+                    (val.y / -32.0).floor()
                 )
             };
 
@@ -3686,10 +3677,10 @@ impl DFGraphicsHelper {
                 .data_aspect(1.0)
                 .show_background(true)
                 .set_margin_fraction(egui::vec2(0.03, 0.03))
-                .x_grid_spacer(Self::grid)
-                .y_grid_spacer(Self::grid)
                 .x_axis_formatter(x_fmt)
                 .y_axis_formatter(y_fmt)
+                .x_grid_spacer(Self::grid)
+                .y_grid_spacer(Self::grid)
                 .label_formatter(label_fmt);
             plot.show(ui, |plot_ui| {
                 plot_ui.image(image.name("Image"));
@@ -3703,7 +3694,9 @@ impl DFGraphicsHelper {
                         [x1 * 32.0, y2 * -32.0 - 32.0],
                     ];
 
-                    let rectangle = egui::plot::Polygon::new(points);
+                    let rectangle = egui::plot::Polygon::new(points)
+                        .color(egui::Color32::LIGHT_BLUE)
+                        .fill_alpha(0.01);
                     plot_ui.polygon(rectangle);
                 }
             });
@@ -3720,10 +3713,7 @@ impl DFGraphicsHelper {
                 .into();
 
             if image_path.exists() {
-                let dyn_image = image::io::Reader::open(image_path)
-                    .unwrap()
-                    .decode()
-                    .unwrap();
+                let dyn_image = image::open(image_path).unwrap();
                 let size = [dyn_image.width() as _, dyn_image.height() as _];
                 let image = dyn_image.as_bytes();
                 let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
@@ -3756,20 +3746,17 @@ impl DFGraphicsHelper {
         let max = max.ceil() as i32;
 
         for i in min..=max {
-            let step_size = if i % 3200.0 as i32 == 0 {
+            let step_size = if i % 3200 == 0 {
                 // 100 tile
                 3200.0
-            } else if i % 320.0 as i32 == 0 {
+            } else if i % 320 == 0 {
                 // 10 tile
                 320.0
-            } else if i % 32.0 as i32 == 0 {
+            } else if i % 32 == 0 {
                 // 1 tile
                 32.0
-            } else if i % 1.0 as i32 == 0 {
-                // 1 px
-                1.0
             } else {
-                // skip grids below 5min
+                // skip grids below 1 tile
                 continue;
             };
 
@@ -3944,17 +3931,10 @@ impl eframe::App for DFGraphicsHelper {
             Response::Paste => {
                 self.paste();
             },
-            // Response::Split => {
-            //     self.split();
-            // },
-            // Response::MergeDown => {
-            //     self.merge_down();
-            // },
             Response::Insert(data) => {
                 self.insert(data.clone());
             },
             Response::None => {},
-            // _ => {self.context_response = Response::None},
         }
     }
 }
