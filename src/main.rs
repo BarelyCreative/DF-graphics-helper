@@ -46,15 +46,24 @@ impl Graphics {
         (brackets, line_vec, comments) //retain first bracket to ignore commented-out lines
     }
 
-    fn import(folder: path::PathBuf) -> Result<Graphics, Box<dyn Error>> {
+    fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf), Box<dyn Error>> {
         let mut tilepages: Vec<TilePage> = Vec::new();
         let mut creature_files: Vec<CreatureFile> = Vec::new();
 
-        let paths = fs::read_dir(&folder).expect("expects 0 or more valid file paths"); //read graphics directory
+        if folder.ends_with("graphics") {
+            folder.pop();
+        } else if folder.ends_with("images") && folder.parent().get_or_insert(path::Path::new("")).ends_with("graphics") {
+            folder.pop();
+            folder.pop();
+        } else if !folder.read_dir()?.any(|f| if f.is_ok() {f.unwrap().path().ends_with("graphics")} else {false}) {
+            panic!("no /graphics directory found");
+        }
+
+        let paths = fs::read_dir(&folder.join("graphics")).expect("expects 0 or more valid file paths"); //read graphics directory
 
         for path in paths {
-            let dir_entry = path.unwrap();
-            let entry_name = dir_entry.file_name().into_string().expect("utf-8 string");//only supports utf-8 file paths
+            let path = path?;
+            let entry_name = path.file_name().into_string().expect("utf-8 string");//only supports utf-8 file paths
 
             if entry_name.ends_with(".txt") {
                 if entry_name.starts_with("tile_page_") {
@@ -63,7 +72,7 @@ impl Graphics {
                     let mut tile = Tile::empty();
 
                     let f =
-                        fs::File::open(dir_entry.path()).expect("failed to open tile page file");
+                        fs::File::open(path.path()).expect("failed to open tile page file");
                     
                     for raw_line_result in io::BufReader::new(f).lines() {
                         //read line-by-line
@@ -125,7 +134,7 @@ impl Graphics {
                     let mut condition = Condition::default();
 
                     let f =
-                        fs::File::open(dir_entry.path()).expect("failed to open tile page file");
+                        fs::File::open(path.path()).expect("failed to open creature graphics file");
 
                     for raw_line_result in io::BufReader::new(f).lines() {
 
@@ -244,7 +253,12 @@ impl Graphics {
                                                     line_vec[5].parse::<u32>().unwrap_or_default()];
                                                 let l_c = [line_vec[6].parse::<u32>().unwrap_or_default(),
                                                     line_vec[7].parse::<u32>().unwrap_or_default()];
-                                                let large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                                let large;
+                                                if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                                    large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                                } else {
+                                                    panic!("impossible large coordinates import at {}", raw_line.trim())
+                                                }
                                                 layer = Layer{
                                                     name: line_vec[1].clone(),
                                                     conditions: Vec::new(),
@@ -278,7 +292,12 @@ impl Graphics {
                                                     line_vec[4].parse::<u32>().unwrap_or_default()];
                                                 let l_c = [line_vec[5].parse::<u32>().unwrap_or_default(),
                                                     line_vec[6].parse::<u32>().unwrap_or_default()];
-                                                let large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                                let large;
+                                                if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                                    large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                                } else {
+                                                    panic!("impossible large coordinates import at {}", raw_line.trim())
+                                                }
                                                 simple_layer = SimpleLayer {
                                                     state: State::from(line_vec[0].clone()),
                                                     tile: line_vec[1].clone(),
@@ -318,7 +337,12 @@ impl Graphics {
                                                 line_vec[3].parse::<u32>().unwrap_or_default()];
                                             let l_c = [line_vec[4].parse::<u32>().unwrap_or_default(),
                                                 line_vec[5].parse::<u32>().unwrap_or_default()];
-                                            let large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                            let large;
+                                            if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                                large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                            } else {
+                                                panic!("impossible large coordinates import at {}", raw_line.trim())
+                                            }
                                             simple_layer = SimpleLayer {
                                                 state: State::from(line_vec[0].clone()),
                                                 tile: line_vec[1].clone(),
@@ -397,29 +421,28 @@ impl Graphics {
             }
         }
 
-        Ok(Graphics {
-            tilepages: tilepages,
-            creature_files: creature_files,
-            ..Default::default()
-        })
+        Ok(
+            (Graphics {
+                tilepages: tilepages,
+                creature_files: creature_files,
+                ..Default::default()
+            },
+            folder.clone())
+        )
     }
 
-    fn export(&self) -> Result<(), Box<dyn Error>> {
+    fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
         fs::DirBuilder::new()
             .recursive(true)
-            .create("./graphics")
-            .unwrap();
-        fs::DirBuilder::new()
-            .recursive(true)
-            .create("./graphics/images")
-            .unwrap();
+            .create(path.join("graphics").join("images"))
+            .expect("should always find or build directory in folder with permissions");
 
         for tilepage in self.tilepages.iter() {
-            tilepage.export()?;
+            tilepage.export(&path)?;
         }
 
         for creature_file in self.creature_files.iter() {
-            creature_file.export()?;
+            creature_file.export(&path)?;
         }
 
         Ok(())
@@ -446,11 +469,13 @@ impl CreatureFile {
         }
     }
 
-    fn export(&self) -> Result<(), Box<dyn Error>> {
-        let creature_file = fs::File::create(format!(
-            "./graphics/graphics_creatures_{}.txt",
-            self.name.clone().to_case(Case::Snake)
-        )).expect("creature file creation should not fail");
+    fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+        let creature_file = fs::File::create(
+            path
+            .join("graphics")
+            .join(format!("graphics_creatures_{}.txt",
+            self.name.clone().to_case(Case::Snake)))
+        ).expect("creature file creation should not fail");
 
         let mut creature_writer = io::LineWriter::new(creature_file);
         
@@ -1546,7 +1571,12 @@ impl Condition {
                         line_vec[6].parse::<u32>().unwrap_or_default()];
                     let l_c = [line_vec[7].parse::<u32>().unwrap_or_default(),
                         line_vec[8].parse::<u32>().unwrap_or_default()];
-                    let large = [l_c[0]-c[0], l_c[1]-c[1]];
+                    let large;
+                    if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                        large = [l_c[0]-c[0], l_c[1]-c[1]];
+                    } else {
+                        panic!("impossible large coordinates import condition");
+                    }
                     Condition::TissueSwap(
                         line_vec[1].clone(),
                         line_vec[2].parse::<u32>().unwrap_or_default(),
@@ -2322,11 +2352,13 @@ impl TilePage {
         }
     }
 
-    fn export(&self) -> Result<(), Box<dyn Error>> {
-        let tile_page_file = fs::File::create(format!(
-            "./graphics/tile_page_{}.txt",
-            self.name.clone().to_case(Case::Snake)
-        )).expect("should always be able to create a file");
+    fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+        let tile_page_file = fs::File::create(
+            path
+            .join("graphics")
+            .join(format!("tile_page_{}.txt",
+            self.name.clone().to_case(Case::Snake)))
+        ).expect("tile page file creation should not fail");
 
         let mut tile_page_writer = io::LineWriter::new(tile_page_file);
         
@@ -2564,7 +2596,7 @@ impl DFGraphicsHelper {
             main_window: MainWindow::DefaultMenu,
             loaded_graphics: Graphics::new(),
             indices: GraphicsIndices::new(),
-            path: path::PathBuf::from("./graphics"),
+            path: path::PathBuf::new(),
             texture_file_name: String::new(),
             texture: None,
             preview_image: false,
@@ -3706,11 +3738,10 @@ impl DFGraphicsHelper {
             }
         } else if self.preview_image && self.texture.is_none() {
             //load texture from path
-            let image_path: path::PathBuf = format!(
-                "{}/images/{}.png",
-                self.path.to_string_lossy(),
-                file_name)
-                .into();
+            let image_path = self.path
+                .join("graphics")
+                .join("images")
+                .join(format!("{}.png", &file_name));
 
             if image_path.exists() {
                 let dyn_image = image::open(image_path).unwrap();
@@ -3875,19 +3906,35 @@ impl eframe::App for DFGraphicsHelper {
                         ui.close_menu();
                     }
                     if ui.button("Import From..").clicked() {
-                        self.path = rfd::FileDialog::new()
-                            .set_title(r"Choose graphics folder")
-                            .pick_folder()
-                            .unwrap_or(path::PathBuf::from("./graphics"));
-                        self.loaded_graphics = Graphics::import(self.path.clone()).unwrap();
+                        if let Some(mut path) = rfd::FileDialog::new()
+                            .set_title(r"Choose Mod Folder")
+                            .pick_folder() {
+                            (self.loaded_graphics, self.path) = Graphics::import(&mut path).unwrap();
+                        }
                         ui.close_menu();
                     }
                     if ui.button("Import").clicked() {
-                        self.loaded_graphics = Graphics::import(self.path.clone()).unwrap();
+                        if !self.path.exists() {
+                            if let Some(mut path) = rfd::FileDialog::new()
+                                .set_title(r"Choose Mod Folder")
+                                .pick_folder() {
+                                (self.loaded_graphics, self.path) = Graphics::import(&mut path).unwrap();
+                            }
+                        } else {
+                            (self.loaded_graphics, self.path) = Graphics::import(&mut self.path).unwrap();
+                        }
                         ui.close_menu();
                     }
                     if ui.button("Export").clicked() {
-                        self.loaded_graphics.export().unwrap();
+                        if !self.path.exists() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_title(r"Choose Mod Folder")
+                                .pick_folder() {
+                                self.loaded_graphics.export(&path).unwrap();
+                            }
+                        } else {
+                            self.loaded_graphics.export(&self.path.clone()).unwrap();
+                        }
                         ui.close_menu();
                     }
                 });
