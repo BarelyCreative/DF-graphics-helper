@@ -12,13 +12,13 @@ const PADDING: f32 = 8.0;
 
 #[derive(Clone, Default)]
 struct Graphics {
-    tilepages: Vec<TilePage>,
+    tile_pages: Vec<TilePage>,
     creature_files: Vec<CreatureFile>,
 }
 impl Graphics {
     fn new() -> Graphics {
         Graphics {
-            tilepages: vec![TilePage::new()],
+            tile_pages: vec![TilePage::new()],
             creature_files: vec![CreatureFile::new()],
         }
     }
@@ -47,7 +47,7 @@ impl Graphics {
     }
 
     fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf), Box<dyn Error>> {
-        let mut tilepages: Vec<TilePage> = Vec::new();
+        let mut tile_pages: Vec<TilePage> = Vec::new();
         let mut creature_files: Vec<CreatureFile> = Vec::new();
 
         if folder.ends_with("graphics") {
@@ -68,349 +68,373 @@ impl Graphics {
             if entry_name.ends_with(".txt") {
                 if entry_name.starts_with("tile_page_") {
                     //read tile page file
-                    let mut tilepage = TilePage::empty();
-                    let mut tile = Tile::empty();
-
-                    let f =
-                        fs::File::open(path.path()).expect("failed to open tile page file");
-                    
-                    for raw_line_result in io::BufReader::new(f).lines() {
-                        //read line-by-line
-                        let raw_line = raw_line_result.expect("the for loop should always give a valid String");
-                        let (brackets, line_vec, _) = Self::read_brackets(&raw_line);
-
-                        if tilepage.name.is_empty() {
-                            tilepage.name = raw_line.replace("tile_page_", "").trim().to_string();
-
-                        } else if brackets && line_vec.len() > 0 {
-                            match line_vec[0].as_str() {
-                                "TILE_PAGE" => {
-                                    if !tile.name.is_empty() {
-                                        tilepage.tiles.push(tile.clone());
-                                        tile = Tile::empty();
-                                        tile.name.clear();
-                                    }
-                                    tile.name = line_vec[1].clone();
-                                },
-                                "FILE" => {
-                                tile.filename = line_vec[1].clone()
-                                    .replace(".png", "")
-                                    .replace("images", "")
-                                    .replace("/", "")
-                                    .replace("/", "");
-                                },
-                                "TILE_DIM" => {
-                                    tile.tile_size = 
-                                        [line_vec[1].parse().unwrap_or_default(),
-                                        line_vec[2].parse().unwrap_or_default()];
-                                },
-                                "PAGE_DIM_PIXELS" => {
-                                    let image_path: path::PathBuf = folder
-                                        .join("images")
-                                        .join(format!("{}.png", tile.filename));
-
-                                    if let Ok((x, y)) = image::image_dimensions(image_path) {
-                                        tile.image_size = [x, y];
-                                    } else {
-                                        tile.image_size = 
-                                            [line_vec[1].parse().unwrap_or_default(),
-                                            line_vec[2].parse().unwrap_or_default()];
-                                    }
-                                },
-                                _ => {},
-                            }
-                        }
-                    }
-                    tilepage.tiles.push(tile);
-                    tilepages.push(tilepage);
+                    tile_pages.push(Self::import_tile_page(folder, &path)?);
 
                 } else if entry_name.starts_with("graphics_creatures_") {
-                    let mut creature_file = CreatureFile::empty();
-                    let mut creature = Creature::empty();
-                    let mut layer_set = LayerSet::default();
-                    let mut layer_group = LayerGroup::empty();
-                    let mut simple_layer = SimpleLayer::empty();
-                    let mut layer = Layer::empty();
-                    let mut condition = Condition::default();
-
-                    let f =
-                        fs::File::open(path.path()).expect("failed to open creature graphics file");
-
-                    for raw_line_result in io::BufReader::new(f).lines() {
-
-                        let raw_line = raw_line_result.unwrap();
-                        let (brackets, mut line_vec, comments) = Self::read_brackets(&raw_line);
-                        // let line_vec = line_vec_as_is.drain_filter(|string| string.as_ref() == "AS_IS").collect();
-                        line_vec.retain(|elem| elem != "AS_IS");//remove any AS_IS elements there are for creature files due to not palletization(?) v50.05
-
-                        if creature_file.name.is_empty() {
-                            //set creature file name
-                            creature_file.name =
-                                raw_line.replace("graphics_creatures_", "").trim().to_string();
-                        } else if brackets && line_vec.len() > 0 {
-
-                            // dbg!(&raw_line);
-
-                            match line_vec[0].as_str() {
-                                "CREATURE_GRAPHICS" | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
-                                    match &mut layer_set {
-                                        //write buffered creature/layer set before starting the new one
-                                        LayerSet::Empty => {
-                                            //nothing defined, there is nothing to push
-                                        },
-                                        LayerSet::Layered(_, layer_groups) => {
-                                            //if a new creature graphics is encountered, then the previous one must be finished
-                                            // => write everything to the vector that contains it
-                                            if layer.name.ne("") {// !layer_groups.is_empty() | 
-                                                if condition.ne(&Condition::default()) {
-                                                    layer.conditions.push(condition.clone());
-                                                    condition = Condition::default();
-                                                }
-                                                layer_group.layers.push(layer.clone());
-                                                layer = Layer::empty();
-                                                layer_groups.push(layer_group.clone());
-                                                layer_group = LayerGroup::empty();
-                                            }
-                                        },
-                                        LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
-                                            if simple_layer.state.ne(&State::default()) {
-                                                simple_layers.push(simple_layer);
-                                                simple_layer = SimpleLayer::empty();
-                                            }
-                                        },
-                                        // _ => {panic!()}
-                                    }
-                                    match line_vec[0].as_str() {
-                                        //set up the buffered graphics according to the current line
-                                        "CREATURE_GRAPHICS" => {
-                                            if creature.name.ne("") {
-                                                creature.graphics_type.push(layer_set.clone());
-                                                creature_file.creatures.push(creature.clone());
-                                                creature.graphics_type.clear();
-                                            }
-                                            creature.name = line_vec[1].clone();
-                                            layer_set = LayerSet::Simple(Vec::new());
-                                        },
-                                        "STATUE_CREATURE_GRAPHICS" => {
-                                            if creature.name.ne("") {
-                                                creature.graphics_type.push(layer_set.clone());
-                                                creature_file.creatures.push(creature.clone());
-                                                creature.graphics_type.clear();
-                                            }
-                                            creature.name = line_vec[1].clone();
-                                            layer_set = LayerSet::Statue(Vec::new());
-                                        },
-                                        "LAYER_SET" => {
-                                            if creature.name.ne("") {
-                                                match &layer_set {
-                                                    LayerSet::Simple(simple_layers) => {
-                                                        if !simple_layers.is_empty() {
-                                                            creature.graphics_type.push(layer_set.clone());
-                                                        }
-                                                    },
-                                                    _ => {creature.graphics_type.push(layer_set.clone());}
-                                                }
-                                            }
-                                            layer_set = LayerSet::Layered(
-                                                State::from(line_vec[1].clone()),
-                                                Vec::new()
-                                            );
-                                        },
-                                        _ => {},
-                                    }
-                                },
-                                "LAYER_GROUP" | "END_LAYER_GROUP" => {
-                                    //handle explicit layer groups
-                                    match &mut layer_set {
-                                        LayerSet::Layered(_, layer_groups) => {
-                                            if layer.name.ne("") {
-                                                layer.conditions.push(condition.clone());
-                                                condition = Condition::default();
-                                                layer_group.layers.push(layer.clone());
-                                                layer = Layer::empty();
-                                                layer_groups.push(layer_group);
-                                                layer_group = LayerGroup::empty();
-                                            }
-                                        },
-                                        _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
-                                    }
-                                    if let Some(c) = comments {
-                                        layer_group.name = c.replace("---", "");
-                                    }
-                                },
-                                "LAYER" => {
-                                    match &mut layer_set {
-                                        LayerSet::Layered(..) => {
-                                            if layer.name.ne("") {
-                                                if condition.ne(&Condition::default()) {
-                                                    layer.conditions.push(condition.clone());
-                                                    condition = Condition::default();
-                                                }
-                                                layer_group.layers.push(layer.clone());
-                                            }
-                                            if line_vec[3].eq("LARGE_IMAGE") {
-                                                let c = [line_vec[4].parse::<u32>().unwrap_or_default(),
-                                                    line_vec[5].parse::<u32>().unwrap_or_default()];
-                                                let l_c = [line_vec[6].parse::<u32>().unwrap_or_default(),
-                                                    line_vec[7].parse::<u32>().unwrap_or_default()];
-                                                let large;
-                                                if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-                                                    large = [l_c[0]-c[0], l_c[1]-c[1]];
-                                                } else {
-                                                    panic!("impossible large coordinates import at {}", raw_line.trim())
-                                                }
-                                                layer = Layer{
-                                                    name: line_vec[1].clone(),
-                                                    conditions: Vec::new(),
-                                                    tile: line_vec[2].clone(),
-                                                    coords: c,
-                                                    large_coords: Some(large),
-                                                }
-                                            } else {
-                                                layer = Layer{
-                                                    name: line_vec[1].clone(),
-                                                    conditions: Vec::new(),
-                                                    tile: line_vec[2].clone(),
-                                                    coords:
-                                                        [line_vec[3].parse::<u32>().unwrap_or_default(),
-                                                        line_vec[4].parse::<u32>().unwrap_or_default()],
-                                                    large_coords: None,
-                                                }
-                                            }
-                                        },
-                                        _ => { panic!("should not see layers outside of a 'layered' layer set"); }
-                                    }
-                                },
-                                _ => {//if there's a bracketed tag that is not already covered
-                                    match &mut layer_set {
-                                        LayerSet::Simple(simple_layers) => {
-                                            if simple_layer.state.ne(&State::Empty) {
-                                                simple_layers.push(simple_layer.clone());
-                                            }
-                                            if line_vec[2].eq("LARGE_IMAGE") {
-                                                let c = [line_vec[3].parse::<u32>().unwrap_or_default(),
-                                                    line_vec[4].parse::<u32>().unwrap_or_default()];
-                                                let l_c = [line_vec[5].parse::<u32>().unwrap_or_default(),
-                                                    line_vec[6].parse::<u32>().unwrap_or_default()];
-                                                let large;
-                                                if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-                                                    large = [l_c[0]-c[0], l_c[1]-c[1]];
-                                                } else {
-                                                    panic!("impossible large coordinates import at {}", raw_line.trim())
-                                                }
-                                                simple_layer = SimpleLayer {
-                                                    state: State::from(line_vec[0].clone()),
-                                                    tile: line_vec[1].clone(),
-                                                    coords: c,
-                                                    large_coords: Some(large),
-                                                    sub_state: {
-                                                        if line_vec.get(7).is_some() {
-                                                            Some(State::from(line_vec[7].clone()))
-                                                        } else {
-                                                            None
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                simple_layer = SimpleLayer {
-                                                    state: State::from(line_vec[0].clone()),
-                                                    tile: line_vec[1].clone(),
-                                                    coords: 
-                                                        [line_vec[2].parse::<u32>().unwrap_or_default(),
-                                                        line_vec[3].parse::<u32>().unwrap_or_default()],
-                                                    large_coords: None,
-                                                    sub_state: {
-                                                        if line_vec.get(4).is_some() {
-                                                            Some(State::from(line_vec[4].clone()))
-                                                        } else {
-                                                            None
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        LayerSet::Statue(simple_layers) => {
-                                            if simple_layer.state.ne(&State::Empty) {
-                                                simple_layers.push(simple_layer.clone());
-                                            }
-                                            let c = [line_vec[2].parse::<u32>().unwrap_or_default(),
-                                                line_vec[3].parse::<u32>().unwrap_or_default()];
-                                            let l_c = [line_vec[4].parse::<u32>().unwrap_or_default(),
-                                                line_vec[5].parse::<u32>().unwrap_or_default()];
-                                            let large;
-                                            if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-                                                large = [l_c[0]-c[0], l_c[1]-c[1]];
-                                            } else {
-                                                panic!("impossible large coordinates import at {}", raw_line.trim())
-                                            }
-                                            simple_layer = SimpleLayer {
-                                                state: State::from(line_vec[0].clone()),
-                                                tile: line_vec[1].clone(),
-                                                coords: c,
-                                                large_coords: Some(large),
-                                                sub_state: None
-                                            }
-                                        },
-                                        LayerSet::Layered(..) => {
-                                            if condition.ne(&Condition::default()) {
-                                                layer.conditions.push(condition.clone());
-                                            }
-                                            condition = Condition::from(line_vec.clone());
-                                        },
-                                        _ => {}
-                                    }
-                                }                                
-                            }
-                        }
-                    }
-
-                    //push everything down at end of file
-                    if condition.ne(&Condition::default()) {
-                        layer.conditions.push(condition);
-                    }
-                    if layer.name.ne("") {
-                        layer_group.layers.push(layer);
-                    }
-                    match &mut layer_set {
-                        LayerSet::Empty => {},
-                        LayerSet::Layered(_, layer_groups) => {
-                            layer_groups.push(layer_group);
-                            creature.graphics_type.push(layer_set);
-                            creature_file.creatures.push(creature);
-                        },
-                        LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
-                            simple_layers.push(simple_layer);
-                            creature.graphics_type.push(layer_set);
-                            creature_file.creatures.push(creature);
-                        }
-                    }
-                    creature_files.push(creature_file);
+                    //read creature file
+                    creature_files.push(Self::import_creature_file(&path)?);
 
                     //naming the layer groups
-                    for cf in creature_files.iter_mut() {
-                        for c in cf.creatures.iter_mut() {
-                            for gt in c.graphics_type.iter_mut() {
-                                if let LayerSet::Layered(state, lgs) = gt {
-                                    for lg in lgs.iter_mut() {
-                                        if lg.name.eq("") {
-                                            let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
-                                            layer_names.sort();
-                                            layer_names.dedup();
-    
-                                            match layer_names.len() {
-                                                0 => lg.name = state.name().to_case(Case::Title),
-                                                1 => lg.name = layer_names[0].clone(),
-                                                _ => {
-                                                    let mut words: Vec<&str> = layer_names[0].split("_").collect();
-                                                    words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
-    
-                                                    if words.is_empty() {
-                                                        lg.name = state.name().to_case(Case::Title);
-                                                    } else {
-                                                        lg.name = words.join("_");
-                                                    }
-                                                }
+                    Self::rename_layer_groups(&mut creature_files);
+                }
+            }
+        }
+
+        Ok(
+            (Graphics {
+                tile_pages: tile_pages,
+                creature_files: creature_files,
+                ..Default::default()
+            },
+            folder.clone())
+        )
+    }
+
+    fn import_tile_page(folder: &mut path::PathBuf, path: &fs::DirEntry) -> Result<TilePage, Box<dyn Error>> {
+        let mut tile_page = TilePage::empty();
+        let mut tile = Tile::empty();
+
+        let f =
+            fs::File::open(path.path()).expect("failed to open tile page file");
+        
+        for raw_line_result in io::BufReader::new(f).lines() {
+            //read line-by-line
+            let raw_line = raw_line_result.expect("the for loop should always give a valid String");
+            let (brackets, line_vec, _) = Self::read_brackets(&raw_line);
+
+            if tile_page.name.is_empty() {
+                tile_page.name = raw_line.replace("tile_page_", "").trim().to_string();
+
+            } else if brackets && line_vec.len() > 0 {
+                match line_vec[0].as_str() {
+                    "TILE_PAGE" => {
+                        if !tile.name.is_empty() {
+                            tile_page.tiles.push(tile.clone());
+                            tile = Tile::empty();
+                            tile.name.clear();
+                        }
+                        tile.name = line_vec[1].clone();
+                    },
+                    "FILE" => {
+                    tile.filename = line_vec[1].clone()
+                        .replace(".png", "")
+                        .replace("images", "")
+                        .replace("/", "")
+                        .replace("/", "");
+                    },
+                    "TILE_DIM" => {
+                        tile.tile_size = 
+                            [line_vec[1].parse().unwrap_or_default(),
+                            line_vec[2].parse().unwrap_or_default()];
+                    },
+                    "PAGE_DIM_PIXELS" => {
+                        let image_path: path::PathBuf = folder
+                            .join("images")
+                            .join(format!("{}.png", tile.filename));
+
+                        if let Ok((x, y)) = image::image_dimensions(image_path) {
+                            tile.image_size = [x, y];
+                        } else {
+                            tile.image_size = 
+                                [line_vec[1].parse().unwrap_or_default(),
+                                line_vec[2].parse().unwrap_or_default()];
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        }
+        tile_page.tiles.push(tile);
+
+        Ok(tile_page)
+    }
+
+    fn import_creature_file(path: &fs::DirEntry) -> Result<CreatureFile, Box<dyn Error>> {
+        let mut creature_file = CreatureFile::empty();
+        let mut creature = Creature::empty();
+        let mut layer_set = LayerSet::default();
+        let mut layer_group = LayerGroup::empty();
+        let mut simple_layer = SimpleLayer::empty();
+        let mut layer = Layer::empty();
+        let mut condition = Condition::default();
+
+        let f =
+            fs::File::open(path.path()).expect("failed to open creature graphics file");
+
+        for raw_line_result in io::BufReader::new(f).lines() {
+
+            let raw_line = raw_line_result.unwrap();
+            let (brackets, mut line_vec, comments) = Self::read_brackets(&raw_line);
+            // let line_vec = line_vec_as_is.drain_filter(|string| string.as_ref() == "AS_IS").collect();
+            line_vec.retain(|elem| elem != "AS_IS");//remove any AS_IS elements there are for creature files due to not palletization(?) v50.05
+
+            if creature_file.name.is_empty() {
+                //set creature file name
+                creature_file.name =
+                    raw_line.replace("graphics_creatures_", "").trim().to_string();
+            } else if brackets && line_vec.len() > 0 {
+
+                // dbg!(&raw_line);
+
+                match line_vec[0].as_str() {
+                    "CREATURE_GRAPHICS" | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
+                        match &mut layer_set {
+                            //write buffered creature/layer set before starting the new one
+                            LayerSet::Empty => {
+                                //nothing defined, there is nothing to push
+                            },
+                            LayerSet::Layered(_, layer_groups) => {
+                                //if a new creature graphics is encountered, then the previous one must be finished
+                                // => write everything to the vector that contains it
+                                if layer.name.ne("") {// !layer_groups.is_empty() | 
+                                    if condition.ne(&Condition::default()) {
+                                        layer.conditions.push(condition.clone());
+                                        condition = Condition::default();
+                                    }
+                                    layer_group.layers.push(layer.clone());
+                                    layer = Layer::empty();
+                                    layer_groups.push(layer_group.clone());
+                                    layer_group = LayerGroup::empty();
+                                }
+                            },
+                            LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
+                                if simple_layer.state.ne(&State::default()) {
+                                    simple_layers.push(simple_layer);
+                                    simple_layer = SimpleLayer::empty();
+                                }
+                            },
+                            // _ => {panic!()}
+                        }
+                        match line_vec[0].as_str() {
+                            //set up the buffered graphics according to the current line
+                            "CREATURE_GRAPHICS" => {
+                                if creature.name.ne("") {
+                                    creature.graphics_type.push(layer_set.clone());
+                                    creature_file.creatures.push(creature.clone());
+                                    creature.graphics_type.clear();
+                                }
+                                creature.name = line_vec[1].clone();
+                                layer_set = LayerSet::Simple(Vec::new());
+                            },
+                            "STATUE_CREATURE_GRAPHICS" => {
+                                if creature.name.ne("") {
+                                    creature.graphics_type.push(layer_set.clone());
+                                    creature_file.creatures.push(creature.clone());
+                                    creature.graphics_type.clear();
+                                }
+                                creature.name = line_vec[1].clone();
+                                layer_set = LayerSet::Statue(Vec::new());
+                            },
+                            "LAYER_SET" => {
+                                if creature.name.ne("") {
+                                    match &layer_set {
+                                        LayerSet::Simple(simple_layers) => {
+                                            if !simple_layers.is_empty() {
+                                                creature.graphics_type.push(layer_set.clone());
                                             }
+                                        },
+                                        _ => {creature.graphics_type.push(layer_set.clone());}
+                                    }
+                                }
+                                layer_set = LayerSet::Layered(
+                                    State::from(line_vec[1].clone()),
+                                    Vec::new()
+                                );
+                            },
+                            _ => {},
+                        }
+                    },
+                    "LAYER_GROUP" | "END_LAYER_GROUP" => {
+                        //handle explicit layer groups
+                        match &mut layer_set {
+                            LayerSet::Layered(_, layer_groups) => {
+                                if layer.name.ne("") {
+                                    layer.conditions.push(condition.clone());
+                                    condition = Condition::default();
+                                    layer_group.layers.push(layer.clone());
+                                    layer = Layer::empty();
+                                    layer_groups.push(layer_group);
+                                    layer_group = LayerGroup::empty();
+                                }
+                            },
+                            _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
+                        }
+                        if let Some(c) = comments {
+                            layer_group.name = c.replace("---", "");
+                        }
+                    },
+                    "LAYER" => {
+                        match &mut layer_set {
+                            LayerSet::Layered(..) => {
+                                if layer.name.ne("") {
+                                    if condition.ne(&Condition::default()) {
+                                        layer.conditions.push(condition.clone());
+                                        condition = Condition::default();
+                                    }
+                                    layer_group.layers.push(layer.clone());
+                                }
+                                if line_vec[3].eq("LARGE_IMAGE") {
+                                    let c = [line_vec[4].parse::<u32>().unwrap_or_default(),
+                                        line_vec[5].parse::<u32>().unwrap_or_default()];
+                                    let l_c = [line_vec[6].parse::<u32>().unwrap_or_default(),
+                                        line_vec[7].parse::<u32>().unwrap_or_default()];
+                                    let large;
+                                    if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                        large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                    } else {
+                                        panic!("impossible large coordinates import at {}", raw_line.trim())
+                                    }
+                                    layer = Layer{
+                                        name: line_vec[1].clone(),
+                                        conditions: Vec::new(),
+                                        tile: line_vec[2].clone(),
+                                        coords: c,
+                                        large_coords: Some(large),
+                                    }
+                                } else {
+                                    layer = Layer{
+                                        name: line_vec[1].clone(),
+                                        conditions: Vec::new(),
+                                        tile: line_vec[2].clone(),
+                                        coords:
+                                            [line_vec[3].parse::<u32>().unwrap_or_default(),
+                                            line_vec[4].parse::<u32>().unwrap_or_default()],
+                                        large_coords: None,
+                                    }
+                                }
+                            },
+                            _ => { panic!("should not see layers outside of a 'layered' layer set"); }
+                        }
+                    },
+                    _ => {//if there's a bracketed tag that is not already covered
+                        match &mut layer_set {
+                            LayerSet::Simple(simple_layers) => {
+                                if simple_layer.state.ne(&State::Empty) {
+                                    simple_layers.push(simple_layer.clone());
+                                }
+                                if line_vec[2].eq("LARGE_IMAGE") {
+                                    let c = [line_vec[3].parse::<u32>().unwrap_or_default(),
+                                        line_vec[4].parse::<u32>().unwrap_or_default()];
+                                    let l_c = [line_vec[5].parse::<u32>().unwrap_or_default(),
+                                        line_vec[6].parse::<u32>().unwrap_or_default()];
+                                    let large;
+                                    if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                        large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                    } else {
+                                        panic!("impossible large coordinates import at {}", raw_line.trim())
+                                    }
+                                    simple_layer = SimpleLayer {
+                                        state: State::from(line_vec[0].clone()),
+                                        tile: line_vec[1].clone(),
+                                        coords: c,
+                                        large_coords: Some(large),
+                                        sub_state: {
+                                            if line_vec.get(7).is_some() {
+                                                Some(State::from(line_vec[7].clone()))
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    simple_layer = SimpleLayer {
+                                        state: State::from(line_vec[0].clone()),
+                                        tile: line_vec[1].clone(),
+                                        coords: 
+                                            [line_vec[2].parse::<u32>().unwrap_or_default(),
+                                            line_vec[3].parse::<u32>().unwrap_or_default()],
+                                        large_coords: None,
+                                        sub_state: {
+                                            if line_vec.get(4).is_some() {
+                                                Some(State::from(line_vec[4].clone()))
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            LayerSet::Statue(simple_layers) => {
+                                if simple_layer.state.ne(&State::Empty) {
+                                    simple_layers.push(simple_layer.clone());
+                                }
+                                let c = [line_vec[2].parse::<u32>().unwrap_or_default(),
+                                    line_vec[3].parse::<u32>().unwrap_or_default()];
+                                let l_c = [line_vec[4].parse::<u32>().unwrap_or_default(),
+                                    line_vec[5].parse::<u32>().unwrap_or_default()];
+                                let large;
+                                if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                    large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                } else {
+                                    panic!("impossible large coordinates import at {}", raw_line.trim())
+                                }
+                                simple_layer = SimpleLayer {
+                                    state: State::from(line_vec[0].clone()),
+                                    tile: line_vec[1].clone(),
+                                    coords: c,
+                                    large_coords: Some(large),
+                                    sub_state: None
+                                }
+                            },
+                            LayerSet::Layered(..) => {
+                                if condition.ne(&Condition::default()) {
+                                    layer.conditions.push(condition.clone());
+                                }
+                                condition = Condition::from(line_vec.clone());
+                            },
+                            _ => {}
+                        }
+                    }                                
+                }
+            }
+        }
+
+        //push everything down at end of file
+        if condition.ne(&Condition::default()) {
+            layer.conditions.push(condition);
+        }
+        if layer.name.ne("") {
+            layer_group.layers.push(layer);
+        }
+        match &mut layer_set {
+            LayerSet::Empty => {},
+            LayerSet::Layered(_, layer_groups) => {
+                layer_groups.push(layer_group);
+                creature.graphics_type.push(layer_set);
+                creature_file.creatures.push(creature);
+            },
+            LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
+                simple_layers.push(simple_layer);
+                creature.graphics_type.push(layer_set);
+                creature_file.creatures.push(creature);
+            }
+        }
+
+        Ok(creature_file)
+    }
+
+    fn rename_layer_groups(creature_files: &mut Vec<CreatureFile>) {
+        for cf in creature_files.iter_mut() {
+            for c in cf.creatures.iter_mut() {
+                for gt in c.graphics_type.iter_mut() {
+                    if let LayerSet::Layered(state, lgs) = gt {
+                        for lg in lgs.iter_mut() {
+                            if lg.name.eq("") {
+                                let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
+                                layer_names.sort();
+                                layer_names.dedup();
+
+                                match layer_names.len() {
+                                    0 => lg.name = state.name().to_case(Case::Title),
+                                    1 => lg.name = layer_names[0].clone(),
+                                    _ => {
+                                        let mut words: Vec<&str> = layer_names[0].split("_").collect();
+                                        words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
+
+                                        if words.is_empty() {
+                                            lg.name = state.name().to_case(Case::Title);
+                                        } else {
+                                            lg.name = words.join("_");
                                         }
                                     }
                                 }
@@ -420,15 +444,6 @@ impl Graphics {
                 }
             }
         }
-
-        Ok(
-            (Graphics {
-                tilepages: tilepages,
-                creature_files: creature_files,
-                ..Default::default()
-            },
-            folder.clone())
-        )
     }
 
     fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
@@ -437,8 +452,8 @@ impl Graphics {
             .create(path.join("graphics").join("images"))
             .expect("should always find or build directory in folder with permissions");
 
-        for tilepage in self.tilepages.iter() {
-            tilepage.export(&path)?;
+        for tile_page in self.tile_pages.iter() {
+            tile_page.export(&path)?;
         }
 
         for creature_file in self.creature_files.iter() {
@@ -2556,7 +2571,7 @@ enum Response {
 }
 
 struct GraphicsIndices {
-    tilepage_index: usize,
+    tile_page_index: usize,
     tile_index: usize,
     creaturefile_index: usize,
     creature_index: usize,
@@ -2568,7 +2583,7 @@ struct GraphicsIndices {
 impl GraphicsIndices {
     fn new() -> GraphicsIndices {
         Self {
-            tilepage_index: 0,
+            tile_page_index: 0,
             tile_index: 0,
             creaturefile_index: 0,
             creature_index: 0,
@@ -2581,7 +2596,7 @@ impl GraphicsIndices {
 
     fn from(array: [usize; 8]) -> GraphicsIndices {
         GraphicsIndices {
-            tilepage_index: array[0],
+            tile_page_index: array[0],
             tile_index: array[1],
             creaturefile_index: array[2],
             creature_index: array[3],
@@ -2633,16 +2648,16 @@ impl DFGraphicsHelper {
         self.copied = ContextData::from(selected.clone());
         match selected {
             ContextData::TilePage(_) => {
-                graphics.tilepages.remove(indices.tilepage_index);
-                if indices.tilepage_index >=1 {
-                    indices.tilepage_index -= 1;
+                graphics.tile_pages.remove(indices.tile_page_index);
+                if indices.tile_page_index >=1 {
+                    indices.tile_page_index -= 1;
                 } else {
                     self.main_window = MainWindow::TilePageDefaultMenu;
                 }
             },
             ContextData::Tile(_) => {
-                graphics.tilepages
-                    .get_mut(indices.tilepage_index)
+                graphics.tile_pages
+                    .get_mut(indices.tile_page_index)
                     .unwrap()
                     .tiles
                     .remove(indices.tile_index);
@@ -2800,12 +2815,12 @@ impl DFGraphicsHelper {
 
         match data {
             ContextData::TilePage(tile_page) => {
-                graphics.tilepages.insert(indices.tilepage_index, tile_page);
+                graphics.tile_pages.insert(indices.tile_page_index, tile_page);
                 self.main_window = MainWindow::TilePageMenu;
             },
             ContextData::Tile(tile) => {
-                graphics.tilepages
-                    .get_mut(indices.tilepage_index)
+                graphics.tile_pages
+                    .get_mut(indices.tile_page_index)
                     .unwrap()
                     .tiles
                     .insert(indices.tile_index, tile);
@@ -2991,9 +3006,9 @@ impl DFGraphicsHelper {
         {
             self.main_window = MainWindow::TilePageDefaultMenu;
         };
-        for (i_tilepage, tilepage) in graphics.tilepages.iter_mut().enumerate() {
+        for (i_tile_page, tile_page) in graphics.tile_pages.iter_mut().enumerate() {
             let id_t = ui.make_persistent_id(
-                format!("tilepage{}", i_tilepage)
+                format!("tile_page{}", i_tile_page)
             );
             egui::collapsing_header::CollapsingState::load_with_default_open(
                 ctx,
@@ -3002,24 +3017,24 @@ impl DFGraphicsHelper {
             )
             .show_header(ui, |ui| {
                 if ui.add(egui::Label::new(
-                    format!("Tile Page: {}", &tilepage.name))
+                    format!("Tile Page: {}", &tile_page.name))
                     .sense(Sense::click()))
                     .context_menu(|ui| {
-                    self.indices = GraphicsIndices::from([i_tilepage, 0, 0, 0, 0, 0, 0, 0]);
-                    self.context_response = Self::context(ui, ContextData::from(tilepage.clone()));
+                    self.indices = GraphicsIndices::from([i_tile_page, 0, 0, 0, 0, 0, 0, 0]);
+                    self.context_response = Self::context(ui, ContextData::from(tile_page.clone()));
                 }).clicked() {
-                    self.indices = GraphicsIndices::from([i_tilepage, 0, 0, 0, 0, 0, 0, 0]);
+                    self.indices = GraphicsIndices::from([i_tile_page, 0, 0, 0, 0, 0, 0, 0]);
                     self.main_window = MainWindow::TilePageMenu;
                 }
             })
             .body(|ui| {
-                for (i_tile, tile) in tilepage.tiles.iter_mut().enumerate() {
+                for (i_tile, tile) in tile_page.tiles.iter_mut().enumerate() {
                     if ui.add(egui::Label::new(&tile.name).sense(Sense::click()))
                         .context_menu(|ui| {
-                        self.indices = GraphicsIndices::from([i_tilepage, i_tile, 0, 0, 0, 0, 0, 0]);
+                        self.indices = GraphicsIndices::from([i_tile_page, i_tile, 0, 0, 0, 0, 0, 0]);
                         self.context_response = Self::context(ui, ContextData::from(tile.clone()));
                     }).clicked() {
-                        self.indices = GraphicsIndices::from([i_tilepage, i_tile, 0, 0, 0, 0, 0, 0]);
+                        self.indices = GraphicsIndices::from([i_tile_page, i_tile, 0, 0, 0, 0, 0, 0]);
                         self.main_window = MainWindow::TileMenu;
                     }
                 }
@@ -3246,12 +3261,12 @@ impl DFGraphicsHelper {
         );
     }
 
-    fn tilepage_default_menu(&mut self, ui: &mut Ui) {
+    fn tile_page_default_menu(&mut self, ui: &mut Ui) {
         ui.label("Tile Page Menu");
         ui.separator();
 
         if ui.small_button("New Tile Page").clicked() {
-            self.loaded_graphics.tilepages.push(TilePage::new());
+            self.loaded_graphics.tile_pages.push(TilePage::new());
         }
     }
 
@@ -3383,35 +3398,35 @@ impl DFGraphicsHelper {
         }
     }
 
-    fn tilepage_menu(&mut self, ui: &mut Ui) {
+    fn tile_page_menu(&mut self, ui: &mut Ui) {
         ui.label("Tile Page Menu");
         let indices = &mut self.indices;
 
-        if self.loaded_graphics.tilepages.is_empty() {
+        if self.loaded_graphics.tile_pages.is_empty() {
             self.main_window = MainWindow::TilePageDefaultMenu;
-            indices.tilepage_index = 0;
+            indices.tile_page_index = 0;
         } else {
-            let tilepage = self
+            let tile_page = self
                 .loaded_graphics
-                .tilepages
-                .get_mut(indices.tilepage_index)
+                .tile_pages
+                .get_mut(indices.tile_page_index)
                 .unwrap();
 
             ui.separator();
-            ui.text_edit_singleline(&mut tilepage.name);
+            ui.text_edit_singleline(&mut tile_page.name);
             ui.add_space(PADDING);
 
             if ui.button("New Tile").clicked() {
-                tilepage.tiles.push(Tile::new());
+                tile_page.tiles.push(Tile::new());
             }
             ui.add_space(PADDING);
             ui.add_space(PADDING);
 
             if ui.button("Delete").clicked() {
-                self.loaded_graphics.tilepages.remove(indices.tilepage_index);
-                if indices.tilepage_index > 0 {
-                    indices.tilepage_index = indices.tilepage_index - 1;
-                } else if self.loaded_graphics.tilepages.is_empty() {
+                self.loaded_graphics.tile_pages.remove(indices.tile_page_index);
+                if indices.tile_page_index > 0 {
+                    indices.tile_page_index = indices.tile_page_index - 1;
+                } else if self.loaded_graphics.tile_pages.is_empty() {
                     self.main_window = MainWindow::TilePageDefaultMenu;
                 }
             }
@@ -3425,8 +3440,8 @@ impl DFGraphicsHelper {
 
         let tiles = &mut self
             .loaded_graphics
-            .tilepages
-            .get_mut(indices.tilepage_index)
+            .tile_pages
+            .get_mut(indices.tile_page_index)
             .unwrap()
             .tiles;
 
@@ -3448,8 +3463,8 @@ impl DFGraphicsHelper {
 
             let tiles = &mut self
                 .loaded_graphics
-                .tilepages
-                .get_mut(indices.tilepage_index)
+                .tile_pages
+                .get_mut(indices.tile_page_index)
                 .unwrap()
                 .tiles;
 
@@ -3535,7 +3550,7 @@ impl DFGraphicsHelper {
 
         let tiles: Vec<&Tile> = self
             .loaded_graphics
-            .tilepages
+            .tile_pages
             .iter()
             .flat_map(|tp| tp.tiles.iter())
             .collect();
@@ -3787,8 +3802,8 @@ impl DFGraphicsHelper {
                 let image = dyn_image.as_bytes();
                 let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
 
-                self.loaded_graphics.tilepages
-                    .get_mut(self.indices.tilepage_index)
+                self.loaded_graphics.tile_pages
+                    .get_mut(self.indices.tile_page_index)
                     .unwrap()
                     .tiles
                     .get_mut(self.indices.tile_index)
@@ -3898,10 +3913,10 @@ impl DFGraphicsHelper {
     fn tile_info(&self) -> Vec<(String, [u32; 2])> {
         let mut tile_info: Vec<(String, [u32; 2])> = self
             .loaded_graphics
-            .tilepages
+            .tile_pages
             .iter()
-            .flat_map(|tilepage| {
-                tilepage.tiles.iter().map(|t| {
+            .flat_map(|tile_page| {
+                tile_page.tiles.iter().map(|t| {
                     if t.tile_size[0]*t.tile_size[1]*t.image_size[0]*t.image_size[1] != 0 {
                         (t.name.clone(),
                         [t.image_size[0]/t.tile_size[0] - 1,
@@ -3991,9 +4006,9 @@ impl eframe::App for DFGraphicsHelper {
         egui::CentralPanel::default().show(ctx, |ui| {
             //Draw main window by matching self.main_window
             egui::ScrollArea::both().show(ui, |ui| match self.main_window {
-                MainWindow::TilePageDefaultMenu => self.tilepage_default_menu(ui),
+                MainWindow::TilePageDefaultMenu => self.tile_page_default_menu(ui),
                 MainWindow::CreatureDefaultMenu => self.creature_default_menu(ui),
-                MainWindow::TilePageMenu => self.tilepage_menu(ui),
+                MainWindow::TilePageMenu => self.tile_page_menu(ui),
                 MainWindow::TileMenu => self.tile_menu(ui),
                 MainWindow::CreatureFileMenu => self.creature_file_menu(ui),
                 MainWindow::CreatureMenu => self.creature_menu(ui),
