@@ -1,7 +1,7 @@
 // #![windows_subsystem = "windows"]
 
 use egui::plot::{Plot, PlotImage, PlotPoint};
-use egui::{Context, Sense, Ui};
+use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut};
 use convert_case::{Boundary, Case, Casing};
 use rfd;
 use std::error::Error;
@@ -901,7 +901,7 @@ impl SimpleLayer {
                     self.coords[0],
                     self.coords[1],
                     self.coords[0] + x2,
-                    self.coords[0] + y2,
+                    self.coords[1] + y2,
                     sub_state.name(),
                 ))
             } else {
@@ -912,7 +912,7 @@ impl SimpleLayer {
                     self.coords[0],
                     self.coords[1],
                     self.coords[0] + x2,
-                    self.coords[0] + y2,
+                    self.coords[1] + y2,
                 ))
             }
         } else {
@@ -1407,6 +1407,7 @@ enum Equipment {
     Pants,
     Shield,
     Weapon,
+    Tool,
     Any,
 }
 impl Equipment {
@@ -1420,6 +1421,7 @@ impl Equipment {
             Equipment::Pants => "PANTS".to_string(),
             Equipment::Shield => "SHIELD".to_string(),
             Equipment::Weapon => "WEAPON".to_string(),
+            Equipment::Tool => "TOOL".to_string(),
             Equipment::Any => "ANY".to_string(),
         }
     }
@@ -1433,6 +1435,7 @@ impl Equipment {
             "PANTS" => Equipment::Pants,
             "SHIELD" => Equipment::Shield,
             "WEAPON" => Equipment::Weapon,
+            "TOOL" => Equipment::Tool,
             "ANY" => Equipment::Any,
             _ => Equipment::None,
         }
@@ -1493,9 +1496,9 @@ impl Profession {
             "RANGER" => Profession::Ranger,
             "STANDARD" => Profession::Standard,
             "CRAFTSMAN" => Profession::Craftsman,
-            "FISHERY_WORKER" => Profession::Ranger,
-            "MERCHANT" => Profession::Ranger,
-            "NONE" => Profession::Ranger,
+            "FISHERY_WORKER" => Profession::FisheryWorker,
+            "MERCHANT" => Profession::Merchant,
+            "NONE" => Profession::None,
             prof=> Profession::Custom(prof.to_string()),
         }
     }
@@ -1855,12 +1858,13 @@ impl Condition {
                         ui.add_space(PADDING);
                     }
                     ItemType::Wield(equipment) => {
-                        ui.label("Item type: (WEAPON or ANY)");
+                        ui.label("Item type: (WEAPON, TOOL, or ANY)");
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(equipment, Equipment::Any, "Any");
                                 ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                                ui.selectable_value(equipment, Equipment::Tool, "Tool");
                         });
 
                         if equipment == &Equipment::Any {
@@ -2266,7 +2270,7 @@ impl Condition {
                 out.push_str("]\n");
             },
             Condition::ShutOffIfItemPresent(item_type, items) => {
-                out = format!("\t\t\t\t[CONDITION_ITEM_WORN:");
+                out = format!("\t\t\t\t[SHUT_OFF_IF_ITEM_PRESENT:");
                 match item_type {
                     ItemType::ByCategory(category, equipment) => {
                         out.push_str(&format!("BY_CATEGORY:{}:{}",
@@ -2414,18 +2418,26 @@ impl Condition {
             },
             Condition::TissueSwap(app_mod, amount, tile, [x1,y1], large_coords) => {
                 out = format!(
-                    "\t\t\t\t\t[TISSUE_SWAP:{}:{}:{}:{}:{}",
+                    "\t\t\t\t\t[TISSUE_SWAP:{}:{}:{}:",
                     app_mod.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
                     amount,
                     tile.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-                    x1,
-                    y1,
                 );
 
                 if let Some([x2,y2]) = large_coords {
-                    out.push_str(&format!(":{}:{}]\n", x1 + x2, y1 + y2));
+                    out.push_str(&format!(
+                        "LARGE_IMAGE:{}:{}:{}:{}]\n",
+                        x1,
+                        y2,
+                        x1 + x2,
+                        y1 + y2
+                    ));
                 } else {
-                    out.push_str("]\n");
+                    out.push_str(&format!(
+                        "{}:{}]\n",
+                        x1,
+                        y1,
+                    ));
                 }
             },
             Condition::Custom(string) => {
@@ -2559,7 +2571,9 @@ impl Tile {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
 enum MainWindow {
+    #[default]
     DefaultMenu,
     TilePageDefaultMenu,
     TilePageMenu,
@@ -2631,6 +2645,24 @@ impl From<SimpleLayer> for ContextData {
 impl From<Condition> for ContextData {
     fn from(value: Condition) -> Self {
         ContextData::Condition(value)
+    }
+}
+impl From<MainWindow> for ContextData {
+    fn from(main_window: MainWindow) -> Self {
+        match main_window {
+            MainWindow::DefaultMenu => ContextData::CreatureFile(CreatureFile::new()),
+            MainWindow::TilePageDefaultMenu => ContextData::TilePage(TilePage::new()),
+            MainWindow::TilePageMenu => ContextData::TilePage(TilePage::new()),
+            MainWindow::TileMenu => ContextData::Tile(Tile::new()),
+            MainWindow::CreatureDefaultMenu => ContextData::Creature(Creature::new()),
+            MainWindow::CreatureFileMenu => ContextData::CreatureFile(CreatureFile::new()),
+            MainWindow::CreatureMenu => ContextData::Creature(Creature::new()),
+            MainWindow::LayerGroupMenu => ContextData::LayerGroup(LayerGroup::new()),
+            MainWindow::LayerSetMenu => ContextData::LayerSet(LayerSet::Empty),
+            MainWindow::LayerMenu => ContextData::Layer(Layer::new()),
+            MainWindow::ConditionMenu => ContextData::Condition(Condition::Default),
+            MainWindow::ReferenceMenu => ContextData::None,
+        }
     }
 }
 
@@ -3057,12 +3089,6 @@ impl DFGraphicsHelper {
         } else if ui.button("Duplicate").clicked() {
             ui.close_menu();
             action = Action::Duplicate(selected);
-        } else if ui.button("Undo").clicked() {
-            ui.close_menu();
-            action = Action::Undo;
-        } else if ui.button("Redo").clicked() {
-            ui.close_menu();
-            action = Action::Redo;
         } else {
             let mut inner_action = Action::None;
             ui.menu_button("Insert..", |ui| {
@@ -3999,7 +4025,7 @@ impl eframe::App for DFGraphicsHelper {
                     }
                     if ui.button("Import From..").clicked() {
                         if let Some(mut path) = rfd::FileDialog::new()
-                            .set_title(r"Choose Mod Folder")
+                            .set_title("Choose Mod Folder")
                             .pick_folder() {
                             (self.loaded_graphics, self.path) = Graphics::import(&mut path).unwrap();
                         }
@@ -4009,7 +4035,7 @@ impl eframe::App for DFGraphicsHelper {
                     if ui.button("Import").clicked() {
                         if !self.path.exists() {
                             if let Some(mut path) = rfd::FileDialog::new()
-                                .set_title(r"Choose Mod Folder")
+                                .set_title("Choose Mod Folder")
                                 .pick_folder() {
                                 (self.loaded_graphics, self.path) = Graphics::import(&mut path).unwrap();
                             }
@@ -4022,7 +4048,7 @@ impl eframe::App for DFGraphicsHelper {
                     if ui.button("Export").clicked() {
                         if !self.path.exists() {
                             if let Some(path) = rfd::FileDialog::new()
-                                .set_title(r"Choose Mod Folder")
+                                .set_title("Choose Mod Folder")
                                 .pick_folder() {
                                 self.loaded_graphics.export(&path).unwrap();
                             }
@@ -4064,6 +4090,24 @@ impl eframe::App for DFGraphicsHelper {
                 }
             );
         });
+
+        if !ctx.wants_keyboard_input() {
+            let undo = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                key: Key::Z
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(undo)) {
+                self.context_action = Action::Undo;
+            }
+            let redo = &KeyboardShortcut {
+                modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
+                key: Key::Z
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(redo)) {
+                self.context_action = Action::Redo;
+            }
+        }
+
 
         match &self.context_action { //respond to the context menus
             Action::Delete(selected) => {
