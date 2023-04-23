@@ -6,6 +6,7 @@ use convert_case::{Boundary, Case, Casing};
 use rfd;
 use thiserror::Error;
 use std::io::prelude::*;
+use std::path::PathBuf;
 use std::{fs, io, path};
 
 const PADDING: f32 = 8.0;
@@ -121,7 +122,7 @@ impl Graphics {
                             tile.name = line_vec[1].clone();
                         } else {
                             return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line,
+                                i_line + 1,
                                 raw_line.trim().to_string(),
                                 path.path()
                             ))
@@ -136,7 +137,7 @@ impl Graphics {
                                 .replace("/", "");
                         } else {
                             return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line,
+                                i_line + 1,
                                 raw_line.trim().to_string(),
                                 path.path()
                             ))
@@ -149,7 +150,7 @@ impl Graphics {
                                 line_vec[2].parse()?];
                         } else {
                             return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line,
+                                i_line + 1,
                                 raw_line.trim().to_string(),
                                 path.path()
                             ))
@@ -169,7 +170,7 @@ impl Graphics {
                                     line_vec[2].parse()?];
                             } else {
                                 return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                    i_line,
+                                    i_line + 1,
                                     raw_line.trim().to_string(),
                                     path.path()
                                 ))
@@ -177,11 +178,13 @@ impl Graphics {
                         }
                     },
                     _ => {
-                        return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                            i_line,
-                            raw_line.trim().to_string(),
-                            path.path()
-                        ))
+                        if line_vec != ["OBJECT", "TILE_PAGE"] {
+                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
+                                i_line + 1,
+                                raw_line.trim().to_string(),
+                                path.path()
+                            ))
+                        }
                     },
                 }
             }
@@ -298,7 +301,7 @@ impl Graphics {
                             },
                             _ => {
                                 return Err(DFGHError::ImportError(
-                                    i_line,
+                                    i_line + 1,
                                     raw_line.trim().to_string(),
                                     path.path()
                                 ))
@@ -329,7 +332,7 @@ impl Graphics {
                                             large = [l_c[0]-c[0], l_c[1]-c[1]];
                                         } else {
                                             return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                                i_line,
+                                                i_line + 1,
                                                 raw_line.trim().to_string(),
                                                 path.path()
                                             ))
@@ -353,7 +356,7 @@ impl Graphics {
                                         }
                                     } else {
                                         return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                            i_line,
+                                            i_line + 1,
                                             raw_line.trim().to_string(),
                                             path.path()
                                         ))
@@ -361,7 +364,7 @@ impl Graphics {
                                 }
                                  else {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                        i_line,
+                                        i_line + 1,
                                         raw_line.trim().to_string(),
                                         path.path()
                                     ))
@@ -369,7 +372,7 @@ impl Graphics {
                             },
                             _ => {
                                 return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                    i_line,
+                                    i_line + 1,
                                     raw_line.trim().to_string(),
                                     path.path()
                                 ))
@@ -393,7 +396,7 @@ impl Graphics {
                                             large = [l_c[0]-c[0], l_c[1]-c[1]];
                                         } else {
                                             return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                                i_line,
+                                                i_line + 1,
                                                 raw_line.trim().to_string(),
                                                 path.path()
                                             ))
@@ -430,7 +433,7 @@ impl Graphics {
                                     }
                                 } else {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                        i_line,
+                                        i_line + 1,
                                         raw_line.trim().to_string(),
                                         path.path()
                                     ))
@@ -451,7 +454,7 @@ impl Graphics {
                                         large = [l_c[0]-c[0], l_c[1]-c[1]];
                                     } else {
                                         return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                            i_line,
+                                            i_line + 1,
                                             raw_line.trim().to_string(),
                                             path.path()
                                         ))
@@ -465,7 +468,7 @@ impl Graphics {
                                     }
                                 } else {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                        i_line,
+                                        i_line + 1,
                                         raw_line.trim().to_string(),
                                         path.path()
                                     ))
@@ -478,11 +481,13 @@ impl Graphics {
                                 condition = Condition::from(line_vec.clone())?;
                             },
                             _ => {
-                                return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-                                    i_line,
-                                    raw_line.trim().to_string(),
-                                    path.path()
-                                ))
+                                if line_vec != ["OBJECT", "GRAPHICS"] {
+                                    return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                        i_line + 1,
+                                        raw_line.trim().to_string(),
+                                        path.path()
+                                    ))
+                                }
                             }
                         }
                     }                                
@@ -1710,7 +1715,7 @@ impl Condition {
                 },
                 "CONDITION_NOT_DYED" => Ok(Condition::NotDyed),
                 "CONDITION_MATERIAL_FLAG" => {
-                    if len > 2 {
+                    if len > 1 {
                         Ok(Condition::MaterialFlag(
                             line_vec[1..]
                                 .iter()
@@ -2896,6 +2901,8 @@ enum Action {
     Undo,
     Redo,
     Delete(ContextData),
+    Import,
+    Export,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -2943,28 +2950,28 @@ enum DFGHError {
     #[error("No error")]
     None,
 
-    #[error("An error occured while opening or closing a file.")]
+    #[error("An intermittent error occured while reading or saving to a file.\nPlease try again")]
     IoError(#[from] std::io::Error),
 
-    #[error("An error occured while processing the image.")]
+    #[error("An error occured while processing an image.")]
     ImageError(#[from] image::ImageError),
 
-    #[error("An error occured while attempting to import. Line {0}:\n{1}\nFile: \n{2}")]
+    #[error("An error occured while attempting to import.\n\tLine {0}:\n\t{1}\n\n\tFile: \n{2}")]
     ImportError(usize, String, path::PathBuf),
 
-    #[error("Failed to parse an integer from imported string.")]
+    #[error("Failed to parse an integer while importing a string.")]
     ImportParseError(#[from] std::num::ParseIntError),
 
-    #[error("An error occured while attempting to import a condition:\n{0}")]
+    #[error("An error occured while attempting to import a condition:\n\t{0}")]
     ImportConditionError(String),
 
-    #[error("No mod/graphics/ directory found at path {0}")]
+    #[error("No <mod (version)>/graphics/ directory found at path:\n\t{0}")]
     NoGraphicsDirectory(path::PathBuf),
 
-    #[error("File name is unsupported (non UTF-8). {0}")]
+    #[error("File name is unsupported (non UTF-8):\n\t{0}")]
     UnsupportedFileName(path::PathBuf),
 
-    #[error("Index out of bounds: ")]
+    #[error("Index out of bounds")]
     IndexError,
 }
 
@@ -2979,7 +2986,7 @@ struct DFGraphicsHelper {
     texture: Option<egui::TextureHandle>,
     preview_image: bool,
     cursor_coords: Option<[u32; 2]>,
-    context_action: Action,
+    action: Action,
     copied: ContextData,
     undo_buffer: Vec<(Graphics, GraphicsIndices)>,
     redo_buffer: Vec<(Graphics, GraphicsIndices)>,
@@ -2996,7 +3003,7 @@ impl DFGraphicsHelper {
             texture: None,
             preview_image: true,
             cursor_coords: None,
-            context_action: Action::default(),
+            action: Action::default(),
             copied: ContextData::default(),
             undo_buffer: Vec::with_capacity(1000),
             redo_buffer: Vec::with_capacity(100),
@@ -3004,30 +3011,74 @@ impl DFGraphicsHelper {
         }
     }
 
+    fn import(&mut self) {
+        self.save_state();
+        if !self.path.exists() {
+            if let Some(mut path) = rfd::FileDialog::new()
+                .set_title("Choose Mod Folder")
+                .pick_folder() {
+                
+                let import_result = Graphics::import(&mut path);
+                if let Ok((graphics, path)) = import_result {
+                    (self.loaded_graphics, self.path) = (graphics, path);
+                } else {
+                    self.exception = import_result.unwrap_err();
+                }
+            }
+        } else {
+            let import_result = Graphics::import(&mut self.path);
+            if let Ok((graphics, path)) = import_result {
+                (self.loaded_graphics, self.path) = (graphics, path);
+            } else {
+                self.exception = import_result.unwrap_err();
+            }
+        }
+        self.action = Action::None;
+    }
+
+    fn export(&mut self) {
+        if !self.path.exists() {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Choose Mod Folder")
+                .pick_folder() {
+                let export_result = self.loaded_graphics.export(&path);
+                if export_result.is_err() {
+                    self.exception = export_result.unwrap_err();
+                };
+            }
+        } else {
+            let export_result = self.loaded_graphics.export(&self.path);
+            if export_result.is_err() {
+                self.exception = export_result.unwrap_err();
+            };
+        }
+        self.action = Action::None;
+    }
+
     fn undo(&mut self) {
         if let Some(pop) = self.undo_buffer.pop() {
             if self.redo_buffer.len() == self.redo_buffer.capacity() {
-                self.redo_buffer.remove(0);
+                self.redo_buffer.remove(0);//checked
             }
             self.redo_buffer.push((self.loaded_graphics.clone(), self.indices));
 
             (self.loaded_graphics, self.indices) = pop;
         }
 
-        self.context_action = Action::None;
+        self.action = Action::None;
     }
 
     fn redo(&mut self) {
         if let Some(pop) = self.redo_buffer.pop() {
             if self.undo_buffer.len() == self.undo_buffer.capacity() {
-                self.undo_buffer.remove(0);
+                self.undo_buffer.remove(0);//checked
             }
             self.undo_buffer.push((self.loaded_graphics.clone(), self.indices));
 
             (self.loaded_graphics, self.indices) = pop;
         }
 
-        self.context_action = Action::None;
+        self.action = Action::None;
     }
 
     fn context(ui: &mut Ui, selected: ContextData) -> Action {
@@ -3114,7 +3165,7 @@ impl DFGraphicsHelper {
 
     fn copy(&mut self, selected: ContextData) {
         self.copied = ContextData::from(selected.clone());
-        self.context_action = Action::None;
+        self.action = Action::None;
     }
 
     fn cut(&mut self, selected: ContextData) -> Result<()> {
@@ -3267,7 +3318,7 @@ impl DFGraphicsHelper {
             },
             ContextData::None => {},
         }
-        self.context_action = Action::None;
+        self.action = Action::None;
         Ok(())
     }
 
@@ -3440,7 +3491,7 @@ impl DFGraphicsHelper {
             },
             ContextData::None => {},
         }
-        self.context_action = Action::None;
+        self.action = Action::None;
         Ok(())
     }
 
@@ -3468,7 +3519,7 @@ impl DFGraphicsHelper {
                     .sense(Sense::click()))
                     .context_menu(|ui| {
                     self.indices = GraphicsIndices::from([i_tile_page, 0, 0, 0, 0, 0, 0, 0]);
-                    self.context_action = Self::context(ui, ContextData::from(tile_page.clone()));
+                    self.action = Self::context(ui, ContextData::from(tile_page.clone()));
                 }).clicked() {
                     self.indices = GraphicsIndices::from([i_tile_page, 0, 0, 0, 0, 0, 0, 0]);
                     self.main_window = MainWindow::TilePageMenu;
@@ -3479,7 +3530,7 @@ impl DFGraphicsHelper {
                     if ui.add(egui::Label::new(&tile.name).sense(Sense::click()))
                         .context_menu(|ui| {
                         self.indices = GraphicsIndices::from([i_tile_page, i_tile, 0, 0, 0, 0, 0, 0]);
-                        self.context_action = Self::context(ui, ContextData::from(tile.clone()));
+                        self.action = Self::context(ui, ContextData::from(tile.clone()));
                     }).clicked() {
                         self.indices = GraphicsIndices::from([i_tile_page, i_tile, 0, 0, 0, 0, 0, 0]);
                         self.main_window = MainWindow::TileMenu;
@@ -3511,7 +3562,7 @@ impl DFGraphicsHelper {
                     .sense(Sense::click()))
                     .context_menu(|ui| {
                     self.indices = GraphicsIndices::from([0, 0, i_file, 0, 0, 0, 0, 0]);
-                    self.context_action = Self::context(ui, ContextData::from(creature_file.clone()));
+                    self.action = Self::context(ui, ContextData::from(creature_file.clone()));
                 }).clicked() {
                     self.indices = GraphicsIndices::from([0, 0, i_file, 0, 0, 0, 0, 0]);
                     self.main_window = MainWindow::CreatureFileMenu;
@@ -3534,7 +3585,7 @@ impl DFGraphicsHelper {
                             .sense(Sense::click()))
                             .context_menu(|ui| {
                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, 0, 0, 0, 0]);
-                            self.context_action = Self::context(ui, ContextData::from(creature.clone()));
+                            self.action = Self::context(ui, ContextData::from(creature.clone()));
                         }).clicked() {
                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, 0, 0, 0, 0]);
                             self.main_window = MainWindow::CreatureMenu;
@@ -3548,7 +3599,7 @@ impl DFGraphicsHelper {
                                         .sense(Sense::click()))
                                         .context_menu(|ui| {
                                         self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
-                                        self.context_action = Self::context(ui, ContextData::from(layer_set.clone()));
+                                        self.action = Self::context(ui, ContextData::from(layer_set.clone()));
                                     }).clicked() {
                                         self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
                                         self.main_window = MainWindow::LayerSetMenu;
@@ -3569,7 +3620,7 @@ impl DFGraphicsHelper {
                                             .sense(Sense::click()))
                                             .context_menu(|ui| {
                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
-                                            self.context_action = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
+                                            self.action = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
                                         }).clicked() {
                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
                                             self.main_window = MainWindow::LayerSetMenu;
@@ -3591,7 +3642,7 @@ impl DFGraphicsHelper {
                                                     format!("Group: {}", &layer_group.name))
                                                     .sense(Sense::click())).context_menu(|ui| {
                                                     self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0]);
-                                                    self.context_action = Self::context(ui, ContextData::from(layer_group.clone()));
+                                                    self.action = Self::context(ui, ContextData::from(layer_group.clone()));
                                                 }).clicked() {
                                                     self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0]);
                                                     self.main_window = MainWindow::LayerGroupMenu;
@@ -3614,7 +3665,7 @@ impl DFGraphicsHelper {
                                                             .sense(Sense::click()))
                                                             .context_menu(|ui| {
                                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0]);
-                                                            self.context_action = Self::context(ui, ContextData::from(layer.clone()));
+                                                            self.action = Self::context(ui, ContextData::from(layer.clone()));
                                                         }).clicked() {
                                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0]);
                                                             self.main_window = MainWindow::LayerMenu;
@@ -3627,7 +3678,7 @@ impl DFGraphicsHelper {
                                                                 .sense(Sense::click()))
                                                                 .context_menu(|ui| {
                                                                 self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition]);
-                                                                self.context_action = Self::context(ui, ContextData::from(condition.clone()));
+                                                                self.action = Self::context(ui, ContextData::from(condition.clone()));
                                                             }).clicked() {
                                                                 self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition]);
                                                                 self.main_window = MainWindow::ConditionMenu;
@@ -3653,7 +3704,7 @@ impl DFGraphicsHelper {
                                             .sense(Sense::click()))
                                             .context_menu(|ui| {
                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
-                                            self.context_action = Self::context(ui, ContextData::from(simple_layer.clone()));
+                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
                                         }).clicked() {
                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
                                             self.main_window = MainWindow::LayerMenu;
@@ -3674,7 +3725,7 @@ impl DFGraphicsHelper {
                                             .sense(Sense::click()))
                                             .context_menu(|ui| {
                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
-                                            self.context_action = Self::context(ui, ContextData::from(simple_layer.clone()));
+                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
                                         }).clicked() {
                                             self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
                                             self.main_window = MainWindow::LayerMenu;
@@ -3714,7 +3765,7 @@ impl DFGraphicsHelper {
         ui.separator();
 
         if ui.small_button("New Tile Page").clicked() {
-            self.context_action = Action::Insert(ContextData::TilePage(TilePage::new()));
+            self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
         }
         Ok(())
     }
@@ -3723,14 +3774,14 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Tile Page Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::TilePage(TilePage::new()));
+                self.action = Action::Delete(ContextData::TilePage(TilePage::new()));
             }
         });
 
         let indices = &mut self.indices;
 
         if self.loaded_graphics.tile_pages.is_empty() {
-            self.context_action = Action::Insert(ContextData::TilePage(TilePage::new()));
+            self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
         } else {
             let tile_page = self
                 .loaded_graphics
@@ -3743,7 +3794,7 @@ impl DFGraphicsHelper {
             ui.add_space(PADDING);
 
             if ui.button("New Tile").clicked() {
-                self.context_action = Action::Insert(ContextData::Tile(Tile::new()));
+                self.action = Action::Insert(ContextData::Tile(Tile::new()));
             }
         }
         Ok(())
@@ -3753,7 +3804,7 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Tile Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::Tile(Tile::new()));
+                self.action = Action::Delete(ContextData::Tile(Tile::new()));
             }
         });
         
@@ -3768,7 +3819,7 @@ impl DFGraphicsHelper {
 
         if tiles.is_empty() {
             if ui.small_button("Create Tile").clicked() {
-                self.context_action = Action::Insert(ContextData::Tile(Tile::new()));
+                self.action = Action::Insert(ContextData::Tile(Tile::new()));
             }
         } else {
             let tile = tiles
@@ -3789,7 +3840,7 @@ impl DFGraphicsHelper {
         ui.separator();
 
         if ui.small_button("New Creature File").clicked() {
-            self.context_action = Action::Insert(ContextData::CreatureFile(CreatureFile::new()));
+            self.action = Action::Insert(ContextData::CreatureFile(CreatureFile::new()));
         }
         Ok(())
     }
@@ -3798,7 +3849,7 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Creature File Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::CreatureFile(CreatureFile::new()));
+                self.action = Action::Delete(ContextData::CreatureFile(CreatureFile::new()));
             }
         });
         
@@ -3818,7 +3869,7 @@ impl DFGraphicsHelper {
             ui.add_space(PADDING);
 
             if ui.button("New Creature").clicked() {
-                self.context_action = Action::Insert(ContextData::Creature(Creature::new()));
+                self.action = Action::Insert(ContextData::Creature(Creature::new()));
             }
         }
         Ok(())
@@ -3828,7 +3879,7 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Creature Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::Creature(Creature::new()));
+                self.action = Action::Delete(ContextData::Creature(Creature::new()));
             }
         });
 
@@ -3843,7 +3894,7 @@ impl DFGraphicsHelper {
         
         if creatures.is_empty() {
             if ui.small_button("Create Creature").clicked() {
-                self.context_action = Action::Insert(ContextData::Creature(Creature::new()));
+                self.action = Action::Insert(ContextData::Creature(Creature::new()));
             }
         } else {
             let creature = creatures
@@ -3859,7 +3910,7 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Layer Set Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::LayerSet(LayerSet::Simple(Vec::new())));
+                self.action = Action::Delete(ContextData::LayerSet(LayerSet::Simple(Vec::new())));
             }
         });
 
@@ -3877,7 +3928,7 @@ impl DFGraphicsHelper {
         
         if layer_sets.is_empty() {
             if ui.small_button("Create Layer Set").clicked() {
-                self.context_action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
+                self.action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
             }
         } else {
             let layer_set = layer_sets
@@ -3893,7 +3944,7 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Layer Group Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::LayerGroup(LayerGroup::new()));
+                self.action = Action::Delete(ContextData::LayerGroup(LayerGroup::new()));
             }
         });
         
@@ -3914,7 +3965,7 @@ impl DFGraphicsHelper {
         if let LayerSet::Layered(_, layer_groups) = graphics_type {
             if layer_groups.is_empty() {
                 if ui.small_button("Create Layer Group").clicked() {
-                    self.context_action = Action::Insert(ContextData::LayerGroup(LayerGroup::new()));
+                    self.action = Action::Insert(ContextData::LayerGroup(LayerGroup::new()));
                 }
             } else {
                 let layer_group = layer_groups
@@ -3960,13 +4011,13 @@ impl DFGraphicsHelper {
                     ui.label("Simple Layer Menu");
                     ui.separator();
                     if ui.small_button("Create Layer").clicked() {
-                        self.context_action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
+                        self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
                     }
                 } else {
                     ui.horizontal(|ui| {
                         ui.label("Layer Menu");
                         if ui.button("Delete").clicked() {
-                            self.context_action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
+                            self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
                         }
                     });
 
@@ -3998,13 +4049,13 @@ impl DFGraphicsHelper {
                     ui.label("Statue Layer Menu");
                     ui.separator();
                     if ui.small_button("Create Layer").clicked() {
-                        self.context_action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
+                        self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
                     }
                 } else {
                     ui.horizontal(|ui| {
                         ui.label("Layer Menu");
                         if ui.button("Delete").clicked() {
-                            self.context_action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
+                            self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
                         }
                     });
                     
@@ -4042,13 +4093,13 @@ impl DFGraphicsHelper {
                     ui.label("Layer Menu");
                     ui.separator();
                     if ui.small_button("Create Layer").clicked() {
-                        self.context_action = Action::Insert(ContextData::Layer(Layer::new()));
+                        self.action = Action::Insert(ContextData::Layer(Layer::new()));
                     }
                 } else {
                     ui.horizontal(|ui| {
                         ui.label("Layer Menu");
                         if ui.button("Delete").clicked() {
-                            self.context_action = Action::Delete(ContextData::Layer(Layer::new()));
+                            self.action = Action::Delete(ContextData::Layer(Layer::new()));
                         }
                     });
 
@@ -4079,7 +4130,7 @@ impl DFGraphicsHelper {
                 ui.horizontal(|ui| {
                     ui.label("Empty Layer Menu");
                     if ui.button("Delete").clicked() {
-                        self.context_action = Action::Delete(ContextData::Layer(Layer::new()));
+                        self.action = Action::Delete(ContextData::Layer(Layer::new()));
                     }
                 });
             },
@@ -4091,7 +4142,7 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Condition Menu");
             if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::Condition(Condition::default()));
+                self.action = Action::Delete(ContextData::Condition(Condition::default()));
             }
         });
 
@@ -4122,7 +4173,7 @@ impl DFGraphicsHelper {
 
             if conditions.is_empty() {
                 if ui.small_button("New condition").clicked() {
-                    self.context_action = Action::Insert(ContextData::Condition(Condition::default()));
+                    self.action = Action::Insert(ContextData::Condition(Condition::default()));
                 }
             } else {
                 let condition = conditions
@@ -4338,59 +4389,16 @@ impl eframe::App for DFGraphicsHelper {
                         ui.close_menu();
                     }
                     if ui.button("Import From..").clicked() {
-                        if let Some(mut path) = rfd::FileDialog::new()
-                            .set_title("Choose Mod Folder")
-                            .pick_folder() {
-                            let import_result = Graphics::import(&mut path);
-                            if let Ok((graphics, path)) = import_result {
-                                (self.loaded_graphics, self.path) = (graphics, path);
-                            } else {
-                                self.exception = import_result.unwrap_err();
-                            }
-                        }
-                        self.save_state();
+                        self.path = PathBuf::new();
+                        self.action = Action::Import;
                         ui.close_menu();
                     }
                     if ui.button("Import").clicked() {
-                        if !self.path.exists() {
-                            if let Some(mut path) = rfd::FileDialog::new()
-                                .set_title("Choose Mod Folder")
-                                .pick_folder() {
-                                
-                                let import_result = Graphics::import(&mut path);
-                                if let Ok((graphics, path)) = import_result {
-                                    (self.loaded_graphics, self.path) = (graphics, path);
-                                } else {
-                                    self.exception = import_result.unwrap_err();
-                                }
-                            }
-                        } else {
-                            let import_result = Graphics::import(&mut self.path);
-                            if let Ok((graphics, path)) = import_result {
-                                (self.loaded_graphics, self.path) = (graphics, path);
-                            } else {
-                                self.exception = import_result.unwrap_err();
-                            }
-                        }
-                        self.save_state();
+                        self.action = Action::Import;
                         ui.close_menu();
                     }
                     if ui.button("Export").clicked() {
-                        if !self.path.exists() {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_title("Choose Mod Folder")
-                                .pick_folder() {
-                                let export_result = self.loaded_graphics.export(&path);
-                                if export_result.is_err() {
-                                    self.exception = export_result.unwrap_err();
-                                };
-                            }
-                        } else {
-                            let export_result = self.loaded_graphics.export(&self.path);
-                            if export_result.is_err() {
-                                self.exception = export_result.unwrap_err();
-                            };
-                        }
+                        self.action = Action::Export;
                         ui.close_menu();
                     }
                 });
@@ -4437,20 +4445,41 @@ impl eframe::App for DFGraphicsHelper {
                 key: Key::Z
             };
             if ctx.input_mut(|i| i.consume_shortcut(undo)) {
-                self.context_action = Action::Undo;
+                self.action = Action::Undo;
             }
             let redo = &KeyboardShortcut {
                 modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
                 key: Key::Z
             };
             if ctx.input_mut(|i| i.consume_shortcut(redo)) {
-                self.context_action = Action::Redo;
+                self.action = Action::Redo;
+            }
+            let import = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                key: Key::I
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(import)) {
+                self.action = Action::Import;
+            }
+            let open = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                key: Key::O
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(open)) {
+                self.action = Action::Import;
+            }
+            let export = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                key: Key::E
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(export)) {
+                self.action = Action::Export;
             }
         }
 
         {//Action handler
             let mut result = Ok(());
-            match &self.context_action { //respond to the context menus
+            match &self.action { //respond to the context menus
                 Action::Delete(selected) => {
                     result = self.delete(selected.clone());
                 },
@@ -4476,6 +4505,12 @@ impl eframe::App for DFGraphicsHelper {
                 Action::Redo => {
                     self.redo();
                 },
+                Action::Import => {
+                    self.import();
+                },
+                Action::Export => {
+                    self.export();
+                },
                 Action::None => {},
             }
             if result.is_err() {
@@ -4486,8 +4521,51 @@ impl eframe::App for DFGraphicsHelper {
         if let DFGHError::None = self.exception {
         } else {
             egui::Window::new("Error Window")
-                .show(ctx, |ui| {
-                
+                .collapsible(false)
+                .constrain(true)
+                .auto_sized()
+                .show(ctx, |_ui| {
+
+                egui::TopBottomPanel::bottom("Ok Panic").max_height(32.0).show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("  Ok  ").clicked() {
+                            match self.exception {
+                                DFGHError::IoError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImageError(..) => {
+                                    self.undo();
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImportError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImportParseError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImportConditionError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::NoGraphicsDirectory(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::UnsupportedFileName(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::IndexError => {
+                                    self.indices = GraphicsIndices::from([0; 8]);
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::None => {},
+                            }
+                        } else if ui.button("Panic!").clicked() {
+                            panic!();
+                        }
+                    })
+                });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.label(self.exception.to_string());
+                });
             });
         }
     }
@@ -4509,7 +4587,3 @@ fn main() {
     )
     .expect("Should always run if Creation Conteext can be created.");
 }
-
-//.get
-//.remove(
-//[
