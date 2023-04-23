@@ -4,13 +4,13 @@ use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut};
 use convert_case::{Boundary, Case, Casing};
 use rfd;
-use std::error::Error;
+use thiserror::Error;
 use std::io::prelude::*;
 use std::{fs, io, path};
 
 const PADDING: f32 = 8.0;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 struct Graphics {
     tile_pages: Vec<TilePage>,
     creature_files: Vec<CreatureFile>,
@@ -24,29 +24,30 @@ impl Graphics {
     }
 
     fn read_brackets(raw_line: &String) -> (bool, Vec<String>, Option<String>) {
-        let brackets = raw_line.contains("[") && raw_line.contains("]");
+        let brackets = raw_line.trim().starts_with("[") && raw_line.contains("]");
         let line_vec: Vec<String>;
         let comments: Option<String>;
         if brackets {
             // let clean_line = raw_line.replace("[", "").replace("]", "").trim().to_string();
             let start_line = raw_line.trim().replace("[", "");
-            let mut split_line = start_line.split("]");
+            let split_line:Vec<&str>  = start_line.split("]").collect();
 
-            line_vec = split_line.next().unwrap().split(":").map(|s| s.to_string()).collect();
-            if let Some(c) = split_line.next() {
+            //0 cannot be index out of range b/c checked that there is ] to split at after start
+            line_vec = split_line[0].split(":").map(|s| s.to_string()).collect();
+            if let Some(&c) = split_line.get(1) {
                 comments = Some(c.trim().to_string());
             } else {
                 comments = None;
             }
+            
         } else {
             line_vec = Vec::new();
             comments = None;
         }
-
         (brackets, line_vec, comments) //retain first bracket to ignore commented-out lines
     }
 
-    fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf), Box<dyn Error>> {
+    fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf)> {
         let mut tile_pages: Vec<TilePage> = Vec::new();
         let mut creature_files: Vec<CreatureFile> = Vec::new();
 
@@ -55,28 +56,30 @@ impl Graphics {
         } else if folder.ends_with("images") && folder.parent().get_or_insert(path::Path::new("")).ends_with("graphics") {
             folder.pop();
             folder.pop();
-        } else if !folder.read_dir()?.any(|f| if f.is_ok() {f.unwrap().path().ends_with("graphics")} else {false}) {
-            panic!("no /graphics directory found");
+        } else if !folder.read_dir()?.any(|f| if f.is_ok() {f.unwrap().path().ends_with("graphics")} else {false}) {//checked unwrap
+            return Err(DFGHError::NoGraphicsDirectory(folder.clone()));
         }
 
-        let paths = fs::read_dir(&folder.join("graphics")).expect("expects 0 or more valid file paths"); //read graphics directory
+        let paths = fs::read_dir(&folder.join("graphics"))?; //read graphics directory
 
         for path in paths {
             let path = path?;
-            let entry_name = path.file_name().into_string().expect("utf-8 string");//only supports utf-8 file paths
-
-            if entry_name.ends_with(".txt") {
-                if entry_name.starts_with("tile_page_") {
-                    //read tile page file
-                    tile_pages.push(Self::import_tile_page(folder, &path)?);
-
-                } else if entry_name.starts_with("graphics_creatures_") {
-                    //read creature file
-                    creature_files.push(Self::import_creature_file(&path)?);
-
-                    //naming the layer groups
-                    Self::rename_layer_groups(&mut creature_files);
+            if let Ok(entry_name) = path.file_name().into_string() {
+                if entry_name.ends_with(".txt") {
+                    if entry_name.starts_with("tile_page_") {
+                        //read tile page file
+                        tile_pages.push(Self::import_tile_page(folder, &path)?);
+    
+                    } else if entry_name.starts_with("graphics_creatures_") {
+                        //read creature file
+                        creature_files.push(Self::import_creature_file(&path)?);
+    
+                        //naming the layer groups
+                        Self::rename_layer_groups(&mut creature_files);
+                    }
                 }
+            } else {
+                return Err(DFGHError::UnsupportedFileName(path.path()))
             }
         }
 
@@ -90,42 +93,67 @@ impl Graphics {
         )
     }
 
-    fn import_tile_page(folder: &mut path::PathBuf, path: &fs::DirEntry) -> Result<TilePage, Box<dyn Error>> {
+    fn import_tile_page(folder: &mut path::PathBuf, path: &fs::DirEntry) -> Result<TilePage> {
         let mut tile_page = TilePage::empty();
         let mut tile = Tile::empty();
 
         let f =
-            fs::File::open(path.path()).expect("failed to open tile page file");
+            fs::File::open(path.path())?;
         
-        for raw_line_result in io::BufReader::new(f).lines() {
+        for (i_line, raw_line_result) in io::BufReader::new(f).lines().enumerate() {
             //read line-by-line
-            let raw_line = raw_line_result.expect("the for loop should always give a valid String");
+            let raw_line = raw_line_result?;
             let (brackets, line_vec, _) = Self::read_brackets(&raw_line);
+            let len = line_vec.len();
 
             if tile_page.name.is_empty() {
                 tile_page.name = raw_line.replace("tile_page_", "").trim().to_string();
 
-            } else if brackets && line_vec.len() > 0 {
+            } else if brackets && len > 0 {
                 match line_vec[0].as_str() {
                     "TILE_PAGE" => {
-                        if !tile.name.is_empty() {
-                            tile_page.tiles.push(tile.clone());
-                            tile = Tile::empty();
-                            tile.name.clear();
+                        if len > 1{
+                            if !tile.name.is_empty() {
+                                tile_page.tiles.push(tile.clone());
+                                tile = Tile::empty();
+                                tile.name.clear();
+                            }
+                            tile.name = line_vec[1].clone();
+                        } else {
+                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
+                                i_line,
+                                raw_line.trim().to_string(),
+                                path.path()
+                            ))
                         }
-                        tile.name = line_vec[1].clone();
                     },
                     "FILE" => {
-                    tile.filename = line_vec[1].clone()
-                        .replace(".png", "")
-                        .replace("images", "")
-                        .replace("/", "")
-                        .replace("/", "");
+                        if len > 1 {
+                            tile.filename = line_vec[1].clone()
+                                .replace(".png", "")
+                                .replace("images", "")
+                                .replace("/", "")
+                                .replace("/", "");
+                        } else {
+                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
+                                i_line,
+                                raw_line.trim().to_string(),
+                                path.path()
+                            ))
+                        }
                     },
                     "TILE_DIM" => {
-                        tile.tile_size = 
-                            [line_vec[1].parse().unwrap_or_default(),
-                            line_vec[2].parse().unwrap_or_default()];
+                        if len > 2 {
+                            tile.tile_size = 
+                                [line_vec[1].parse()?,
+                                line_vec[2].parse()?];
+                        } else {
+                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
+                                i_line,
+                                raw_line.trim().to_string(),
+                                path.path()
+                            ))
+                        }
                     },
                     "PAGE_DIM_PIXELS" => {
                         let image_path: path::PathBuf = folder
@@ -134,13 +162,27 @@ impl Graphics {
 
                         if let Ok((x, y)) = image::image_dimensions(image_path) {
                             tile.image_size = [x, y];
-                        } else {
-                            tile.image_size = 
-                                [line_vec[1].parse().unwrap_or_default(),
-                                line_vec[2].parse().unwrap_or_default()];
+                        } else {  
+                            if len > 2 {
+                                tile.image_size = 
+                                    [line_vec[1].parse()?,
+                                    line_vec[2].parse()?];
+                            } else {
+                                return Err::<TilePage, DFGHError>(DFGHError::ImportError(
+                                    i_line,
+                                    raw_line.trim().to_string(),
+                                    path.path()
+                                ))
+                            }
                         }
                     },
-                    _ => {},
+                    _ => {
+                        return Err::<TilePage, DFGHError>(DFGHError::ImportError(
+                            i_line,
+                            raw_line.trim().to_string(),
+                            path.path()
+                        ))
+                    },
                 }
             }
         }
@@ -149,7 +191,7 @@ impl Graphics {
         Ok(tile_page)
     }
 
-    fn import_creature_file(path: &fs::DirEntry) -> Result<CreatureFile, Box<dyn Error>> {
+    fn import_creature_file(path: &fs::DirEntry) -> Result<CreatureFile> {
         let mut creature_file = CreatureFile::empty();
         let mut creature = Creature::empty();
         let mut layer_set = LayerSet::default();
@@ -158,24 +200,20 @@ impl Graphics {
         let mut layer = Layer::empty();
         let mut condition = Condition::default();
 
-        let f =
-            fs::File::open(path.path()).expect("failed to open creature graphics file");
+        let f = fs::File::open(path.path())?;
 
-        for raw_line_result in io::BufReader::new(f).lines() {
-
-            let raw_line = raw_line_result.unwrap();
+        for (i_line, raw_line_result) in io::BufReader::new(f).lines().enumerate() {
+            let raw_line = raw_line_result?;
             let (brackets, mut line_vec, comments) = Self::read_brackets(&raw_line);
-            // let line_vec = line_vec_as_is.drain_filter(|string| string.as_ref() == "AS_IS").collect();
-            line_vec.retain(|elem| elem != "AS_IS");//remove any AS_IS elements there are for creature files due to not palletization(?) v50.05
+            //remove any AS_IS elements there are for creature files due to not palletization(?) v50.05
+            line_vec.retain(|elem| elem != "AS_IS");
+            let len = line_vec.len();
 
             if creature_file.name.is_empty() {
                 //set creature file name
                 creature_file.name =
                     raw_line.replace("graphics_creatures_", "").trim().to_string();
-            } else if brackets && line_vec.len() > 0 {
-
-                // dbg!(&raw_line);
-
+            } else if brackets && len > 0 {
                 match line_vec[0].as_str() {
                     "CREATURE_GRAPHICS" | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
                         match &mut layer_set {
@@ -203,45 +241,46 @@ impl Graphics {
                                     simple_layer = SimpleLayer::empty();
                                 }
                             },
-                            // _ => {panic!()}
                         }
-                        match line_vec[0].as_str() {
-                            //set up the buffered graphics according to the current line
-                            "CREATURE_GRAPHICS" => {
-                                if creature.name.ne("") {
-                                    creature.graphics_type.push(layer_set.clone());
-                                    creature_file.creatures.push(creature.clone());
-                                    creature.graphics_type.clear();
-                                }
-                                creature.name = line_vec[1].clone();
-                                layer_set = LayerSet::Simple(Vec::new());
-                            },
-                            "STATUE_CREATURE_GRAPHICS" => {
-                                if creature.name.ne("") {
-                                    creature.graphics_type.push(layer_set.clone());
-                                    creature_file.creatures.push(creature.clone());
-                                    creature.graphics_type.clear();
-                                }
-                                creature.name = line_vec[1].clone();
-                                layer_set = LayerSet::Statue(Vec::new());
-                            },
-                            "LAYER_SET" => {
-                                if creature.name.ne("") {
-                                    match &layer_set {
-                                        LayerSet::Simple(simple_layers) => {
-                                            if !simple_layers.is_empty() {
-                                                creature.graphics_type.push(layer_set.clone());
-                                            }
-                                        },
-                                        _ => {creature.graphics_type.push(layer_set.clone());}
+                        if len > 1{
+                            match line_vec[0].as_str() {
+                                //set up the buffered graphics according to the current line
+                                "CREATURE_GRAPHICS" => {
+                                    if creature.name.ne("") {
+                                        creature.graphics_type.push(layer_set.clone());
+                                        creature_file.creatures.push(creature.clone());
+                                        creature.graphics_type.clear();
                                     }
-                                }
-                                layer_set = LayerSet::Layered(
-                                    State::from(line_vec[1].clone()),
-                                    Vec::new()
-                                );
-                            },
-                            _ => {},
+                                    creature.name = line_vec[1].clone();
+                                    layer_set = LayerSet::Simple(Vec::new());
+                                },
+                                "STATUE_CREATURE_GRAPHICS" => {
+                                    if creature.name.ne("") {
+                                        creature.graphics_type.push(layer_set.clone());
+                                        creature_file.creatures.push(creature.clone());
+                                        creature.graphics_type.clear();
+                                    }
+                                    creature.name = line_vec[1].clone();
+                                    layer_set = LayerSet::Statue(Vec::new());
+                                },
+                                "LAYER_SET" => {
+                                    if creature.name.ne("") {
+                                        match &layer_set {
+                                            LayerSet::Simple(simple_layers) => {
+                                                if !simple_layers.is_empty() {
+                                                    creature.graphics_type.push(layer_set.clone());
+                                                }
+                                            },
+                                            _ => {creature.graphics_type.push(layer_set.clone());}
+                                        }
+                                    }
+                                    layer_set = LayerSet::Layered(
+                                        State::from(line_vec[1].clone()),
+                                        Vec::new()
+                                    );
+                                },
+                                _ => {/*unreachable*/},
+                            }
                         }
                     },
                     "LAYER_GROUP" | "END_LAYER_GROUP" => {
@@ -257,7 +296,13 @@ impl Graphics {
                                     layer_group = LayerGroup::empty();
                                 }
                             },
-                            _ => { panic!("should not see layer groups outside of a 'layered' layer set"); }
+                            _ => {
+                                return Err(DFGHError::ImportError(
+                                    i_line,
+                                    raw_line.trim().to_string(),
+                                    path.path()
+                                ))
+                            }
                         }
                         if let Some(c) = comments {
                             layer_group.name = c.replace("---", "");
@@ -273,37 +318,62 @@ impl Graphics {
                                     }
                                     layer_group.layers.push(layer.clone());
                                 }
-                                if line_vec[3].eq("LARGE_IMAGE") {
-                                    let c = [line_vec[4].parse::<u32>().unwrap_or_default(),
-                                        line_vec[5].parse::<u32>().unwrap_or_default()];
-                                    let l_c = [line_vec[6].parse::<u32>().unwrap_or_default(),
-                                        line_vec[7].parse::<u32>().unwrap_or_default()];
-                                    let large;
-                                    if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-                                        large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                if len > 3 {
+                                    if line_vec[3].eq("LARGE_IMAGE") && len > 7 {
+                                        let c = [line_vec[4].parse()?,
+                                            line_vec[5].parse()?];
+                                        let l_c = [line_vec[6].parse()?,
+                                            line_vec[7].parse()?];
+                                        let large;
+                                        if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                            large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                        } else {
+                                            return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                                i_line,
+                                                raw_line.trim().to_string(),
+                                                path.path()
+                                            ))
+                                        }
+                                        layer = Layer{
+                                            name: line_vec[1].clone(),
+                                            conditions: Vec::new(),
+                                            tile: line_vec[2].clone(),
+                                            coords: c,
+                                            large_coords: Some(large),
+                                        }
+                                    } else if line_vec.len() > 4 {
+                                        layer = Layer{
+                                            name: line_vec[1].clone(),
+                                            conditions: Vec::new(),
+                                            tile: line_vec[2].clone(),
+                                            coords:
+                                                [line_vec[3].parse()?,
+                                                line_vec[4].parse()?],
+                                            large_coords: None,
+                                        }
                                     } else {
-                                        panic!("impossible large coordinates import at {}", raw_line.trim())
-                                    }
-                                    layer = Layer{
-                                        name: line_vec[1].clone(),
-                                        conditions: Vec::new(),
-                                        tile: line_vec[2].clone(),
-                                        coords: c,
-                                        large_coords: Some(large),
-                                    }
-                                } else {
-                                    layer = Layer{
-                                        name: line_vec[1].clone(),
-                                        conditions: Vec::new(),
-                                        tile: line_vec[2].clone(),
-                                        coords:
-                                            [line_vec[3].parse::<u32>().unwrap_or_default(),
-                                            line_vec[4].parse::<u32>().unwrap_or_default()],
-                                        large_coords: None,
+                                        return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                            i_line,
+                                            raw_line.trim().to_string(),
+                                            path.path()
+                                        ))
                                     }
                                 }
+                                 else {
+                                    return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                        i_line,
+                                        raw_line.trim().to_string(),
+                                        path.path()
+                                    ))
+                                }
                             },
-                            _ => { panic!("should not see layers outside of a 'layered' layer set"); }
+                            _ => {
+                                return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                    i_line,
+                                    raw_line.trim().to_string(),
+                                    path.path()
+                                ))
+                            }
                         }
                     },
                     _ => {//if there's a bracketed tag that is not already covered
@@ -312,77 +382,108 @@ impl Graphics {
                                 if simple_layer.state.ne(&State::Empty) {
                                     simple_layers.push(simple_layer.clone());
                                 }
-                                if line_vec[2].eq("LARGE_IMAGE") {
-                                    let c = [line_vec[3].parse::<u32>().unwrap_or_default(),
-                                        line_vec[4].parse::<u32>().unwrap_or_default()];
-                                    let l_c = [line_vec[5].parse::<u32>().unwrap_or_default(),
-                                        line_vec[6].parse::<u32>().unwrap_or_default()];
+                                if line_vec.len() > 2 {
+                                    if line_vec[2].eq("LARGE_IMAGE") && line_vec.len() > 6 {
+                                        let c = [line_vec[3].parse()?,
+                                            line_vec[4].parse()?];
+                                        let l_c = [line_vec[5].parse()?,
+                                            line_vec[6].parse()?];
+                                        let large;
+                                        if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                            large = [l_c[0]-c[0], l_c[1]-c[1]];
+                                        } else {
+                                            return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                                i_line,
+                                                raw_line.trim().to_string(),
+                                                path.path()
+                                            ))
+                                        }
+                                        simple_layer = SimpleLayer {
+                                            state: State::from(line_vec[0].clone()),
+                                            tile: line_vec[1].clone(),
+                                            coords: c,
+                                            large_coords: Some(large),
+                                            sub_state: {
+                                                if line_vec.get(7).is_some() {
+                                                    Some(State::from(line_vec[7].clone()))
+                                                } else {
+                                                    None
+                                                }
+                                            }
+                                        }
+                                    } else if line_vec.len() > 3 {
+                                        simple_layer = SimpleLayer {
+                                            state: State::from(line_vec[0].clone()),
+                                            tile: line_vec[1].clone(),
+                                            coords: 
+                                                [line_vec[2].parse()?,
+                                                line_vec[3].parse()?],
+                                            large_coords: None,
+                                            sub_state: {
+                                                if line_vec.get(4).is_some() {
+                                                    Some(State::from(line_vec[4].clone()))
+                                                } else {
+                                                    None
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                        i_line,
+                                        raw_line.trim().to_string(),
+                                        path.path()
+                                    ))
+                                }
+                            },
+                            LayerSet::Statue(simple_layers) => {
+                                if len > 5 {
+                                    if simple_layer.state.ne(&State::Empty) {
+                                        simple_layers.push(simple_layer.clone());
+                                    }
+
+                                    let c = [line_vec[2].parse()?,
+                                        line_vec[3].parse()?];
+                                    let l_c = [line_vec[4].parse()?,
+                                        line_vec[5].parse()?];
                                     let large;
                                     if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
                                         large = [l_c[0]-c[0], l_c[1]-c[1]];
                                     } else {
-                                        panic!("impossible large coordinates import at {}", raw_line.trim())
+                                        return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                            i_line,
+                                            raw_line.trim().to_string(),
+                                            path.path()
+                                        ))
                                     }
                                     simple_layer = SimpleLayer {
                                         state: State::from(line_vec[0].clone()),
                                         tile: line_vec[1].clone(),
                                         coords: c,
                                         large_coords: Some(large),
-                                        sub_state: {
-                                            if line_vec.get(7).is_some() {
-                                                Some(State::from(line_vec[7].clone()))
-                                            } else {
-                                                None
-                                            }
-                                        }
+                                        sub_state: None
                                     }
                                 } else {
-                                    simple_layer = SimpleLayer {
-                                        state: State::from(line_vec[0].clone()),
-                                        tile: line_vec[1].clone(),
-                                        coords: 
-                                            [line_vec[2].parse::<u32>().unwrap_or_default(),
-                                            line_vec[3].parse::<u32>().unwrap_or_default()],
-                                        large_coords: None,
-                                        sub_state: {
-                                            if line_vec.get(4).is_some() {
-                                                Some(State::from(line_vec[4].clone()))
-                                            } else {
-                                                None
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            LayerSet::Statue(simple_layers) => {
-                                if simple_layer.state.ne(&State::Empty) {
-                                    simple_layers.push(simple_layer.clone());
-                                }
-                                let c = [line_vec[2].parse::<u32>().unwrap_or_default(),
-                                    line_vec[3].parse::<u32>().unwrap_or_default()];
-                                let l_c = [line_vec[4].parse::<u32>().unwrap_or_default(),
-                                    line_vec[5].parse::<u32>().unwrap_or_default()];
-                                let large;
-                                if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-                                    large = [l_c[0]-c[0], l_c[1]-c[1]];
-                                } else {
-                                    panic!("impossible large coordinates import at {}", raw_line.trim())
-                                }
-                                simple_layer = SimpleLayer {
-                                    state: State::from(line_vec[0].clone()),
-                                    tile: line_vec[1].clone(),
-                                    coords: c,
-                                    large_coords: Some(large),
-                                    sub_state: None
+                                    return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                        i_line,
+                                        raw_line.trim().to_string(),
+                                        path.path()
+                                    ))
                                 }
                             },
                             LayerSet::Layered(..) => {
                                 if condition.ne(&Condition::default()) {
                                     layer.conditions.push(condition.clone());
                                 }
-                                condition = Condition::from(line_vec.clone());
+                                condition = Condition::from(line_vec.clone())?;
                             },
-                            _ => {}
+                            _ => {
+                                return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
+                                    i_line,
+                                    raw_line.trim().to_string(),
+                                    path.path()
+                                ))
+                            }
                         }
                     }                                
                 }
@@ -446,11 +547,10 @@ impl Graphics {
         }
     }
 
-    fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+    fn export(&self, path: &path::PathBuf) -> Result<()> {
         fs::DirBuilder::new()
             .recursive(true)
-            .create(path.join("graphics").join("images"))
-            .expect("should always find or build directory in folder with permissions");
+            .create(path.join("graphics").join("images"))?;
 
         for tile_page in self.tile_pages.iter() {
             tile_page.export(&path)?;
@@ -484,32 +584,33 @@ impl CreatureFile {
         }
     }
 
-    fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+    fn export(&self, path: &path::PathBuf) -> Result<()> {
         let creature_file = fs::File::create(
             path
             .join("graphics")
             .join(format!("graphics_creatures_{}.txt",
             self.name.clone().to_case(Case::Snake)))
-        ).expect("creature file creation should not fail");
+        )?;
 
         let mut creature_writer = io::LineWriter::new(creature_file);
         
         creature_writer.write_all(format!(
             "graphics_creatures_{}\n\n[OBJECT:GRAPHICS]\n\n",
-            self.name.to_case(Case::Snake)
-        ).as_bytes())?;
+            self.name.to_case(Case::Snake))
+            .as_bytes()
+        )?;
 
         for creature in self.creatures.iter() {
-            creature_writer.write_all(creature.export()?.as_bytes()).expect("should always push a successful string");
+            creature_writer.write_all(creature.export().as_bytes())?;
         }
         
-        creature_writer.flush().expect("flush should succeed for any reasonable case");
+        creature_writer.flush()?;
 
         Ok(())
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq)]
 enum State {
     #[default]
     Empty,
@@ -582,16 +683,6 @@ enum LayerSet {
     Layered(State, Vec<LayerGroup>),
 }
 impl LayerSet {
-    // fn name(&self) -> String {
-    //     match self {
-    //         LayerSet::Simple(..) => "SIMPLE".to_string(),
-    //         LayerSet::Statue(..) => "STATUE".to_string(),
-    //         LayerSet::Layered(..) => "LAYERED".to_string(),
-    //         LayerSet::Empty => "(none)".to_string(),
-    //         _ => "(unexpected state)".to_string(),
-    //     }
-    // }
-
     fn layer_set_menu(&mut self, ui: &mut Ui) {
         ui.separator();
 
@@ -628,20 +719,20 @@ impl LayerSet {
         }
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
+    fn export(&self) -> String {
         let mut out = String::new();
 
         match self {
             LayerSet::Simple(simple_layers) => {
                 for simple_layer in simple_layers {
-                    out.push_str(&simple_layer.export()?);
+                    out.push_str(&simple_layer.export());
                 }
 
                 out.push_str("\n");
             },
             LayerSet::Statue(simple_layers) => {
                 for simple_layer in simple_layers {
-                    out.push_str(&simple_layer.export_statue()?);
+                    out.push_str(&simple_layer.export_statue());
                 }
 
                 out.push_str("\n");
@@ -650,13 +741,13 @@ impl LayerSet {
                 out.push_str(&format!("\t[LAYER_SET:{}]\n", state.name()));
 
                 for layer_group in layer_groups {
-                    out.push_str(&layer_group.export()?);
+                    out.push_str(&layer_group.export());
                 }
             },
             LayerSet::Empty => {}
         }
 
-        Ok(out)
+        out
     }
 }
 
@@ -686,7 +777,7 @@ impl Creature {
 
         ui.add_space(PADDING);
         if ui.button("Add simple layer").clicked() {
-            if self.graphics_type.iter().any(|ls| match ls { LayerSet::Layered(..) => true, _ => false, }) {
+            if self.graphics_type.iter().any(|ls| match ls { LayerSet::Layered(..) => true, _ => false}) {
                 self.graphics_type.insert(0, LayerSet::Simple(vec![SimpleLayer::empty()]));
             } else {
                 self.graphics_type.push(LayerSet::Simple(vec![SimpleLayer::empty()]));
@@ -704,23 +795,37 @@ impl Creature {
         }
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
+    fn sort_layer_sets(layer_sets: &Vec<LayerSet>) -> Vec<LayerSet> {
+        let mut statues = layer_sets.clone();
+        let mut simples = layer_sets.clone();
+        let mut layereds = layer_sets.clone();
+
+        statues.retain(|ls| if let LayerSet::Statue(..) = ls {true} else {false});
+        simples.retain(|ls| if let LayerSet::Simple(..) = ls {true} else {false});
+        layereds.retain(|ls| if let LayerSet::Layered(..) = ls {true} else {false});
+        
+        [statues, simples, layereds].concat()
+    }
+
+    fn export(&self) -> String {
         let mut out = String::new();
 
-        for graphics_type in self.graphics_type.iter() {
-            if let LayerSet::Statue(_) = graphics_type {
-                if out.is_empty() && (self.graphics_type.len() == 1) {
+        let mut layer_sets = Self::sort_layer_sets(&self.graphics_type);
+
+        for layer_set in layer_sets.iter_mut() {//test
+            if let LayerSet::Statue(simple_layers) = layer_set {
+                if !out.contains("[STATUE_CREATURE_GRAPHICS ") {
                     out.push_str(&format!(
                         "[STATUE_CREATURE_GRAPHICS:{}]\n",
                         self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
                     ));
-                } else if self.graphics_type.len() > 1 {
-                    panic!("statue graphics with too many layers");
+                } else if simple_layers.len() > 1 {
+                    simple_layers.drain(1..);
                 }
-            } else if let LayerSet::Empty = graphics_type {
+            } else if let LayerSet::Empty = layer_set {
                 
             } else {
-                if out.is_empty() {
+                if !out.contains("[CREATURE_GRAPHICS") {
                     out.push_str(&format!(
                         "[CREATURE_GRAPHICS:{}]\n",
                         self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
@@ -728,10 +833,10 @@ impl Creature {
                 }
             }
             
-            out.push_str(&graphics_type.export()?);
+            out.push_str(&layer_set.export());
         }
 
-        Ok(out)
+        out
     }
 }
 
@@ -837,7 +942,7 @@ impl SimpleLayer {
         ui.add_space(PADDING);
         ui.label("Preview:");
         egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+            ui.add(egui::Label::new(self.export()).wrap(false));
         });
     }
 
@@ -887,14 +992,14 @@ impl SimpleLayer {
         ui.add_space(PADDING);
         ui.label("Preview:");
         egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+            ui.add(egui::Label::new(self.export()).wrap(false));
         });
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
+    fn export(&self) -> String {
         if let Some([x2, y2]) = self.large_coords {
             if let Some(sub_state) = &self.sub_state {
-                Ok(format!(
+                format!(
                     "\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS:{}]\n",
                     self.state.name(),
                     self.tile,
@@ -903,9 +1008,9 @@ impl SimpleLayer {
                     self.coords[0] + x2,
                     self.coords[1] + y2,
                     sub_state.name(),
-                ))
+                )
             } else {
-                Ok(format!(
+                format!(
                     "\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
                     self.state.name(),
                     self.tile,
@@ -913,42 +1018,42 @@ impl SimpleLayer {
                     self.coords[1],
                     self.coords[0] + x2,
                     self.coords[1] + y2,
-                ))
+                )
             }
         } else {
             if let Some(sub_state) = &self.sub_state {
-                Ok(format!(
+                format!(
                     "\t\t[{}:{}:{}:{}:AS_IS:{}]\n",
                     self.state.name(),
                     self.tile,
                     self.coords[0],
                     self.coords[1],
                     sub_state.name(),
-                ))
+                )
             } else {
-                Ok(format!(
+                format!(
                     "\t[{}:{}:{}:{}:AS_IS]\n",
                     self.state.name(),
                     self.tile,
                     self.coords[0],
                     self.coords[1],
-                ))
+                )
             }
         }
     }
 
-    fn export_statue(&self) -> Result<String, Box<dyn Error>> {
-        let [x2, y2] = self.large_coords.ok_or("export statue without large coordinates")?;
-
-        Ok(format!(
-            "\t[{}:{}:{}:{}:{}:{}]\n",
-            self.state.name(),
-            self.tile,
-            self.coords[0],
-            self.coords[1],
-            self.coords[0] + x2,
-            self.coords[1] + y2,
-        ))
+    fn export_statue(&self) -> String {
+        if let Some([x2, y2]) = self.large_coords {
+            format!(
+                "\t[{}:{}:{}:{}:{}:{}]\n",
+                self.state.name(),
+                self.tile,
+                self.coords[0],
+                self.coords[1],
+                self.coords[0] + x2,
+                self.coords[1] + y2,
+            )
+        } else {String::new()}
     }
 }
 
@@ -1041,7 +1146,7 @@ impl Layer {
                 .id_source("Preview scroll")
                 .show(&mut ui[0], |ui| {
                 ui.add(egui::Label::new(
-                    layer.export().expect("should always create valid string"))
+                    layer.export())
                     .wrap(false)
                 );
             });
@@ -1065,12 +1170,12 @@ impl Layer {
             });
 
             if let Some(i_cond) = delete {
-                conditions.remove(i_cond);
+                conditions.remove(i_cond);//checked
             }
         });
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
+    fn export(&self) -> String {
         let mut out = String::new();
 
         if let Some([x2, y2]) = self.large_coords {
@@ -1094,10 +1199,10 @@ impl Layer {
         }
 
         for condition in self.conditions.iter() {
-            out.push_str(&condition.export()?);
+            out.push_str(&condition.export());
         }
 
-        Ok(out)
+        out
     }
 }
 
@@ -1134,24 +1239,20 @@ impl LayerGroup {
         ui.add_space(PADDING);
         ui.label("Preview:");
         egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+            ui.add(egui::Label::new(self.export()).wrap(false));
         });
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
+    fn export(&self) -> String {
         let mut out = String::new();
 
-        // dbg!(&self.name);
-
         out.push_str(&format!("\t\t[LAYER_GROUP] ---{}---\n", self.name));
-
         for layer in self.layers.iter() {
-            out.push_str(&layer.export()?);
+            out.push_str(&layer.export());
         }
-
         out.push_str("\n");
 
-        Ok(out)
+        out
     }
 }
 
@@ -1371,27 +1472,52 @@ impl ItemType {
         }
     }
 
-    fn from(strings: Vec<String>) -> (ItemType, Vec<String>) {
+    fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
+        let len = strings.len();
         match strings[0].as_str() {
             "BY_CATEGORY" => {
-                (ItemType::ByCategory(strings[1].clone(),
-                Equipment::from(strings[2].clone())),
-                strings[3..].to_vec())
+                if len > 3 {
+                    Ok(
+                        (ItemType::ByCategory(strings[1].clone(),
+                        Equipment::from(strings[2].clone())),
+                        strings[3..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                }
             },
             "BY_TOKEN" => {
-                (ItemType::ByToken(strings[1].clone(),
-                Equipment::from(strings[2].clone())),
-                strings[3..].to_vec())
+                if len > 3 {
+                    Ok(
+                        (ItemType::ByToken(strings[1].clone(),
+                        Equipment::from(strings[2].clone())),
+                        strings[3..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                }
             },
             "ANY_HELD" => {
-                (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
-                strings[2..].to_vec())
+                if len > 2 {
+                    Ok(
+                        (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
+                        strings[2..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                }
             },
             "WIELD" => {
-                (ItemType::Wield(Equipment::from(strings[1].clone())),
-                strings[2..].to_vec())
+                if len > 2 {
+                    Ok(
+                        (ItemType::Wield(Equipment::from(strings[1].clone())),
+                        strings[2..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                }
             },
-            _ => {(ItemType::None, strings)}
+            _ => {Ok((ItemType::None, strings))}
         }
     }
 }
@@ -1562,104 +1688,195 @@ impl Condition {
         }
     }
 
-    fn from(mut line_vec: Vec<String>) -> Condition {
-        match line_vec[0].as_str() {
-            "(default)" => Condition::Default,
-            "CONDITION_ITEM_WORN" => {
-                let (item_type, items) = ItemType::from(line_vec[1..].to_vec());
-                Condition::ItemWorn(item_type, items)
-            },
-            "SHUT_OFF_IF_ITEM_PRESENT" => {
-                let (item_type, items) = ItemType::from(line_vec[1..].to_vec());
-                Condition::ShutOffIfItemPresent(item_type, items)
-            },
-            "CONDITION_DYE" => Condition::Dye(
-                line_vec[1].clone()
-            ),
-            "CONDITION_NOT_DYED" => Condition::NotDyed,
-            "CONDITION_MATERIAL_FLAG" => Condition::MaterialFlag(
-                line_vec[1..]
-                    .iter()
-                    .map(|flag| MaterialFlag::from(flag.clone()))
-                    .collect()
-            ),
-            "CONDITION_MATERIAL_TYPE" => Condition::MaterialType(
-                Metal::from(line_vec[2].clone())
-            ),
-            "CONDITION_PROFESSION_CATEGORY" => Condition::ProfessionCategory(
-                line_vec[1..]
-                    .iter()
-                    .map(|prof| Profession::from(prof.clone()))
-                    .collect()
-            ),
-            "CONDITION_RANDOM_PART_INDEX" => Condition::RandomPartIndex(
-                line_vec[1].clone(),
-                line_vec[2].parse::<u32>().unwrap_or_default(),
-                line_vec[3].parse::<u32>().unwrap_or_default()
-            ),
-            "CONDITION_HAUL_COUNT_MIN" => Condition::HaulCountMin(
-                line_vec[1].parse::<u32>().unwrap_or_default()
-            ),
-            "CONDITION_HAUL_COUNT_MAX" => Condition::HaulCountMax(
-                line_vec[1].parse::<u32>().unwrap_or_default()
-            ),
-            "CONDITION_CHILD" => Condition::Child,
-            "CONDITION_NOT_CHILD" => Condition::NotChild,
-            "CONDITION_CASTE" => Condition::Caste(
-                line_vec[1].clone()
-            ),
-            "CONDITION_GHOST" => Condition::Ghost,
-            "CONDITION_SYN_CLASS" => Condition::SynClass(
-                line_vec.drain(1..).collect()
-            ),
-            "CONDITION_TISSUE_LAYER" => Condition::TissueLayer(
-                line_vec[2].clone(),
-                line_vec[3].clone(),
-            ),
-            "TISSUE_MIN_LENGTH" => Condition::TissueMinLength(
-                line_vec[1].parse::<u32>().unwrap_or_default()
-            ),
-            "TISSUE_MAX_LENGTH" => Condition::TissueMaxLength(
-                line_vec[1].parse::<u32>().unwrap_or_default()
-            ),
-            "TISSUE_MAY_HAVE_COLOR" => Condition::TissueMayHaveColor(
-                line_vec.drain(1..).collect()
-            ),
-            "TISSUE_MAY_HAVE_SHAPING" => Condition::TissueMayHaveShaping(
-                line_vec.drain(1..).collect()
-            ),
-            "TISSUE_NOT_SHAPED" => Condition::TissueNotShaped,
-            "TISSUE_SWAP" => {
-                if line_vec[4].eq("LARGE_IMAGE") {
-                    let c = [line_vec[5].parse::<u32>().unwrap_or_default(),
-                        line_vec[6].parse::<u32>().unwrap_or_default()];
-                    let l_c = [line_vec[7].parse::<u32>().unwrap_or_default(),
-                        line_vec[8].parse::<u32>().unwrap_or_default()];
-                    let large;
-                    if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-                        large = [l_c[0]-c[0], l_c[1]-c[1]];
+    fn from(mut line_vec: Vec<String>) -> Result<Condition> {
+        let len = line_vec.len();
+        if len > 0 {
+            match line_vec[0].as_str() {
+                "(default)" => Ok(Condition::Default),
+                "CONDITION_ITEM_WORN" => {
+                    let (item_type, items) = ItemType::from(line_vec[1..].to_vec())?;
+                    Ok(Condition::ItemWorn(item_type, items))
+                },
+                "SHUT_OFF_IF_ITEM_PRESENT" => {
+                    let (item_type, items) = ItemType::from(line_vec[1..].to_vec())?;
+                    Ok(Condition::ShutOffIfItemPresent(item_type, items))
+                },
+                "CONDITION_DYE" => {
+                    if len > 1 {
+                        Ok(Condition::Dye(line_vec[1].clone()))
                     } else {
-                        panic!("impossible large coordinates import condition");
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
                     }
-                    Condition::TissueSwap(
-                        line_vec[1].clone(),
-                        line_vec[2].parse::<u32>().unwrap_or_default(),
-                        line_vec[3].clone(),
-                        c,
-                        Some(large),
-                    )
-                } else {
-                    Condition::TissueSwap(
-                        line_vec[1].clone(),
-                        line_vec[2].parse::<u32>().unwrap_or_default(),
-                        line_vec[3].clone(),
-                        [line_vec[4].parse::<u32>().unwrap_or_default(), 
-                        line_vec[5].parse::<u32>().unwrap_or_default()],
-                        None,
-                    )
-                }
-            },
-            other => Condition::Custom(other.to_string()),
+                },
+                "CONDITION_NOT_DYED" => Ok(Condition::NotDyed),
+                "CONDITION_MATERIAL_FLAG" => {
+                    if len > 2 {
+                        Ok(Condition::MaterialFlag(
+                            line_vec[1..]
+                                .iter()
+                                .map(|flag| MaterialFlag::from(flag.clone()))
+                                .collect()
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_MATERIAL_TYPE" => {
+                    if len > 2 {
+                        Ok(Condition::MaterialType(
+                            Metal::from(line_vec[2].clone())
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_PROFESSION_CATEGORY" => {
+                    if len > 1 {
+                        Ok(Condition::ProfessionCategory(
+                            line_vec[1..]
+                                .iter()
+                                .map(|prof| Profession::from(prof.clone()))
+                                .collect()
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_RANDOM_PART_INDEX" => {
+                    if len > 3 {
+                        Ok(Condition::RandomPartIndex(
+                            line_vec[1].clone(),
+                            line_vec[2].parse()?,
+                            line_vec[3].parse()?
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_HAUL_COUNT_MIN" => {
+                    if len > 1 {
+                        Ok(Condition::HaulCountMin(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_HAUL_COUNT_MAX" => {
+                    if len > 1 {
+                        Ok(Condition::HaulCountMax(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_CHILD" => Ok(Condition::Child),
+                "CONDITION_NOT_CHILD" => Ok(Condition::NotChild),
+                "CONDITION_CASTE" => {
+                    if len > 1 {
+                        Ok(Condition::Caste(
+                            line_vec[1].clone()
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_GHOST" => Ok(Condition::Ghost),
+                "CONDITION_SYN_CLASS" => {
+                    if len > 1 {
+                        Ok(Condition::SynClass(
+                            line_vec.drain(1..).collect()
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "CONDITION_TISSUE_LAYER" => {
+                    if len > 3 {
+                        Ok(Condition::TissueLayer(
+                            line_vec[2].clone(),
+                            line_vec[3].clone(),
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "TISSUE_MIN_LENGTH" => {
+                    if len > 0 {
+                        Ok(Condition::TissueMinLength(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "TISSUE_MAX_LENGTH" => {
+                    if len > 1 {
+                        Ok(Condition::TissueMaxLength(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "TISSUE_MAY_HAVE_COLOR" => {
+                    if len > 1 {
+                        Ok(Condition::TissueMayHaveColor(
+                            line_vec.drain(1..).collect()
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "TISSUE_MAY_HAVE_SHAPING" => {
+                    if len > 1 {
+                        Ok(Condition::TissueMayHaveShaping(
+                            line_vec.drain(1..).collect()
+                        ))
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                "TISSUE_NOT_SHAPED" => Ok(Condition::TissueNotShaped),
+                "TISSUE_SWAP" => {
+                    if len > 5 {
+                        if line_vec[4].eq("LARGE_IMAGE") && len > 8 {
+                            let c = [line_vec[5].parse()?,
+                                line_vec[6].parse()?];
+                            let l_c = [line_vec[7].parse()?,
+                                line_vec[8].parse()?];
+                            let large;
+                            if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                large = [l_c[0]-c[0], l_c[1]-c[1]]; 
+                                Ok(Condition::TissueSwap(
+                                    line_vec[1].clone(),
+                                    line_vec[2].parse()?,
+                                    line_vec[3].clone(),
+                                    c,
+                                    Some(large),
+                                ))
+                            } else {
+                                return Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                            }
+                        } else {
+                            Ok(Condition::TissueSwap(
+                                line_vec[1].clone(),
+                                line_vec[2].parse()?,
+                                line_vec[3].clone(),
+                                [line_vec[4].parse()?, 
+                                line_vec[5].parse()?],
+                                None,
+                            ))
+                        }
+                    } else {
+                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                    }
+                },
+                other => Ok(Condition::Custom(other.to_string())),
+            }
+        } else {
+            Err(DFGHError::ImportConditionError(line_vec.join(":")))
         }
     }
 
@@ -1960,7 +2177,7 @@ impl Condition {
                 ui.label(
                     "In vanilla, only used for metal weapons and armor (e.g. METAL:IRON).",
                 );
-                ui.hyperlink_to("At least some material flags are currently unusable (v50.05 //todo recheck).", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_TYPE");
+                ui.hyperlink_to("Only METAL:<weapons metal> tokens are currently valid (v50.05).", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_TYPE");
             }
             Condition::ProfessionCategory(professions) => {
                 for profession in professions.iter_mut() {
@@ -2221,9 +2438,12 @@ impl Condition {
                 );
             }
         }
+
+        ui.add_space(PADDING);
+        ui.label(self.export());
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
+    fn export(&self) -> String {
         let mut out;
 
         match self {
@@ -2445,7 +2665,7 @@ impl Condition {
             },
         }
 
-        Ok(out)
+        out
     }
 }
 
@@ -2469,28 +2689,28 @@ impl TilePage {
         }
     }
 
-    fn export(&self, path: &path::PathBuf) -> Result<(), Box<dyn Error>> {
+    fn export(&self, path: &path::PathBuf) -> Result<()> {
         let tile_page_file = fs::File::create(
             path
             .join("graphics")
             .join(format!("tile_page_{}.txt",
             self.name.clone().to_case(Case::Snake)))
-        ).expect("tile page file creation should not fail");
+        )?;
 
         let mut tile_page_writer = io::LineWriter::new(tile_page_file);
         
         tile_page_writer.write_all(format!(
             "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
             self.name.to_case(Case::Snake)
-        ).as_bytes()).expect("should always be able to write to a fresh text file");
+            ).as_bytes()
+        )?;
 
         for tile in self.tiles.iter() {
-            tile_page_writer.write_all(tile.export()?
-                .as_bytes())
-                .expect("should always be able to append a text file");
+            tile_page_writer.write_all(tile.export()
+                .as_bytes())?;
         }
         
-        tile_page_writer.flush().expect("should always be able to end a text file");
+        tile_page_writer.flush()?;
 
         Ok(())
     }
@@ -2552,21 +2772,19 @@ impl Tile {
         ui.add_space(PADDING);
         ui.label("Preview:");
         egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.add(egui::Label::new(self.export().expect("should always make a valid layer")).wrap(false));
+            ui.add(egui::Label::new(self.export()).wrap(false));
         });
     }
 
-    fn export(&self) -> Result<String, Box<dyn Error>> {
-        Ok(
-            format!(
-                "[TILE_PAGE:{}]\n\t[FILE:images/{}.png]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
-                self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-                self.filename.with_boundaries(&[Boundary::Space]).to_case(Case::Snake),
-                self.tile_size.get(0).expect("tile size should be populated"),
-                self.tile_size.get(1).expect("tile size should be populated"),
-                self.image_size.get(0).expect("image size should be populated"),
-                self.image_size.get(1).expect("image size should be populated")
-            )
+    fn export(&self) -> String {
+        format!(
+            "[TILE_PAGE:{}]\n\t[FILE:images/{}.png]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
+            self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
+            self.filename.with_boundaries(&[Boundary::Space]).to_case(Case::Snake),
+            self.tile_size[0],
+            self.tile_size[1],
+            self.image_size[0],
+            self.image_size[1]
         )
     }
 }
@@ -2705,19 +2923,52 @@ impl GraphicsIndices {
         }
     }
 
-    fn from(array: [usize; 8]) -> GraphicsIndices {
+    fn from(index_array: [usize; 8]) -> GraphicsIndices {
         GraphicsIndices {
-            tile_page_index: array[0],
-            tile_index: array[1],
-            creature_file_index: array[2],
-            creature_index: array[3],
-            layer_set_index: array[4],
-            layer_group_index: array[5],
-            layer_index: array[6],
-            condition_index: array[7]
+            tile_page_index:        index_array[0],
+            tile_index:             index_array[1],
+            creature_file_index:    index_array[2],
+            creature_index:         index_array[3],
+            layer_set_index:        index_array[4],
+            layer_group_index:      index_array[5],
+            layer_index:            index_array[6],
+            condition_index:        index_array[7]
         }
     }
 }
+
+//Dwarf Fortress Graphics Helper Error
+#[derive(Debug, Error)]
+enum DFGHError {
+    #[error("No error")]
+    None,
+
+    #[error("An error occured while opening or closing a file.")]
+    IoError(#[from] std::io::Error),
+
+    #[error("An error occured while processing the image.")]
+    ImageError(#[from] image::ImageError),
+
+    #[error("An error occured while attempting to import. Line {0}:\n{1}\nFile: \n{2}")]
+    ImportError(usize, String, path::PathBuf),
+
+    #[error("Failed to parse an integer from imported string.")]
+    ImportParseError(#[from] std::num::ParseIntError),
+
+    #[error("An error occured while attempting to import a condition:\n{0}")]
+    ImportConditionError(String),
+
+    #[error("No mod/graphics/ directory found at path {0}")]
+    NoGraphicsDirectory(path::PathBuf),
+
+    #[error("File name is unsupported (non UTF-8). {0}")]
+    UnsupportedFileName(path::PathBuf),
+
+    #[error("Index out of bounds: ")]
+    IndexError,
+}
+
+type Result<T> = std::result::Result<T, DFGHError>;
 
 struct DFGraphicsHelper {
     main_window: MainWindow,
@@ -2732,9 +2983,10 @@ struct DFGraphicsHelper {
     copied: ContextData,
     undo_buffer: Vec<(Graphics, GraphicsIndices)>,
     redo_buffer: Vec<(Graphics, GraphicsIndices)>,
+    exception: DFGHError,
 }
 impl DFGraphicsHelper {
-    fn new() -> Self {
+    fn new(_cc: &eframe::CreationContext) -> Self {
         Self {
             main_window: MainWindow::DefaultMenu,
             loaded_graphics: Graphics::new(),
@@ -2748,161 +3000,8 @@ impl DFGraphicsHelper {
             copied: ContextData::default(),
             undo_buffer: Vec::with_capacity(1000),
             redo_buffer: Vec::with_capacity(100),
+            exception: DFGHError::None,
         }
-    }
-
-    fn delete(&mut self, selected: ContextData) {
-        self.save_state();
-        
-        let graphics = &mut self.loaded_graphics;
-        let indices = &mut self.indices;
-
-        match selected {
-            ContextData::TilePage(_) => {
-                graphics.tile_pages.remove(indices.tile_page_index);
-                if indices.tile_page_index >=1 {
-                    indices.tile_page_index -= 1;
-                } else {
-                    self.main_window = MainWindow::TilePageDefaultMenu;
-                }
-            },
-            ContextData::Tile(_) => {
-                graphics.tile_pages
-                    .get_mut(indices.tile_page_index)
-                    .unwrap()
-                    .tiles
-                    .remove(indices.tile_index);
-                if indices.tile_index >=1 {
-                    indices.tile_index -= 1;
-                } else {
-                    self.main_window = MainWindow::TilePageMenu;
-                }
-            },
-            ContextData::CreatureFile(_) => {
-                graphics.creature_files.remove(indices.creature_file_index);
-                if indices.creature_file_index >=1 {
-                    indices.creature_file_index -= 1;
-                } else {
-                    self.main_window = MainWindow::CreatureDefaultMenu;
-                }
-            },
-            ContextData::Creature(_) => {
-                graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .remove(indices.creature_index);
-                if indices.creature_index >=1 {
-                    indices.creature_index -= 1;
-                } else {
-                    self.main_window = MainWindow::CreatureFileMenu;
-                }
-            },
-            ContextData::LayerSet(_) => {
-                graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .remove(indices.layer_set_index);
-                if indices.layer_set_index >=1 {
-                    indices.layer_set_index -= 1;
-                } else {
-                    self.main_window = MainWindow::CreatureMenu;
-                }
-            },
-            ContextData::LayerGroup(_) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    layer_groups
-                    .remove(indices.layer_group_index);
-                    if indices.layer_group_index >=1 {
-                        indices.layer_group_index -= 1;
-                    } else {
-                        self.main_window = MainWindow::LayerSetMenu;
-                    }
-                }
-            },
-            ContextData::SimpleLayer(_) => {
-                if let LayerSet::Simple(simple_layers) |
-                    LayerSet::Statue(simple_layers) = 
-                    graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    simple_layers
-                    .remove(indices.layer_index);
-                    if indices.layer_index >=1 {
-                        indices.layer_index -= 1;
-                    } else {
-                        self.main_window = MainWindow::CreatureMenu;
-                    }
-                }
-            },
-            ContextData::Layer(_) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    layer_groups
-                    .get_mut(indices.layer_group_index)
-                    .unwrap()
-                    .layers
-                    .remove(indices.layer_index);
-                    if indices.layer_index >=1 {
-                        indices.layer_index -= 1;
-                    } else {
-                        self.main_window = MainWindow::LayerGroupMenu;
-                    }
-                }
-            },
-            ContextData::Condition(_) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    layer_groups
-                    .get_mut(indices.layer_group_index)
-                    .unwrap()
-                    .layers
-                    .get_mut(indices.layer_index)
-                    .unwrap()
-                    .conditions
-                    .remove(indices.condition_index);
-                    if indices.condition_index >=1 {
-                        indices.condition_index -= 1;
-                    } else {
-                        self.main_window = MainWindow::LayerMenu;
-                    }
-                }
-            },
-            ContextData::None => {},
-        }
-        self.context_action = Action::None;
     }
 
     fn undo(&mut self) {
@@ -2928,150 +3027,6 @@ impl DFGraphicsHelper {
             (self.loaded_graphics, self.indices) = pop;
         }
 
-        self.context_action = Action::None;
-    }
-
-    fn save_state(&mut self) {
-        self.undo_buffer.push((self.loaded_graphics.clone(), self.indices));
-
-        if !self.redo_buffer.is_empty() {
-            self.redo_buffer.clear();
-        }
-    }
-
-    fn copy(&mut self, selected: ContextData) {
-        self.copied = ContextData::from(selected.clone());
-        self.context_action = Action::None;
-    }
-
-    fn cut(&mut self, selected: ContextData) {
-        self.save_state();
-
-        self.copied = ContextData::from(selected.clone());
-
-        self.delete(selected);
-    }
-
-    fn paste(&mut self) {
-        let data = self.copied.clone();
-        self.insert(data);
-    }
-
-    fn insert(&mut self, data: ContextData) {
-        self.save_state();
-
-        let graphics = &mut self.loaded_graphics;
-        let indices = &mut self.indices;
-
-        match data {
-            ContextData::TilePage(tile_page) => {
-                graphics.tile_pages.insert(indices.tile_page_index, tile_page.clone());
-                self.main_window = MainWindow::TilePageMenu;
-            },
-            ContextData::Tile(tile) => {
-                graphics.tile_pages
-                    .get_mut(indices.tile_page_index)
-                    .unwrap()
-                    .tiles
-                    .insert(indices.tile_index, tile.clone());
-                self.main_window = MainWindow::TileMenu;
-            },
-            ContextData::CreatureFile(creature_file) => {
-                graphics.creature_files.insert(indices.creature_file_index, creature_file.clone());
-                self.main_window = MainWindow::CreatureFileMenu;
-            },
-            ContextData::Creature(creature) => {
-                graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .insert(indices.creature_index, creature.clone());
-                self.main_window = MainWindow::CreatureMenu;
-            },
-            ContextData::LayerSet(layer_set) => {
-                graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .insert(indices.layer_set_index, layer_set.clone());
-                self.main_window = MainWindow::LayerSetMenu;
-            },
-            ContextData::LayerGroup(layer_group) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    layer_groups
-                    .insert(indices.layer_group_index, layer_group.clone());
-                self.main_window = MainWindow::LayerGroupMenu;
-                }
-            },
-            ContextData::SimpleLayer(simple_layer) => {
-                if let LayerSet::Simple(simple_layers) |
-                    LayerSet::Statue(simple_layers) = 
-                    graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    simple_layers
-                    .insert(indices.layer_index, simple_layer.clone());
-                self.main_window = MainWindow::LayerMenu;
-                }
-            },
-            ContextData::Layer(layer) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    layer_groups
-                    .get_mut(indices.layer_group_index)
-                    .unwrap()
-                    .layers
-                    .insert(indices.layer_index, layer.clone());
-                    self.main_window = MainWindow::LayerMenu;
-                }
-            },
-            ContextData::Condition(condition) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .unwrap()
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .unwrap()
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .unwrap() {
-                    layer_groups
-                    .get_mut(indices.layer_group_index)
-                    .unwrap()
-                    .layers
-                    .get_mut(indices.layer_index)
-                    .unwrap()
-                    .conditions
-                    .insert(indices.condition_index, condition.clone());
-                    self.main_window = MainWindow::ConditionMenu;
-                }
-            },
-            ContextData::None => {},
-        }
         self.context_action = Action::None;
     }
 
@@ -3146,8 +3101,347 @@ impl DFGraphicsHelper {
             });
             action = inner_action;
         }
-
         return action
+    }
+
+    fn save_state(&mut self) {
+        self.undo_buffer.push((self.loaded_graphics.clone(), self.indices));
+
+        if !self.redo_buffer.is_empty() {
+            self.redo_buffer.clear();
+        }
+    }
+
+    fn copy(&mut self, selected: ContextData) {
+        self.copied = ContextData::from(selected.clone());
+        self.context_action = Action::None;
+    }
+
+    fn cut(&mut self, selected: ContextData) -> Result<()> {
+        self.save_state();
+
+        self.copied = ContextData::from(selected.clone());
+
+        self.delete(selected)?;
+
+        Ok(())
+    }
+
+    fn paste(&mut self) -> Result<()> {
+        let data = self.copied.clone();
+        self.insert(data)?;
+
+        Ok(())
+    }
+
+    fn insert(&mut self, data: ContextData) -> Result<()> {
+        self.save_state();
+
+        let graphics = &mut self.loaded_graphics;
+        let indices = &mut self.indices;
+
+        match data {
+            ContextData::TilePage(tile_page) => {
+                let tps = &mut graphics.tile_pages;
+                if indices.tile_page_index < tps.len() {
+                    tps.insert(indices.tile_page_index, tile_page.clone());//checked
+                    self.main_window = MainWindow::TilePageMenu;
+                }
+            },
+            ContextData::Tile(tile) => {
+                let ts = &mut graphics.tile_pages
+                    .get_mut(indices.tile_page_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .tiles;
+                if indices.tile_index < ts.len() {
+                    ts.insert(indices.tile_index, tile.clone());//checked
+                    self.main_window = MainWindow::TileMenu;
+                }
+            },
+            ContextData::CreatureFile(creature_file) => {
+                let cfs = &mut graphics.creature_files;
+                if indices.creature_file_index < cfs.len() {
+                    cfs.insert(indices.creature_file_index, creature_file.clone());//checked
+                    self.main_window = MainWindow::CreatureFileMenu;
+                }
+            },
+            ContextData::Creature(creature) => {
+                let cs = &mut graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures;
+                if indices.creature_index < cs.len() {
+                    cs.insert(indices.creature_index, creature.clone());//checked
+                    self.main_window = MainWindow::CreatureMenu;
+                }
+            },
+            ContextData::LayerSet(layer_set) => {
+                let lss = &mut graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type;
+                if indices.layer_set_index < lss.len() {
+                    lss.insert(indices.layer_set_index, layer_set.clone());//checked
+                    self.main_window = MainWindow::LayerSetMenu;
+                }
+            },
+            ContextData::LayerGroup(layer_group) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    if indices.layer_group_index < layer_groups.len() {
+                        layer_groups.insert(indices.layer_group_index, layer_group.clone());//checked
+                        self.main_window = MainWindow::LayerGroupMenu;
+                    }
+                }
+            },
+            ContextData::SimpleLayer(simple_layer) => {
+                if let LayerSet::Simple(simple_layers) |
+                    LayerSet::Statue(simple_layers) = 
+                    graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    if indices.layer_index < simple_layers.len() {
+                        simple_layers.insert(indices.layer_index, simple_layer.clone());//checked
+                        self.main_window = MainWindow::LayerMenu;
+                    }
+                }
+            },
+            ContextData::Layer(layer) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    let ls = &mut layer_groups
+                        .get_mut(indices.layer_group_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .layers;
+                    if indices.layer_index < ls.len() {
+                        ls.insert(indices.layer_index, layer.clone());//checked
+                        self.main_window = MainWindow::LayerMenu;
+                    }
+                }
+            },
+            ContextData::Condition(condition) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    let cs = &mut layer_groups
+                        .get_mut(indices.layer_group_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .layers
+                        .get_mut(indices.layer_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .conditions;
+                    if indices.condition_index < cs.len() {
+                        cs.insert(indices.condition_index, condition.clone());//checked
+                        self.main_window = MainWindow::ConditionMenu;
+                    }
+                }
+            },
+            ContextData::None => {},
+        }
+        self.context_action = Action::None;
+        Ok(())
+    }
+
+    fn delete(&mut self, selected: ContextData) -> Result<()> {
+        self.save_state();
+        
+        let graphics = &mut self.loaded_graphics;
+        let indices = &mut self.indices;
+
+        match selected {
+            ContextData::TilePage(_) => {
+                let tps = &mut graphics.tile_pages;
+                if indices.tile_page_index < tps.len() {
+                    tps.remove(indices.tile_page_index);//checked
+                    if indices.tile_page_index >=1 {
+                        indices.tile_page_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::TilePageDefaultMenu;
+                    }
+                }
+            },
+            ContextData::Tile(_) => {
+                let ts = &mut graphics.tile_pages
+                    .get_mut(indices.tile_page_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .tiles;
+                if indices.tile_index < ts.len() {
+                    ts.remove(indices.tile_index);//checked
+                    if indices.tile_index >=1 {
+                        indices.tile_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::TilePageMenu;
+                    }
+                }
+            },
+            ContextData::CreatureFile(_) => {
+                let cfs = &mut graphics.creature_files;
+                if indices.creature_file_index < cfs.len() {
+                    cfs.remove(indices.creature_file_index);//checked
+                    if indices.creature_file_index >=1 {
+                        indices.creature_file_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::CreatureDefaultMenu;
+                    }
+                }
+            },
+            ContextData::Creature(_) => {
+                let cs = &mut graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures;
+                if indices.creature_index < cs.len() {
+                    cs.remove(indices.creature_index);//checked
+                    if indices.creature_index >=1 {
+                        indices.creature_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::CreatureFileMenu;
+                    }
+                }
+            },
+            ContextData::LayerSet(_) => {
+                let lss = &mut graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type;
+                if indices.layer_set_index < lss.len() {
+                    lss.remove(indices.layer_set_index);//checked
+                    if indices.layer_set_index >=1 {
+                        indices.layer_set_index -= 1;
+                    } else {
+                        self.main_window = MainWindow::CreatureMenu;
+                    }
+                }
+            },
+            ContextData::LayerGroup(_) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    if indices.layer_group_index < layer_groups.len() {
+                        layer_groups.remove(indices.layer_group_index);//checked
+                        if indices.layer_group_index >=1 {
+                            indices.layer_group_index -= 1;
+                        } else {
+                            self.main_window = MainWindow::LayerSetMenu;
+                        }
+                    }
+                }
+            },
+            ContextData::SimpleLayer(_) => {
+                if let LayerSet::Simple(simple_layers) |
+                    LayerSet::Statue(simple_layers) = 
+                    graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    if indices.layer_index < simple_layers.len() {
+                        simple_layers.remove(indices.layer_index);//checked
+                        if indices.layer_index >=1 {
+                            indices.layer_index -= 1;
+                        } else {
+                            self.main_window = MainWindow::CreatureMenu;
+                        }
+                    }
+                }
+            },
+            ContextData::Layer(_) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    let ls = &mut layer_groups
+                        .get_mut(indices.layer_group_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .layers;
+                    if indices.layer_index < ls.len() {
+                        ls.remove(indices.layer_index);//checked
+                        if indices.layer_index >=1 {
+                            indices.layer_index -= 1;
+                        } else {
+                            self.main_window = MainWindow::LayerGroupMenu;
+                        }
+                    }
+                }
+            },
+            ContextData::Condition(_) => {
+                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
+                    .get_mut(indices.creature_file_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .creatures
+                    .get_mut(indices.creature_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .graphics_type
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)? {
+                    let cs = &mut layer_groups
+                        .get_mut(indices.layer_group_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .layers
+                        .get_mut(indices.layer_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .conditions;
+                    if indices.condition_index < cs.len() {
+                        cs.remove(indices.condition_index);//checked
+                        if indices.condition_index >=1 {
+                            indices.condition_index -= 1;
+                        } else {
+                            self.main_window = MainWindow::LayerMenu;
+                        }
+                    }
+                }
+            },
+            ContextData::None => {},
+        }
+        self.context_action = Action::None;
+        Ok(())
     }
 
     fn main_tree(&mut self, ui: &mut Ui, ctx: &Context) {
@@ -3403,7 +3697,7 @@ impl DFGraphicsHelper {
         };
     }
 
-    fn default_menu(&mut self, ui: &mut Ui) {
+    fn default_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.label("Welcome!");
         ui.separator();
 
@@ -3412,119 +3706,20 @@ impl DFGraphicsHelper {
             "DF Graphics Helper on GitHub",
             "https://github.com/BarelyCreative/DF-graphics-helper/tree/main",
         );
+        Ok(())
     }
 
-    fn tile_page_default_menu(&mut self, ui: &mut Ui) {
+    fn tile_page_default_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.label("Tile Page Menu");
         ui.separator();
 
         if ui.small_button("New Tile Page").clicked() {
             self.context_action = Action::Insert(ContextData::TilePage(TilePage::new()));
         }
+        Ok(())
     }
 
-    fn creature_default_menu(&mut self, ui: &mut Ui) {
-        ui.label("Creature File Menu");
-        ui.separator();
-
-        if ui.small_button("New Creature File").clicked() {
-            self.context_action = Action::Insert(ContextData::CreatureFile(CreatureFile::new()));
-        }
-    }
-
-    fn creature_file_menu(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Creature File Menu");
-            if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::CreatureFile(CreatureFile::new()));
-            }
-        });
-        
-        let indices = &mut self.indices;
-
-        if self.loaded_graphics.creature_files.is_empty() {
-            self.main_window = MainWindow::CreatureDefaultMenu;
-        } else {
-            let creature_file = self
-                .loaded_graphics
-                .creature_files
-                .get_mut(indices.creature_file_index)
-                .unwrap();
-
-            ui.separator();
-            ui.text_edit_singleline(&mut creature_file.name);
-            ui.add_space(PADDING);
-
-            if ui.button("New Creature").clicked() {
-                self.context_action = Action::Insert(ContextData::Creature(Creature::new()));
-            }
-        }
-    }
-
-    fn creature_menu(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Creature Menu");
-            if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::Creature(Creature::new()));
-            }
-        });
-
-        let indices = &mut self.indices;
-
-        let creatures = &mut self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .unwrap()
-            .creatures;
-        
-        if creatures.is_empty() {
-            if ui.small_button("Create Creature").clicked() {
-                self.context_action = Action::Insert(ContextData::Creature(Creature::new()));
-            }
-        } else {
-            let creature = creatures
-                .get_mut(indices.creature_index)
-                .unwrap();
-
-            creature.creature_menu(ui);
-        }
-    }
-
-    fn layer_set_menu(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Layer Set Menu");
-            if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::LayerSet(LayerSet::Simple(Vec::new())));
-            }
-        });
-
-        let indices = &mut self.indices;
-
-        let layer_sets = &mut self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .unwrap()
-            .creatures
-            .get_mut(indices.creature_index)
-            .unwrap()
-            .graphics_type;
-        
-        if layer_sets.is_empty() {
-            if ui.small_button("Create Layer Set").clicked() {
-                self.context_action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
-            }
-        } else {
-            let layer_set = layer_sets
-                .get_mut(indices.layer_set_index)
-                .unwrap();
-
-            layer_set.layer_set_menu(ui);
-        }
-    }
-
-    fn tile_page_menu(&mut self, ui: &mut Ui) {
+    fn tile_page_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Tile Page Menu");
             if ui.button("Delete").clicked() {
@@ -3541,7 +3736,7 @@ impl DFGraphicsHelper {
                 .loaded_graphics
                 .tile_pages
                 .get_mut(indices.tile_page_index)
-                .unwrap();
+                .ok_or(DFGHError::IndexError)?;
 
             ui.separator();
             ui.text_edit_singleline(&mut tile_page.name);
@@ -3551,9 +3746,10 @@ impl DFGraphicsHelper {
                 self.context_action = Action::Insert(ContextData::Tile(Tile::new()));
             }
         }
+        Ok(())
     }
 
-    fn tile_menu(&mut self, ui: &mut Ui) {
+    fn tile_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Tile Menu");
             if ui.button("Delete").clicked() {
@@ -3567,7 +3763,7 @@ impl DFGraphicsHelper {
             .loaded_graphics
             .tile_pages
             .get_mut(indices.tile_page_index)
-            .unwrap()
+            .ok_or(DFGHError::IndexError)?
             .tiles;
 
         if tiles.is_empty() {
@@ -3575,17 +3771,125 @@ impl DFGraphicsHelper {
                 self.context_action = Action::Insert(ContextData::Tile(Tile::new()));
             }
         } else {
-            let tile = tiles.get_mut(indices.tile_index).unwrap();
+            let tile = tiles
+                .get_mut(indices.tile_index)
+                .ok_or(DFGHError::IndexError)?;
             let file_name = tile.filename.clone();
 
             tile.tile_menu(ui);
 
             ui.add_space(PADDING);
-            self.preview_image(ui, file_name, None);
+            self.preview_image(ui, file_name, None)?;
         }
+        Ok(())
     }
 
-    fn layer_group_menu(&mut self, ui: &mut Ui) {
+    fn creature_default_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.label("Creature File Menu");
+        ui.separator();
+
+        if ui.small_button("New Creature File").clicked() {
+            self.context_action = Action::Insert(ContextData::CreatureFile(CreatureFile::new()));
+        }
+        Ok(())
+    }
+
+    fn creature_file_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Creature File Menu");
+            if ui.button("Delete").clicked() {
+                self.context_action = Action::Delete(ContextData::CreatureFile(CreatureFile::new()));
+            }
+        });
+        
+        let indices = &mut self.indices;
+
+        if self.loaded_graphics.creature_files.is_empty() {
+            self.main_window = MainWindow::CreatureDefaultMenu;
+        } else {
+            let creature_file = self
+                .loaded_graphics
+                .creature_files
+                .get_mut(indices.creature_file_index)
+                .ok_or(DFGHError::IndexError)?;
+
+            ui.separator();
+            ui.text_edit_singleline(&mut creature_file.name);
+            ui.add_space(PADDING);
+
+            if ui.button("New Creature").clicked() {
+                self.context_action = Action::Insert(ContextData::Creature(Creature::new()));
+            }
+        }
+        Ok(())
+    }
+
+    fn creature_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Creature Menu");
+            if ui.button("Delete").clicked() {
+                self.context_action = Action::Delete(ContextData::Creature(Creature::new()));
+            }
+        });
+
+        let indices = &mut self.indices;
+
+        let creatures = &mut self
+            .loaded_graphics
+            .creature_files
+            .get_mut(indices.creature_file_index)
+            .ok_or(DFGHError::IndexError)?
+            .creatures;
+        
+        if creatures.is_empty() {
+            if ui.small_button("Create Creature").clicked() {
+                self.context_action = Action::Insert(ContextData::Creature(Creature::new()));
+            }
+        } else {
+            let creature = creatures
+                .get_mut(indices.creature_index)
+                .ok_or(DFGHError::IndexError)?;
+
+            creature.creature_menu(ui);
+        }
+        Ok(())
+    }
+
+    fn layer_set_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Layer Set Menu");
+            if ui.button("Delete").clicked() {
+                self.context_action = Action::Delete(ContextData::LayerSet(LayerSet::Simple(Vec::new())));
+            }
+        });
+
+        let indices = &mut self.indices;
+
+        let layer_sets = &mut self
+            .loaded_graphics
+            .creature_files
+            .get_mut(indices.creature_file_index)
+            .ok_or(DFGHError::IndexError)?
+            .creatures
+            .get_mut(indices.creature_index)
+            .ok_or(DFGHError::IndexError)?
+            .graphics_type;
+        
+        if layer_sets.is_empty() {
+            if ui.small_button("Create Layer Set").clicked() {
+                self.context_action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
+            }
+        } else {
+            let layer_set = layer_sets
+                .get_mut(indices.layer_set_index)
+                .ok_or(DFGHError::IndexError)?;
+
+            layer_set.layer_set_menu(ui);
+        }
+        Ok(())
+    }
+
+    fn layer_group_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Layer Group Menu");
             if ui.button("Delete").clicked() {
@@ -3599,13 +3903,13 @@ impl DFGraphicsHelper {
             .loaded_graphics
             .creature_files
             .get_mut(indices.creature_file_index)
-            .unwrap()
+            .ok_or(DFGHError::IndexError)?
             .creatures
             .get_mut(indices.creature_index)
-            .unwrap()
+            .ok_or(DFGHError::IndexError)?
             .graphics_type
             .get_mut(indices.layer_set_index)
-            .unwrap();
+            .ok_or(DFGHError::IndexError)?;
 
         if let LayerSet::Layered(_, layer_groups) = graphics_type {
             if layer_groups.is_empty() {
@@ -3615,14 +3919,15 @@ impl DFGraphicsHelper {
             } else {
                 let layer_group = layer_groups
                     .get_mut(indices.layer_group_index)
-                    .unwrap();
+                    .ok_or(DFGHError::IndexError)?;
 
                 layer_group.layer_group_menu(ui);
             }
         }
+        Ok(())
     }
 
-    fn layer_menu(&mut self, ui: &mut Ui) {
+    fn layer_menu(&mut self, ui: &mut Ui) -> Result<()> {
         let tile_info = self.tile_info();
 
         let cursor_coords = self.cursor_coords;
@@ -3633,13 +3938,13 @@ impl DFGraphicsHelper {
             .loaded_graphics
             .creature_files
             .get_mut(indices.creature_file_index)
-            .unwrap()
+            .ok_or(DFGHError::IndexError)?
             .creatures
             .get_mut(indices.creature_index)
-            .unwrap()
+            .ok_or(DFGHError::IndexError)?
             .graphics_type
             .get_mut(indices.layer_set_index)
-            .unwrap();
+            .ok_or(DFGHError::IndexError)?;
 
         let tiles: Vec<&Tile> = self
             .loaded_graphics
@@ -3665,7 +3970,9 @@ impl DFGraphicsHelper {
                         }
                     });
 
-                    let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
+                    let simple_layer = simple_layers
+                        .get_mut(indices.layer_index)
+                        .ok_or(DFGHError::IndexError)?;
 
                     if let Some(coords) = cursor_coords {
                         simple_layer.coords = coords;
@@ -3682,7 +3989,7 @@ impl DFGraphicsHelper {
                         }
                     }
                     let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
-                    self.preview_image(ui, file_name, rect);
+                    self.preview_image(ui, file_name, rect)?;
                 }
             },
             LayerSet::Statue(simple_layers) => {
@@ -3701,7 +4008,9 @@ impl DFGraphicsHelper {
                         }
                     });
                     
-                    let simple_layer = simple_layers.get_mut(indices.layer_index).unwrap();
+                    let simple_layer = simple_layers
+                        .get_mut(indices.layer_index)
+                        .ok_or(DFGHError::IndexError)?;
 
                     if let Some(coords) = cursor_coords {
                         simple_layer.coords = coords;
@@ -3718,14 +4027,14 @@ impl DFGraphicsHelper {
                         }
                     }
                     let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
-                    self.preview_image(ui, file_name, rect);
+                    self.preview_image(ui, file_name, rect)?;
                 }
             },
             LayerSet::Layered(_, layer_groups) => {
                 let layers = 
                     &mut layer_groups
                     .get_mut(indices.layer_group_index)
-                    .unwrap()
+                    .ok_or(DFGHError::IndexError)?
                     .layers;
 
                 if layers.is_empty() {
@@ -3743,7 +4052,9 @@ impl DFGraphicsHelper {
                         }
                     });
 
-                    let layer = layers.get_mut(indices.layer_index).unwrap();
+                    let layer = layers
+                        .get_mut(indices.layer_index)
+                        .ok_or(DFGHError::IndexError)?;
 
                     if let Some(coords) = cursor_coords {
                         layer.coords = coords;
@@ -3760,7 +4071,7 @@ impl DFGraphicsHelper {
                         }
                     }
                     let rect = Some([layer.coords, layer.large_coords.unwrap_or_else(|| [0, 0])]);
-                    self.preview_image(ui, file_name, rect);
+                    self.preview_image(ui, file_name, rect)?;
                 }
 
             },
@@ -3773,9 +4084,60 @@ impl DFGraphicsHelper {
                 });
             },
         }
+        Ok(())
     }
 
-    fn preview_image(&mut self, ui: &mut Ui, file_name: String, rectangle: Option<[[u32; 2]; 2]>) {
+    fn condition_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Condition Menu");
+            if ui.button("Delete").clicked() {
+                self.context_action = Action::Delete(ContextData::Condition(Condition::default()));
+            }
+        });
+
+        let tile_info = self.tile_info();
+        
+        let indices = &mut self.indices;
+
+        let graphics_type = self
+            .loaded_graphics
+            .creature_files
+            .get_mut(indices.creature_file_index)
+            .ok_or(DFGHError::IndexError)?
+            .creatures
+            .get_mut(indices.creature_index)
+            .ok_or(DFGHError::IndexError)?
+            .graphics_type
+            .get_mut(indices.layer_set_index)
+            .ok_or(DFGHError::IndexError)?;
+
+        if let LayerSet::Layered(_, layergroups) = graphics_type {
+            let conditions = &mut layergroups
+                .get_mut(indices.layer_group_index)
+                .ok_or(DFGHError::IndexError)?
+                .layers
+                .get_mut(indices.layer_index)
+                .ok_or(DFGHError::IndexError)?
+                .conditions;
+
+            if conditions.is_empty() {
+                if ui.small_button("New condition").clicked() {
+                    self.context_action = Action::Insert(ContextData::Condition(Condition::default()));
+                }
+            } else {
+                let condition = conditions
+                    .get_mut(indices.condition_index)
+                    .ok_or(DFGHError::IndexError)?;
+
+                ui.separator();
+    
+                condition.condition_menu(ui, tile_info);
+            }
+        }
+        Ok(())
+    }
+
+    fn preview_image(&mut self, ui: &mut Ui, file_name: String, rectangle: Option<[[u32; 2]; 2]>) -> Result<()> {
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.preview_image, "View Image"); //determine if preview image is desired
             if ui.button("Refresh").clicked() {
@@ -3786,7 +4148,7 @@ impl DFGraphicsHelper {
 
         if self.preview_image && self.texture.is_some() {
             //display texture once loaded
-            let texture: &egui::TextureHandle = self.texture.as_ref().unwrap();
+            let texture: &egui::TextureHandle = self.texture.as_ref().unwrap();//checked
             let size = texture.size_vec2();
 
             
@@ -3870,17 +4232,17 @@ impl DFGraphicsHelper {
                 .join(format!("{}.png", &file_name));
 
             if image_path.exists() {
-                let dyn_image = image::open(image_path).unwrap();
+                let dyn_image = image::open(image_path)?;
                 let size = [dyn_image.width() as _, dyn_image.height() as _];
                 let image = dyn_image.as_bytes();
                 let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
 
                 self.loaded_graphics.tile_pages
                     .get_mut(self.indices.tile_page_index)
-                    .unwrap()
+                    .ok_or(DFGHError::IndexError)?
                     .tiles
                     .get_mut(self.indices.tile_index)
-                    .unwrap()
+                    .ok_or(DFGHError::IndexError)?
                     .image_size = [dyn_image.width(), dyn_image.height()];
                 
                 self.texture.get_or_insert_with(|| {
@@ -3890,12 +4252,11 @@ impl DFGraphicsHelper {
                 self.texture_file_name = file_name;
             }
         }
+        
+        Ok(())
     }
 
     fn grid(input: egui::plot::GridInput) -> Vec<egui::plot::GridMark> {
-        // Note: this always fills all possible marks. For optimization, `input.bounds`
-        // could be used to decide when the low-interval grids (minutes) should be added.
-
         let mut marks = vec![];
 
         let (min, max) = input.bounds;
@@ -3926,55 +4287,6 @@ impl DFGraphicsHelper {
         marks
     }
 
-    fn condition_menu(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Condition Menu");
-            if ui.button("Delete").clicked() {
-                self.context_action = Action::Delete(ContextData::Condition(Condition::default()));
-            }
-        });
-
-        let tile_info = self.tile_info();
-        
-        let indices = &mut self.indices;
-
-        let graphics_type = self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .unwrap()
-            .creatures
-            .get_mut(indices.creature_index)
-            .unwrap()
-            .graphics_type
-            .get_mut(indices.layer_set_index)
-            .unwrap();
-
-        if let LayerSet::Layered(_, layergroups) = graphics_type {
-            let conditions = &mut layergroups
-                .get_mut(indices.layer_group_index)
-                .unwrap()
-                .layers
-                .get_mut(indices.layer_index)
-                .unwrap()
-                .conditions;
-
-            if conditions.is_empty() {
-                if ui.small_button("New condition").clicked() {
-                    self.context_action = Action::Insert(ContextData::Condition(Condition::default()));
-                }
-            } else {
-                let condition = conditions
-                    .get_mut(indices.condition_index)
-                    .unwrap();
-
-                ui.separator();
-    
-                condition.condition_menu(ui, tile_info);
-            }
-        }
-    }
-
     fn tile_info(&self) -> Vec<(String, [u32; 2])> {
         let mut tile_info: Vec<(String, [u32; 2])> = self
             .loaded_graphics
@@ -3984,8 +4296,10 @@ impl DFGraphicsHelper {
                 tile_page.tiles.iter().map(|t| {
                     if t.tile_size[0]*t.tile_size[1]*t.image_size[0]*t.image_size[1] != 0 {
                         (t.name.clone(),
-                        [t.image_size[0]/t.tile_size[0] - 1,
-                        t.image_size[1]/t.tile_size[1] - 1])
+                        [(t.image_size[0]/t.tile_size[0]).checked_sub(1)
+                        .unwrap_or_default(),
+                        (t.image_size[1]/t.tile_size[1]).checked_sub(1)
+                        .unwrap_or_default()])
                     } else{
                         (t.name.clone(), [100, 100])
                     }
@@ -4027,7 +4341,12 @@ impl eframe::App for DFGraphicsHelper {
                         if let Some(mut path) = rfd::FileDialog::new()
                             .set_title("Choose Mod Folder")
                             .pick_folder() {
-                            (self.loaded_graphics, self.path) = Graphics::import(&mut path).unwrap();
+                            let import_result = Graphics::import(&mut path);
+                            if let Ok((graphics, path)) = import_result {
+                                (self.loaded_graphics, self.path) = (graphics, path);
+                            } else {
+                                self.exception = import_result.unwrap_err();
+                            }
                         }
                         self.save_state();
                         ui.close_menu();
@@ -4037,10 +4356,21 @@ impl eframe::App for DFGraphicsHelper {
                             if let Some(mut path) = rfd::FileDialog::new()
                                 .set_title("Choose Mod Folder")
                                 .pick_folder() {
-                                (self.loaded_graphics, self.path) = Graphics::import(&mut path).unwrap();
+                                
+                                let import_result = Graphics::import(&mut path);
+                                if let Ok((graphics, path)) = import_result {
+                                    (self.loaded_graphics, self.path) = (graphics, path);
+                                } else {
+                                    self.exception = import_result.unwrap_err();
+                                }
                             }
                         } else {
-                            (self.loaded_graphics, self.path) = Graphics::import(&mut self.path).unwrap();
+                            let import_result = Graphics::import(&mut self.path);
+                            if let Ok((graphics, path)) = import_result {
+                                (self.loaded_graphics, self.path) = (graphics, path);
+                            } else {
+                                self.exception = import_result.unwrap_err();
+                            }
                         }
                         self.save_state();
                         ui.close_menu();
@@ -4050,10 +4380,16 @@ impl eframe::App for DFGraphicsHelper {
                             if let Some(path) = rfd::FileDialog::new()
                                 .set_title("Choose Mod Folder")
                                 .pick_folder() {
-                                self.loaded_graphics.export(&path).unwrap();
+                                let export_result = self.loaded_graphics.export(&path);
+                                if export_result.is_err() {
+                                    self.exception = export_result.unwrap_err();
+                                };
                             }
                         } else {
-                            self.loaded_graphics.export(&self.path.clone()).unwrap();
+                            let export_result = self.loaded_graphics.export(&self.path);
+                            if export_result.is_err() {
+                                self.exception = export_result.unwrap_err();
+                            };
                         }
                         ui.close_menu();
                     }
@@ -4066,29 +4402,33 @@ impl eframe::App for DFGraphicsHelper {
             .show(ctx, |ui| {
                 //Draw tree-style selection menu on left side
                 egui::ScrollArea::both().show(ui, |ui| {
-                    self.main_tree(ui, ctx);
+                    self.main_tree(ui, ctx)
                 });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             //Draw main window by matching self.main_window
             egui::ScrollArea::horizontal()
-                .show(ui, |ui| 
+                .show(ui, |ui| {
+                let result;
                 match self.main_window {
-                    MainWindow::TilePageDefaultMenu => self.tile_page_default_menu(ui),
-                    MainWindow::CreatureDefaultMenu => self.creature_default_menu(ui),
-                    MainWindow::TilePageMenu => self.tile_page_menu(ui),
-                    MainWindow::TileMenu => self.tile_menu(ui),
-                    MainWindow::CreatureFileMenu => self.creature_file_menu(ui),
-                    MainWindow::CreatureMenu => self.creature_menu(ui),
-                    MainWindow::LayerSetMenu => self.layer_set_menu(ui),
-                    MainWindow::LayerGroupMenu => self.layer_group_menu(ui),
-                    MainWindow::LayerMenu => self.layer_menu(ui),
-                    MainWindow::ConditionMenu => self.condition_menu(ui),
-                    MainWindow::ReferenceMenu => self.default_menu(ui),
-                    MainWindow::DefaultMenu => self.default_menu(ui),
+                    MainWindow::TilePageDefaultMenu =>  result = self.tile_page_default_menu(ui),
+                    MainWindow::CreatureDefaultMenu =>  result = self.creature_default_menu(ui),
+                    MainWindow::TilePageMenu =>         result = self.tile_page_menu(ui),
+                    MainWindow::TileMenu =>             result = self.tile_menu(ui),
+                    MainWindow::CreatureFileMenu =>     result = self.creature_file_menu(ui),
+                    MainWindow::CreatureMenu =>         result = self.creature_menu(ui),
+                    MainWindow::LayerSetMenu =>         result = self.layer_set_menu(ui),
+                    MainWindow::LayerGroupMenu =>       result = self.layer_group_menu(ui),
+                    MainWindow::LayerMenu =>            result = self.layer_menu(ui),
+                    MainWindow::ConditionMenu =>        result = self.condition_menu(ui),
+                    MainWindow::ReferenceMenu =>        result = self.default_menu(ui),
+                    MainWindow::DefaultMenu =>          result = self.default_menu(ui),
                 }
-            );
+                if result.is_err() {
+                    self.exception = result.unwrap_err();
+                }
+            });
         });
 
         if !ctx.wants_keyboard_input() {
@@ -4108,34 +4448,47 @@ impl eframe::App for DFGraphicsHelper {
             }
         }
 
+        {//Action handler
+            let mut result = Ok(());
+            match &self.context_action { //respond to the context menus
+                Action::Delete(selected) => {
+                    result = self.delete(selected.clone());
+                },
+                Action::Copy(selected) => {
+                    self.copy(selected.clone());
+                },
+                Action::Cut(selected) => {
+                    result = self.cut(selected.clone());
+                },
+                Action::Paste => {
+                    result = self.paste();
+                },
+                Action::Duplicate(selected) => {
+                    self.copy(selected.clone());
+                    result = self.paste();
+                },
+                Action::Insert(kind) => {
+                    result = self.insert(kind.clone());
+                },
+                Action::Undo => {
+                    self.undo();
+                },
+                Action::Redo => {
+                    self.redo();
+                },
+                Action::None => {},
+            }
+            if result.is_err() {
+                self.exception = result.unwrap_err();
+            }
+        }
 
-        match &self.context_action { //respond to the context menus
-            Action::Delete(selected) => {
-                self.delete(selected.clone())
-            },
-            Action::Copy(selected) => {
-                self.copy(selected.clone());
-            },
-            Action::Cut(selected) => {
-                self.cut(selected.clone());
-            },
-            Action::Paste => {
-                self.paste();
-            },
-            Action::Duplicate(selected) => {
-                self.copy(selected.clone());
-                self.paste();
-            },
-            Action::Insert(kind) => {
-                self.insert(kind.clone());
-            },
-            Action::Undo => {
-                self.undo();
-            },
-            Action::Redo => {
-                self.redo();
-            },
-            Action::None => {},
+        if let DFGHError::None = self.exception {
+        } else {
+            egui::Window::new("Error Window")
+                .show(ctx, |ui| {
+                
+            });
         }
     }
 }
@@ -4152,7 +4505,11 @@ fn main() {
     eframe::run_native(
         "DF Graphics Helper",
         options,
-        Box::new(|_cc| Box::new(DFGraphicsHelper::new())),
+        Box::new(|cc| Box::new(DFGraphicsHelper::new(cc))),
     )
-    .expect("should always run");
+    .expect("Should always run if Creation Conteext can be created.");
 }
+
+//.get
+//.remove(
+//[
