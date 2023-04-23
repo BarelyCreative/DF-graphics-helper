@@ -1,4 +1,4 @@
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 
 use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut};
@@ -158,9 +158,9 @@ impl Graphics {
                     },
                     "PAGE_DIM_PIXELS" => {
                         let image_path: path::PathBuf = folder
+                            .join("graphics")
                             .join("images")
                             .join(format!("{}.png", tile.filename));
-
                         if let Ok((x, y)) = image::image_dimensions(image_path) {
                             tile.image_size = [x, y];
                         } else {  
@@ -594,14 +594,16 @@ impl CreatureFile {
             path
             .join("graphics")
             .join(format!("graphics_creatures_{}.txt",
-            self.name.clone().to_case(Case::Snake)))
+            self.name.with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake)))
         )?;
 
         let mut creature_writer = io::LineWriter::new(creature_file);
         
         creature_writer.write_all(format!(
             "graphics_creatures_{}\n\n[OBJECT:GRAPHICS]\n\n",
-            self.name.to_case(Case::Snake))
+            self.name.with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake))
             .as_bytes()
         )?;
 
@@ -642,7 +644,11 @@ impl State {
             Self::TrainedWar => "TRAINED_WAR".to_string(),
             Self::Skeleton => "SKELETON".to_string(),
             Self::SkeletonWithSkull => "SKELETON_WITH_SKULL".to_string(),
-            Self::Custom(name) => name.to_string(),
+            Self::Custom(name) => {
+                name.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
             Self::Empty => "(empty)".to_string(),
         }
     }
@@ -930,8 +936,10 @@ impl SimpleLayer {
 
         if large {
             let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
-            ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
-            ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+                .unwrap_or_default()).prefix("Tile X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+                .unwrap_or_default()).prefix("Tile Y: "));
 
             ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
             ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
@@ -988,8 +996,10 @@ impl SimpleLayer {
         ui.add_space(PADDING);
         let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
 
-        ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
-        ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
+        ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+            .unwrap_or_default()).prefix("Tile X: "));
+        ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+            .unwrap_or_default()).prefix("Tile Y: "));
 
         ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
         ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
@@ -1007,7 +1017,9 @@ impl SimpleLayer {
                 format!(
                     "\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS:{}]\n",
                     self.state.name(),
-                    self.tile,
+                    self.tile.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
                     self.coords[0],
                     self.coords[1],
                     self.coords[0] + x2,
@@ -1018,7 +1030,9 @@ impl SimpleLayer {
                 format!(
                     "\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
                     self.state.name(),
-                    self.tile,
+                    self.tile.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
                     self.coords[0],
                     self.coords[1],
                     self.coords[0] + x2,
@@ -1030,7 +1044,9 @@ impl SimpleLayer {
                 format!(
                     "\t\t[{}:{}:{}:{}:AS_IS:{}]\n",
                     self.state.name(),
-                    self.tile,
+                    self.tile.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
                     self.coords[0],
                     self.coords[1],
                     sub_state.name(),
@@ -1039,7 +1055,9 @@ impl SimpleLayer {
                 format!(
                     "\t[{}:{}:{}:{}:AS_IS]\n",
                     self.state.name(),
-                    self.tile,
+                    self.tile.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
                     self.coords[0],
                     self.coords[1],
                 )
@@ -1052,7 +1070,9 @@ impl SimpleLayer {
             format!(
                 "\t[{}:{}:{}:{}:{}:{}]\n",
                 self.state.name(),
-                self.tile,
+                self.tile.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string(),
                 self.coords[0],
                 self.coords[1],
                 self.coords[0] + x2,
@@ -1126,8 +1146,10 @@ impl Layer {
 
             if large {
                 let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
-                ui[0].add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
-                ui[0].add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
+                ui[0].add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+                    .unwrap_or_default()).prefix("Tile X: "));
+                ui[0].add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+                    .unwrap_or_default()).prefix("Tile Y: "));
 
                 ui[0].add(egui::Slider::new(x2, 0..=2).prefix("X + "));
                 ui[0].add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
@@ -1164,11 +1186,14 @@ impl Layer {
                 .show(&mut ui[1], |ui| {
                 for (i_cond, condition) in conditions.iter_mut().enumerate() {
                     ui.push_id(i_cond, |ui| {
-                        condition.condition_menu(ui, tile_info.clone());
-                        ui.add_space(PADDING);
-                        if ui.button("Remove Condition").clicked() {
-                            delete = Some(i_cond);
-                        }
+                        ui.group(|ui| {
+                            condition.condition_menu(ui, tile_info.clone());
+                            ui.add_space(PADDING);
+                            if ui.button("Remove Condition").clicked() {
+                                delete = Some(i_cond);
+                            }
+                        });
+                        
                         ui.add_space(PADDING);
                     });
                 }
@@ -1186,8 +1211,12 @@ impl Layer {
         if let Some([x2, y2]) = self.large_coords {
             out.push_str(&format!(
                 "\t\t\t[LAYER:{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
-                self.name,
-                self.tile,
+                self.name.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string(),
+                self.tile.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string(),
                 self.coords[0],
                 self.coords[1],
                 self.coords[0] + x2,
@@ -1196,8 +1225,12 @@ impl Layer {
         } else {
             out.push_str(&format!(
                 "\t\t\t[LAYER:{}:{}:{}:{}:AS_IS]\n",
-                self.name,
-                self.tile,
+                self.name.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string(),
+                self.tile.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string(),
                 self.coords[0],
                 self.coords[1],
             ));
@@ -1251,7 +1284,13 @@ impl LayerGroup {
     fn export(&self) -> String {
         let mut out = String::new();
 
-        out.push_str(&format!("\t\t[LAYER_GROUP] ---{}---\n", self.name));
+        out.push_str(&format!(
+            "\t\t[LAYER_GROUP] ---{}---\n",
+            self.name
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::UpperSnake)
+            .to_string()
+        ));
         for layer in self.layers.iter() {
             out.push_str(&layer.export());
         }
@@ -1285,7 +1324,11 @@ impl Metal {
             Metal::Iron => "IRON".to_string(),
             Metal::Steel => "STEEL".to_string(),
             Metal::Adamantine => "ADAMANTINE".to_string(),
-            Metal::Custom(metal) => metal.clone(),
+            Metal::Custom(metal) => {
+                metal.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
         }
     }
 
@@ -1611,7 +1654,11 @@ impl Profession {
             Profession::Merchant => "MERCHANT".to_string(),
             Profession::Child => "CHILD".to_string(),
             Profession::None => "NONE".to_string(),
-            Profession::Custom(prof) => prof.clone(),
+            Profession::Custom(prof) => {
+                prof.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
         }
     }
 
@@ -1689,7 +1736,11 @@ impl Condition {
             Condition::TissueMayHaveShaping(..) => "TISSUE_MAY_HAVE_SHAPING".to_string(),
             Condition::TissueNotShaped => "TISSUE_NOT_SHAPED".to_string(),
             Condition::TissueSwap(..) => "TISSUE_SWAP".to_string(),
-            Condition::Custom(string) => string.clone(),
+            Self::Custom(string) => {
+                string.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
         }
     }
 
@@ -1999,7 +2050,7 @@ impl Condition {
 
                         ui.label("Item: (e.g. ITEM_HELM_HELM)");
 
-                        for item in &mut *items {
+                        for item in items.iter_mut() {
                             ui.text_edit_singleline(item);
                         }
 
@@ -2012,7 +2063,6 @@ impl Condition {
                                 items.pop();
                             }
                         });
-                        ui.add_space(PADDING);
                     }
                     ItemType::ByToken(token, equipment) => {
                         ui.label("Token: (e.g. RH for right hand)");
@@ -2033,7 +2083,7 @@ impl Condition {
 
                         ui.label("Item: (e.g. ITEM_GLOVES_GAUNTLETS)");
 
-                        for item in &mut *items {
+                        for item in items.iter_mut() {
                             ui.text_edit_singleline(item);
                         }
 
@@ -2046,7 +2096,6 @@ impl Condition {
                                 items.pop();
                             }
                         });
-                        ui.add_space(PADDING);
                     }
                     ItemType::AnyHeld(equipment) => {
                         ui.label("Item type: (e.g. SHIELD)");
@@ -2064,7 +2113,7 @@ impl Condition {
 
                         ui.label("Item: (e.g. ITEM_SHIELD_SHIELD)");
 
-                        for item in &mut *items {
+                        for item in items.iter_mut() {
                             ui.text_edit_singleline(item);
                         }
 
@@ -2077,7 +2126,6 @@ impl Condition {
                                 items.pop();
                             }
                         });
-                        ui.add_space(PADDING);
                     }
                     ItemType::Wield(equipment) => {
                         ui.label("Item type: (WEAPON, TOOL, or ANY)");
@@ -2094,7 +2142,7 @@ impl Condition {
                         } else {
                             ui.label("Item: (e.g. ITEM_WEAPON_PICK)");
     
-                            for item in &mut *items {
+                            for item in items.iter_mut() {
                                 ui.text_edit_singleline(item);
                             }
     
@@ -2108,7 +2156,6 @@ impl Condition {
                                 }
                             });
                         }
-                        ui.add_space(PADDING);
                     }
                 }
             }
@@ -2320,8 +2367,6 @@ impl Condition {
                 ui.text_edit_singleline(category);
                 ui.label("Tissue: (e.g. HAIR or ALL)");
                 ui.text_edit_singleline(tissue);
-                
-                ui.add_space(PADDING);
             }
             Condition::TissueMinLength(length) => {
                 ui.add(egui::DragValue::new(length).speed(1).prefix("Min Length: "));
@@ -2414,8 +2459,10 @@ impl Condition {
 
                 if large {
                     let [x2, y2] = large_coords.get_or_insert([0, 0]);
-                    ui.add(egui::Slider::new(x1, 0..=max_coords[0]-*x2).prefix("Tile X: "));
-                    ui.add(egui::Slider::new(y1, 0..=max_coords[1]-*y2).prefix("Tile Y: "));
+                    ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+                        .unwrap_or_default()).prefix("Tile X: "));
+                    ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+                        .unwrap_or_default()).prefix("Tile Y: "));
 
                     ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
                     ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
@@ -2475,13 +2522,13 @@ impl Condition {
                     ItemType::AnyHeld(equipment) => {
                         out.push_str(&format!(
                             "ANY_HELD:{}",
-                            equipment.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                            equipment.name()
                         ));
                     },
                     ItemType::Wield(equipment) => {
                         out.push_str(&format!(
                             "WIELD:{}",
-                            equipment.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                            equipment.name()
                         ));
                     },
                     ItemType::None => {}
@@ -2500,25 +2547,25 @@ impl Condition {
                     ItemType::ByCategory(category, equipment) => {
                         out.push_str(&format!("BY_CATEGORY:{}:{}",
                             category.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-                            equipment.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                            equipment.name()
                         ));
                     },
                     ItemType::ByToken(token, equipment) => {
                         out.push_str(&format!("BY_TOKEN:{}:{}",
                             token.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-                            equipment.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                            equipment.name()
                         ));
                     },
                     ItemType::AnyHeld(equipment) => {
                         out.push_str(&format!(
                             "ANY_HELD:{}",
-                            equipment.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                            equipment.name()
                         ));
                     },
                     ItemType::Wield(equipment) => {
                         out.push_str(&format!(
                             "WIELD:{}",
-                            equipment.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                            equipment.name()
                         ));
                     },
                     ItemType::None => {}
@@ -2545,7 +2592,7 @@ impl Condition {
                 for flag in flags {
                     out.push_str(&format!(
                         ":{}",
-                        flag.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                        flag.name()
                     ));
                 }
                 out.push_str("]\n");
@@ -2553,7 +2600,7 @@ impl Condition {
             Condition::MaterialType(metal) => {
                 out = format!(
                     "\t\t\t\t[CONDITION_MATERIAL_TYPE:METAL:{}]\n",
-                    metal.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                    metal.name()
                 );
             },
             Condition::ProfessionCategory(professions) => {
@@ -2561,7 +2608,7 @@ impl Condition {
                 for profession in professions {
                     out.push_str(&format!(
                         ":{}",
-                        profession.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                        profession.name()
                     ));
                 }
                 out.push_str("]\n");
@@ -2699,14 +2746,18 @@ impl TilePage {
             path
             .join("graphics")
             .join(format!("tile_page_{}.txt",
-            self.name.clone().to_case(Case::Snake)))
+            self.name.clone()
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake)))
         )?;
 
         let mut tile_page_writer = io::LineWriter::new(tile_page_file);
         
         tile_page_writer.write_all(format!(
             "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-            self.name.to_case(Case::Snake)
+            self.name
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake)
             ).as_bytes()
         )?;
 
@@ -4345,15 +4396,15 @@ impl DFGraphicsHelper {
             .iter()
             .flat_map(|tile_page| {
                 tile_page.tiles.iter().map(|t| {
-                    if t.tile_size[0]*t.tile_size[1]*t.image_size[0]*t.image_size[1] != 0 {
-                        (t.name.clone(),
-                        [(t.image_size[0]/t.tile_size[0]).checked_sub(1)
-                        .unwrap_or_default(),
-                        (t.image_size[1]/t.tile_size[1]).checked_sub(1)
-                        .unwrap_or_default()])
-                    } else{
-                        (t.name.clone(), [100, 100])
-                    }
+                    (t.name.clone(),
+                    [t.image_size[0].checked_div(t.tile_size[0])
+                    .unwrap_or_default()
+                    .checked_sub(1)
+                    .unwrap_or_default(),
+                    t.image_size[1].checked_div(t.tile_size[1])
+                    .unwrap_or_default()
+                    .checked_sub(1)
+                    .unwrap_or_default()])
                 })
             })
             .collect();
@@ -4523,12 +4574,24 @@ impl eframe::App for DFGraphicsHelper {
             egui::Window::new("Error Window")
                 .collapsible(false)
                 .constrain(true)
-                .auto_sized()
-                .show(ctx, |_ui| {
+                .title_bar(false)
+                .default_size([600.0, 200.0])
+                .show(ctx, |ui| {
 
-                egui::TopBottomPanel::bottom("Ok Panic").max_height(32.0).show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button("  Ok  ").clicked() {
+                egui::TopBottomPanel::top("exception panel")
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| {
+                    ui.label("Error:");
+                    ui.separator();
+                    ui.label(self.exception.to_string());
+                });
+
+                egui::TopBottomPanel::bottom("Ok")
+                    .min_height(20.0)
+                    .show_inside(ui, |ui| {
+                    ui.add_space(PADDING);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+                        if ui.button("      Ok      ").clicked() {
                             match self.exception {
                                 DFGHError::IoError(..) => {
                                     self.exception = DFGHError::None;
@@ -4558,13 +4621,8 @@ impl eframe::App for DFGraphicsHelper {
                                 },
                                 DFGHError::None => {},
                             }
-                        } else if ui.button("Panic!").clicked() {
-                            panic!();
                         }
-                    })
-                });
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.label(self.exception.to_string());
+                    });
                 });
             });
         }
