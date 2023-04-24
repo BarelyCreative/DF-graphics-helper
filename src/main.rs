@@ -1,11 +1,13 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
+use anyhow::anyhow;
 use egui::plot::{Plot, PlotImage, PlotPoint};
 use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut};
 use convert_case::{Boundary, Case, Casing};
 use rfd;
 use thiserror::Error;
 use std::io::prelude::*;
+use std::panic::catch_unwind;
 use std::path::PathBuf;
 use std::{fs, io, path};
 
@@ -3016,7 +3018,7 @@ enum DFGHError {
     #[error("An error occured while attempting to import a condition:\n\t{0}")]
     ImportConditionError(String),
 
-    #[error("No <mod (version)>/graphics/ directory found at path:\n\t{0}")]
+    #[error("No \"<mod>/graphics/\" directory found at path:\n\t{0}")]
     NoGraphicsDirectory(path::PathBuf),
 
     #[error("File name is unsupported (non UTF-8):\n\t{0}")]
@@ -3024,6 +3026,9 @@ enum DFGHError {
 
     #[error("Index out of bounds")]
     IndexError,
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),  // source and Display delegate to anyhow::Error
 }
 
 type Result<T> = std::result::Result<T, DFGHError>;
@@ -4250,83 +4255,86 @@ impl DFGraphicsHelper {
 
         if self.preview_image && self.texture.is_some() {
             //display texture once loaded
-            let texture: &egui::TextureHandle = self.texture.as_ref().unwrap();//checked
+            let texture = self.texture.as_ref().unwrap();//checked
             let size = texture.size_vec2();
 
-            
+            // let image_result = catch_unwind(|| {
+                let image = PlotImage::new(texture, PlotPoint::new(size[0] / 2.0, size[1] / -2.0), size);
+            // });
 
-            let image =
-                PlotImage::new(texture, PlotPoint::new(size[0] / 2.0, size[1] / -2.0), size);
-
-            let x_fmt = |x, _range: &std::ops::RangeInclusive<f64>| {
-                if x < 0.0 {
-                    // No labels outside value bounds
-                    String::new()
-                } else {
-                    // Tiles
-                    format!("{}", (x as f64 / 32.0).floor())
-                }
-            };
-            let y_fmt = |y, _range: &std::ops::RangeInclusive<f64>| {
-                if y > 0.0 {
-                    // No labels outside value bounds
-                    String::new()
-                } else {
-                    // Tiles
-                    format!("{}", (y as f64 / -32.0).floor())
-                }
-            };
-            let label_fmt = |_s: &str, val: &PlotPoint| {
-                format!(
-                    "{}, {}",
-                    (val.x / 32.0).floor(),
-                    (val.y / -32.0).floor()
-                )
-            };
-
-            let plot = Plot::new("image_preview")
-                .auto_bounds_x()
-                .auto_bounds_y()
-                .data_aspect(1.0)
-                .show_background(true)
-                .allow_boxed_zoom(false)
-                .clamp_grid(true)
-                .min_size(egui::vec2(100.0, 400.0))
-                .set_margin_fraction(egui::vec2(0.005, 0.005))
-                .x_axis_formatter(x_fmt)
-                .y_axis_formatter(y_fmt)
-                .x_grid_spacer(Self::grid)
-                .y_grid_spacer(Self::grid)
-                .label_formatter(label_fmt);
-            plot.show(ui, |plot_ui| {
-                plot_ui.image(image.name("Image"));
-                if let Some(rect) = rectangle {
-                    let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
-                    let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
-                    let points = vec![
-                        [x1 * 32.0, y1 * -32.0],
-                        [x2 * 32.0 + 32.0, y1 * -32.0],
-                        [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
-                        [x1 * 32.0, y2 * -32.0 - 32.0],
-                    ];
-
-                    let rectangle = egui::plot::Polygon::new(points)
-                        .color(egui::Color32::LIGHT_BLUE)
-                        .fill_alpha(0.01);
-                    plot_ui.polygon(rectangle);
-                }
-                self.cursor_coords.take();
-                if plot_ui.plot_secondary_clicked() {
-                    if let Some(pointer) = plot_ui.pointer_coordinate() {
-                        self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
+            // if let Ok(image) = image_result {
+                let x_fmt = |x, _range: &std::ops::RangeInclusive<f64>| {
+                    if x < 0.0 {
+                        // No labels outside value bounds
+                        String::new()
+                    } else {
+                        // Tiles
+                        format!("{}", (x as f64 / 32.0).floor())
                     }
-                }
-            });
+                };
+                let y_fmt = |y, _range: &std::ops::RangeInclusive<f64>| {
+                    if y > 0.0 {
+                        // No labels outside value bounds
+                        String::new()
+                    } else {
+                        // Tiles
+                        format!("{}", (y as f64 / -32.0).floor())
+                    }
+                };
+                let label_fmt = |_s: &str, val: &PlotPoint| {
+                    format!(
+                        "{}, {}",
+                        (val.x / 32.0).floor(),
+                        (val.y / -32.0).floor()
+                    )
+                };
 
-            if self.texture_file_name.ne(&file_name) {
-                self.texture = None;
-            }
-        } else if self.preview_image && self.texture.is_none() {
+                let plot = Plot::new("image_preview")
+                    .auto_bounds_x()
+                    .auto_bounds_y()
+                    .data_aspect(1.0)
+                    .show_background(true)
+                    .allow_boxed_zoom(false)
+                    .clamp_grid(true)
+                    .min_size(egui::vec2(100.0, 400.0))
+                    .set_margin_fraction(egui::vec2(0.005, 0.005))
+                    .x_axis_formatter(x_fmt)
+                    .y_axis_formatter(y_fmt)
+                    .x_grid_spacer(Self::grid)
+                    .y_grid_spacer(Self::grid)
+                    .label_formatter(label_fmt);
+                plot.show(ui, |plot_ui| {
+                    plot_ui.image(image.name("Image"));
+                    if let Some(rect) = rectangle {
+                        let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
+                        let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
+                        let points = vec![
+                            [x1 * 32.0, y1 * -32.0],
+                            [x2 * 32.0 + 32.0, y1 * -32.0],
+                            [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
+                            [x1 * 32.0, y2 * -32.0 - 32.0],
+                        ];
+
+                        let rectangle = egui::plot::Polygon::new(points)
+                            .color(egui::Color32::LIGHT_BLUE)
+                            .fill_alpha(0.01);
+                        plot_ui.polygon(rectangle);
+                    }
+                    self.cursor_coords.take();
+                    if plot_ui.plot_secondary_clicked() {
+                        if let Some(pointer) = plot_ui.pointer_coordinate() {
+                            self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
+                        }
+                    }
+                });
+
+                if self.texture_file_name.ne(&file_name) {
+                    self.texture = None;
+                }
+            // } else {
+            //     return Err(DFGHError::Other(anyhow!("Unknown error loading the image.")))
+            // }
+        } else if self.preview_image {
             //load texture from path
             let image_path = self.path
                 .join("graphics")
@@ -4337,21 +4345,27 @@ impl DFGraphicsHelper {
                 let dyn_image = image::open(image_path)?;
                 let size = [dyn_image.width() as _, dyn_image.height() as _];
                 let image = dyn_image.as_bytes();
-                let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
-
-                self.loaded_graphics.tile_pages
-                    .get_mut(self.indices.tile_page_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .tiles
-                    .get_mut(self.indices.tile_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .image_size = [dyn_image.width(), dyn_image.height()];
                 
-                self.texture.get_or_insert_with(|| {
-                    ui.ctx()
-                        .load_texture("default_image", rgba, Default::default())
+                let rgba_result = catch_unwind(|| {
+                    egui::ColorImage::from_rgba_unmultiplied(size, image)
                 });
-                self.texture_file_name = file_name;
+
+                if let Ok(rgba) = rgba_result {
+                    self.loaded_graphics.tile_pages
+                        .get_mut(self.indices.tile_page_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .tiles
+                        .get_mut(self.indices.tile_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .image_size = [dyn_image.width(), dyn_image.height()];
+    
+                    let texture_handle = ui.ctx().load_texture("default_image", rgba, Default::default());
+                    self.texture = Some(texture_handle);
+    
+                    self.texture_file_name = file_name;
+                } else {
+                    return Err(DFGHError::Other(anyhow!("Error loading texture: Image is not 32-bit RGBA")));
+                }
             }
         }
         
@@ -4459,11 +4473,11 @@ impl eframe::App for DFGraphicsHelper {
         egui::SidePanel::new(egui::panel::Side::Left, "tree")
             .resizable(true)
             .show(ctx, |ui| {
-                //Draw tree-style selection menu on left side
-                egui::ScrollArea::both().show(ui, |ui| {
-                    self.main_tree(ui, ctx)
-                });
+            //Draw tree-style selection menu on left side
+            egui::ScrollArea::both().show(ui, |ui| {
+                self.main_tree(ui, ctx)
             });
+        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             //Draw main window by matching self.main_window
@@ -4619,6 +4633,10 @@ impl eframe::App for DFGraphicsHelper {
                                     self.indices = GraphicsIndices::from([0; 8]);
                                     self.exception = DFGHError::None;
                                 },
+                                DFGHError::Other(..) => {
+                                    self.undo();
+                                    self.exception = DFGHError::None;
+                                }
                                 DFGHError::None => {},
                             }
                         }
