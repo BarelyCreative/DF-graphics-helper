@@ -2956,6 +2956,8 @@ enum Action {
     Delete(ContextData),
     Import,
     Export,
+    Split(ContextData),
+    Merge(ContextData),
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -3077,6 +3079,7 @@ impl DFGraphicsHelper {
                 let import_result = Graphics::import(&mut path);
                 if let Ok((graphics, path)) = import_result {
                     (self.loaded_graphics, self.path) = (graphics, path);
+                    self.main_window = MainWindow::DefaultMenu;
                 } else {
                     self.exception = import_result.unwrap_err();
                 }
@@ -3085,6 +3088,7 @@ impl DFGraphicsHelper {
             let import_result = Graphics::import(&mut self.path);
             if let Ok((graphics, path)) = import_result {
                 (self.loaded_graphics, self.path) = (graphics, path);
+                self.main_window = MainWindow::DefaultMenu;
             } else {
                 self.exception = import_result.unwrap_err();
             }
@@ -3153,6 +3157,35 @@ impl DFGraphicsHelper {
             action = Action::Duplicate(selected);
         } else {
             let mut inner_action = Action::None;
+
+            match selected {
+                ContextData::Layer(_) => {
+                    if ui.button("Split").clicked() {
+                        ui.close_menu();
+                        inner_action = Action::Split(selected.clone());
+                    }
+                }
+                ContextData::LayerGroup(_) => {
+                    if ui.button("Split").clicked() {
+                        ui.close_menu();
+                        inner_action = Action::Split(selected.clone());
+                    } else if ui.button("Merge Up").clicked() {
+                        ui.close_menu();
+                        inner_action = Action::Merge(selected.clone());
+                    }
+                },
+                ContextData::LayerSet(_) |
+                ContextData::TilePage(_) |
+                ContextData::CreatureFile(_) |
+                ContextData::Creature(_) |
+                ContextData::SimpleLayer(_) |
+                ContextData::Condition(_) |
+                ContextData::Tile(_) |
+                ContextData::None => {
+                    //do nothing
+                },
+            }
+
             ui.menu_button("Insert..", |ui| {
                 match selected {
                     ContextData::TilePage(_) | ContextData::Tile(_) => {
@@ -3229,7 +3262,7 @@ impl DFGraphicsHelper {
 
         self.copied = ContextData::from(selected.clone());
 
-        self.delete(selected)?;
+        self.delete(selected)?;//resets self.action if successful
 
         Ok(())
     }
@@ -3551,6 +3584,164 @@ impl DFGraphicsHelper {
         Ok(())
     }
 
+    fn split(&mut self, selected: ContextData) -> Result<()> {
+        self.save_state();
+        
+        let graphics = &mut self.loaded_graphics;
+        let indices = &mut self.indices;
+
+        match selected {
+            ContextData::LayerGroup(_) => {
+                let mut lgs_new = Vec::new();
+
+                if indices.layer_group_index > 0 {
+                    if let LayerSet::Layered(_, lgs) = 
+                        &mut graphics.creature_files
+                        .get_mut(indices.creature_file_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .creatures
+                        .get_mut(indices.creature_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .graphics_type
+                        .get_mut(indices.layer_set_index)
+                        .ok_or(DFGHError::IndexError)? {
+    
+                        lgs_new = lgs.drain(indices.layer_group_index..).collect();
+                        
+                        self.main_window = MainWindow::CreatureMenu;
+                    }
+                    
+                    if !lgs_new.is_empty() {
+                        let lss = &mut graphics.creature_files
+                            .get_mut(indices.creature_file_index)
+                            .ok_or(DFGHError::IndexError)?
+                            .creatures
+                            .get_mut(indices.creature_index)
+                            .ok_or(DFGHError::IndexError)?
+                            .graphics_type;
+        
+                        lss.insert(
+                            indices.layer_set_index + 1,
+                            LayerSet::Layered(
+                                State::Default,
+                                lgs_new
+                            )
+                        );
+                    }
+                }
+            },
+            ContextData::Layer(_) => {
+                let mut ls_new = Vec::new();
+
+                if indices.layer_index > 0 {
+                    if let LayerSet::Layered(_, layer_groups) = 
+                        &mut graphics.creature_files
+                        .get_mut(indices.creature_file_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .creatures
+                        .get_mut(indices.creature_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .graphics_type
+                        .get_mut(indices.layer_set_index)
+                        .ok_or(DFGHError::IndexError)? {
+
+                        let ls = &mut layer_groups
+                            .get_mut(indices.layer_group_index)
+                            .ok_or(DFGHError::IndexError)?
+                            .layers;
+    
+                        ls_new = ls.drain(indices.layer_index..).collect();
+                        
+                        self.main_window = MainWindow::LayerGroupMenu;
+                    }
+                    
+                    if !ls_new.is_empty() {
+                        if let LayerSet::Layered(_, lgs) = 
+                            &mut graphics.creature_files
+                            .get_mut(indices.creature_file_index)
+                            .ok_or(DFGHError::IndexError)?
+                            .creatures
+                            .get_mut(indices.creature_index)
+                            .ok_or(DFGHError::IndexError)?
+                            .graphics_type
+                            .get_mut(indices.layer_set_index)
+                            .ok_or(DFGHError::IndexError)? {
+
+                            
+
+                            lgs.insert(
+                                indices.layer_group_index + 1,
+                                LayerGroup {layers: ls_new, ..LayerGroup::new()}
+                            );
+                        }
+                    }
+                }
+            },
+            ContextData::LayerSet(_) |
+            ContextData::SimpleLayer(_) |
+            ContextData::Condition(_) |
+            ContextData::Tile(_) |
+            ContextData::TilePage(_) |
+            ContextData::CreatureFile(_) |
+            ContextData::Creature(_) |
+            ContextData::None => {
+                //do nothing b/c these can't really be split/merged
+            },
+        }
+
+        self.action = Action::None;
+
+        Ok(())
+    }
+    
+    fn merge(&mut self, selected: ContextData) -> Result<()> {
+        self.save_state();
+        
+        let graphics = &mut self.loaded_graphics;
+        let indices = &mut self.indices;
+
+        match selected {
+            ContextData::LayerGroup(_) => {
+                if indices.layer_group_index > 0 {
+                    if let LayerSet::Layered(_, lgs) = 
+                        &mut graphics.creature_files
+                        .get_mut(indices.creature_file_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .creatures
+                        .get_mut(indices.creature_index)
+                        .ok_or(DFGHError::IndexError)?
+                        .graphics_type
+                        .get_mut(indices.layer_set_index)
+                        .ok_or(DFGHError::IndexError)? {
+
+                        let ls_bot = lgs[indices.layer_group_index].layers.clone();
+
+                        lgs[indices.layer_group_index - 1].layers.extend(ls_bot);
+
+                        lgs.remove(indices.layer_group_index);
+
+                        self.main_window = MainWindow::LayerSetMenu;
+                    }
+                }
+            },
+            ContextData::LayerSet(_) |
+            ContextData::Layer(_) |
+            ContextData::SimpleLayer(_) |
+            ContextData::Condition(_) |
+            ContextData::Tile(_) |
+            ContextData::TilePage(_) |
+            ContextData::CreatureFile(_) |
+            ContextData::Creature(_) |
+            ContextData::None => {
+                //do nothing b/c these can't really be split/merged
+            },
+        }
+
+        self.action = Action::None;
+
+        Ok(())
+    }
+
     fn main_tree(&mut self, ui: &mut Ui, ctx: &Context) {
         let graphics = &mut self.loaded_graphics;
 
@@ -3602,7 +3793,7 @@ impl DFGraphicsHelper {
         {
             self.main_window = MainWindow::CreatureDefaultMenu;
         };
-        for (i_file, creature_file) in self.loaded_graphics.creature_files.iter_mut().enumerate() {
+        for (i_file, creature_file) in graphics.creature_files.iter_mut().enumerate() {
             let id_cf = ui.make_persistent_id(
                 format!("creature_file{}",
                 i_file)
@@ -4509,35 +4700,32 @@ impl eframe::App for DFGraphicsHelper {
                 modifiers: Modifiers::COMMAND,
                 key: Key::Z
             };
-            if ctx.input_mut(|i| i.consume_shortcut(undo)) {
-                self.action = Action::Undo;
-            }
             let redo = &KeyboardShortcut {
                 modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
                 key: Key::Z
             };
-            if ctx.input_mut(|i| i.consume_shortcut(redo)) {
-                self.action = Action::Redo;
-            }
             let import = &KeyboardShortcut {
                 modifiers: Modifiers::COMMAND,
                 key: Key::I
             };
-            if ctx.input_mut(|i| i.consume_shortcut(import)) {
-                self.action = Action::Import;
-            }
             let open = &KeyboardShortcut {
                 modifiers: Modifiers::COMMAND,
                 key: Key::O
             };
-            if ctx.input_mut(|i| i.consume_shortcut(open)) {
-                self.action = Action::Import;
-            }
             let export = &KeyboardShortcut {
                 modifiers: Modifiers::COMMAND,
                 key: Key::E
             };
-            if ctx.input_mut(|i| i.consume_shortcut(export)) {
+
+            if ctx.input_mut(|i| i.consume_shortcut(undo)) {
+                self.action = Action::Undo;
+            } else if ctx.input_mut(|i| i.consume_shortcut(redo)) {
+                self.action = Action::Redo;
+            } else if ctx.input_mut(|i| i.consume_shortcut(import)) {
+                self.action = Action::Import;
+            } else if ctx.input_mut(|i| i.consume_shortcut(open)) {
+                self.action = Action::Import;
+            } else if ctx.input_mut(|i| i.consume_shortcut(export)) {
                 self.action = Action::Export;
             }
         }
@@ -4577,6 +4765,12 @@ impl eframe::App for DFGraphicsHelper {
                     self.export();
                 },
                 Action::None => {},
+                Action::Split(selected) => {
+                    result = self.split(selected.clone());
+                },
+                Action::Merge(selected) => {
+                    result = self.merge(selected.clone());
+                },
             }
             if result.is_err() {
                 self.exception = result.unwrap_err();
@@ -4589,15 +4783,19 @@ impl eframe::App for DFGraphicsHelper {
                 .collapsible(false)
                 .constrain(true)
                 .title_bar(false)
-                .default_size([600.0, 200.0])
+                .default_size([500.0, 250.0])
                 .show(ctx, |ui| {
 
+                
                 egui::TopBottomPanel::top("exception panel")
                     .show_separator_line(false)
                     .show_inside(ui, |ui| {
                     ui.label("Error:");
-                    ui.separator();
-                    ui.label(self.exception.to_string());
+
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        ui.separator();
+                        ui.label(self.exception.to_string());
+                    });
                 });
 
                 egui::TopBottomPanel::bottom("Ok")
@@ -4607,30 +4805,20 @@ impl eframe::App for DFGraphicsHelper {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                         if ui.button("      Ok      ").clicked() {
                             match self.exception {
-                                DFGHError::IoError(..) => {
-                                    self.exception = DFGHError::None;
-                                },
-                                DFGHError::ImageError(..) => {
-                                    self.undo();
-                                    self.exception = DFGHError::None;
-                                },
-                                DFGHError::ImportError(..) => {
-                                    self.exception = DFGHError::None;
-                                },
-                                DFGHError::ImportParseError(..) => {
-                                    self.exception = DFGHError::None;
-                                },
+                                DFGHError::ImportError(..) |
                                 DFGHError::ImportConditionError(..) => {
                                     self.exception = DFGHError::None;
-                                },
-                                DFGHError::NoGraphicsDirectory(..) => {
-                                    self.exception = DFGHError::None;
-                                },
-                                DFGHError::UnsupportedFileName(..) => {
-                                    self.exception = DFGHError::None;
+                                    //self.edit_file(line)
                                 },
                                 DFGHError::IndexError => {
                                     self.indices = GraphicsIndices::from([0; 8]);
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::IoError(..) |
+                                DFGHError::ImageError(..) |
+                                DFGHError::ImportParseError(..) |
+                                DFGHError::NoGraphicsDirectory(..) |
+                                DFGHError::UnsupportedFileName(..) => {
                                     self.exception = DFGHError::None;
                                 },
                                 DFGHError::Other(..) => {
