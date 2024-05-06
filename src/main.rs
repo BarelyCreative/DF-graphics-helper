@@ -1,13 +1,11 @@
-// #![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use anyhow::anyhow;
-use egui::plot::{Plot, PlotImage, PlotPoint};
-use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut};
+use egui_plot::{GridInput, GridMark, Plot, PlotImage, PlotPoint, Polygon};
+use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut, Stroke};
 use convert_case::{Boundary, Case, Casing};
 use rfd;
 use thiserror::Error;
 use std::io::prelude::*;
-use std::panic::catch_unwind;
 use std::path::PathBuf;
 use std::{fs, io, path};
 
@@ -59,7 +57,7 @@ impl Graphics {
         } else if folder.ends_with("images") && folder.parent().get_or_insert(path::Path::new("")).ends_with("graphics") {
             folder.pop();
             folder.pop();
-        } else if !folder.read_dir()?.any(|f| if f.is_ok() {f.unwrap().path().ends_with("graphics")} else {false}) {//checked unwrap
+        } else if !folder.read_dir()?.any(|f| f.is_ok_and(|f| f.path().ends_with("graphics"))) {
             return Err(DFGHError::NoGraphicsDirectory(folder.clone()));
         }
 
@@ -220,7 +218,8 @@ impl Graphics {
                     raw_line.replace("graphics_creatures_", "").trim().to_string();
             } else if brackets && len > 0 {
                 match line_vec[0].as_str() {
-                    "CREATURE_GRAPHICS" | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
+                    "CREATURE_GRAPHICS" 
+                    | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
                         match &mut layer_set {
                             //write buffered creature/layer set before starting the new one
                             LayerSet::Empty => {
@@ -240,7 +239,8 @@ impl Graphics {
                                     layer_group = LayerGroup::empty();
                                 }
                             },
-                            LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
+                            LayerSet::Simple(simple_layers) 
+                            | LayerSet::Statue(simple_layers) => {
                                 if simple_layer.state.ne(&State::default()) {
                                     simple_layers.push(simple_layer);
                                     simple_layer = SimpleLayer::empty();
@@ -899,7 +899,7 @@ impl SimpleLayer {
         if let State::Custom(cust_state) = state {
             ui.label("Custom state:");
             ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Unit_type_token");
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
         }
 
         ui.add_space(PADDING);
@@ -915,7 +915,7 @@ impl SimpleLayer {
         if let Some(State::Custom(cust_state)) = sub_state {
             ui.label("Custom state:");
             ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Unit_type_token");
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
         }
 
         ui.add_space(PADDING);
@@ -977,7 +977,7 @@ impl SimpleLayer {
         if let State::Custom(cust_state) = state {
             ui.label("Custom state:");
             ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Unit_type_token");
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
         }
         ui.label("Note: only DEFAULT is known to work v50.05");
 
@@ -2956,8 +2956,6 @@ enum Action {
     Delete(ContextData),
     Import,
     Export,
-    Split(ContextData),
-    Merge(ContextData),
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -2984,8 +2982,9 @@ impl GraphicsIndices {
             condition_index: 0,
         }
     }
-
-    fn from(index_array: [usize; 8]) -> GraphicsIndices {
+}
+impl From<[usize; 8]> for GraphicsIndices {
+    fn from(index_array: [usize; 8]) -> Self {
         GraphicsIndices {
             tile_page_index:        index_array[0],
             tile_index:             index_array[1],
@@ -3011,26 +3010,23 @@ enum DFGHError {
     #[error("An error occured while processing an image.")]
     ImageError(#[from] image::ImageError),
 
-    #[error("An error occured while attempting to import.\n\tLine {0}:\n\t{1}\n\n\tFile: \n{2}")]
+    #[error("An error occured while attempting to import line {0}:\n\t\"{1}\"\n\nIn file:\n\t{2}")]
     ImportError(usize, String, path::PathBuf),
 
     #[error("Failed to parse an integer while importing a string.")]
     ImportParseError(#[from] std::num::ParseIntError),
 
-    #[error("An error occured while attempting to import a condition:\n\t{0}")]
+    #[error("An error occured while attempting to import condition:\n\t{0}")]
     ImportConditionError(String),
 
-    #[error("No \"<mod>/graphics/\" directory found at path:\n\t{0}")]
+    #[error("No valid directory found at path:\n\t{0}\n\nFormat is <mod_name (numeric version)>/graphics/")]
     NoGraphicsDirectory(path::PathBuf),
 
-    #[error("File name is unsupported (non UTF-8):\n\t{0}")]
+    #[error("File name includes unsupported characters(non UTF-8):\n\t{0}")]
     UnsupportedFileName(path::PathBuf),
 
     #[error("Index out of bounds")]
     IndexError,
-
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),  // source and Display delegate to anyhow::Error
 }
 
 type Result<T> = std::result::Result<T, DFGHError>;
@@ -3079,7 +3075,6 @@ impl DFGraphicsHelper {
                 let import_result = Graphics::import(&mut path);
                 if let Ok((graphics, path)) = import_result {
                     (self.loaded_graphics, self.path) = (graphics, path);
-                    self.main_window = MainWindow::DefaultMenu;
                 } else {
                     self.exception = import_result.unwrap_err();
                 }
@@ -3088,7 +3083,6 @@ impl DFGraphicsHelper {
             let import_result = Graphics::import(&mut self.path);
             if let Ok((graphics, path)) = import_result {
                 (self.loaded_graphics, self.path) = (graphics, path);
-                self.main_window = MainWindow::DefaultMenu;
             } else {
                 self.exception = import_result.unwrap_err();
             }
@@ -3157,35 +3151,6 @@ impl DFGraphicsHelper {
             action = Action::Duplicate(selected);
         } else {
             let mut inner_action = Action::None;
-
-            match selected {
-                ContextData::Layer(_) => {
-                    if ui.button("Split").clicked() {
-                        ui.close_menu();
-                        inner_action = Action::Split(selected.clone());
-                    }
-                }
-                ContextData::LayerGroup(_) => {
-                    if ui.button("Split").clicked() {
-                        ui.close_menu();
-                        inner_action = Action::Split(selected.clone());
-                    } else if ui.button("Merge Up").clicked() {
-                        ui.close_menu();
-                        inner_action = Action::Merge(selected.clone());
-                    }
-                },
-                ContextData::LayerSet(_) |
-                ContextData::TilePage(_) |
-                ContextData::CreatureFile(_) |
-                ContextData::Creature(_) |
-                ContextData::SimpleLayer(_) |
-                ContextData::Condition(_) |
-                ContextData::Tile(_) |
-                ContextData::None => {
-                    //do nothing
-                },
-            }
-
             ui.menu_button("Insert..", |ui| {
                 match selected {
                     ContextData::TilePage(_) | ContextData::Tile(_) => {
@@ -3262,7 +3227,7 @@ impl DFGraphicsHelper {
 
         self.copied = ContextData::from(selected.clone());
 
-        self.delete(selected)?;//resets self.action if successful
+        self.delete(selected)?;
 
         Ok(())
     }
@@ -3584,164 +3549,6 @@ impl DFGraphicsHelper {
         Ok(())
     }
 
-    fn split(&mut self, selected: ContextData) -> Result<()> {
-        self.save_state();
-        
-        let graphics = &mut self.loaded_graphics;
-        let indices = &mut self.indices;
-
-        match selected {
-            ContextData::LayerGroup(_) => {
-                let mut lgs_new = Vec::new();
-
-                if indices.layer_group_index > 0 {
-                    if let LayerSet::Layered(_, lgs) = 
-                        &mut graphics.creature_files
-                        .get_mut(indices.creature_file_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .creatures
-                        .get_mut(indices.creature_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .graphics_type
-                        .get_mut(indices.layer_set_index)
-                        .ok_or(DFGHError::IndexError)? {
-    
-                        lgs_new = lgs.drain(indices.layer_group_index..).collect();
-                        
-                        self.main_window = MainWindow::CreatureMenu;
-                    }
-                    
-                    if !lgs_new.is_empty() {
-                        let lss = &mut graphics.creature_files
-                            .get_mut(indices.creature_file_index)
-                            .ok_or(DFGHError::IndexError)?
-                            .creatures
-                            .get_mut(indices.creature_index)
-                            .ok_or(DFGHError::IndexError)?
-                            .graphics_type;
-        
-                        lss.insert(
-                            indices.layer_set_index + 1,
-                            LayerSet::Layered(
-                                State::Default,
-                                lgs_new
-                            )
-                        );
-                    }
-                }
-            },
-            ContextData::Layer(_) => {
-                let mut ls_new = Vec::new();
-
-                if indices.layer_index > 0 {
-                    if let LayerSet::Layered(_, layer_groups) = 
-                        &mut graphics.creature_files
-                        .get_mut(indices.creature_file_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .creatures
-                        .get_mut(indices.creature_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .graphics_type
-                        .get_mut(indices.layer_set_index)
-                        .ok_or(DFGHError::IndexError)? {
-
-                        let ls = &mut layer_groups
-                            .get_mut(indices.layer_group_index)
-                            .ok_or(DFGHError::IndexError)?
-                            .layers;
-    
-                        ls_new = ls.drain(indices.layer_index..).collect();
-                        
-                        self.main_window = MainWindow::LayerGroupMenu;
-                    }
-                    
-                    if !ls_new.is_empty() {
-                        if let LayerSet::Layered(_, lgs) = 
-                            &mut graphics.creature_files
-                            .get_mut(indices.creature_file_index)
-                            .ok_or(DFGHError::IndexError)?
-                            .creatures
-                            .get_mut(indices.creature_index)
-                            .ok_or(DFGHError::IndexError)?
-                            .graphics_type
-                            .get_mut(indices.layer_set_index)
-                            .ok_or(DFGHError::IndexError)? {
-
-                            
-
-                            lgs.insert(
-                                indices.layer_group_index + 1,
-                                LayerGroup {layers: ls_new, ..LayerGroup::new()}
-                            );
-                        }
-                    }
-                }
-            },
-            ContextData::LayerSet(_) |
-            ContextData::SimpleLayer(_) |
-            ContextData::Condition(_) |
-            ContextData::Tile(_) |
-            ContextData::TilePage(_) |
-            ContextData::CreatureFile(_) |
-            ContextData::Creature(_) |
-            ContextData::None => {
-                //do nothing b/c these can't really be split/merged
-            },
-        }
-
-        self.action = Action::None;
-
-        Ok(())
-    }
-    
-    fn merge(&mut self, selected: ContextData) -> Result<()> {
-        self.save_state();
-        
-        let graphics = &mut self.loaded_graphics;
-        let indices = &mut self.indices;
-
-        match selected {
-            ContextData::LayerGroup(_) => {
-                if indices.layer_group_index > 0 {
-                    if let LayerSet::Layered(_, lgs) = 
-                        &mut graphics.creature_files
-                        .get_mut(indices.creature_file_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .creatures
-                        .get_mut(indices.creature_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .graphics_type
-                        .get_mut(indices.layer_set_index)
-                        .ok_or(DFGHError::IndexError)? {
-
-                        let ls_bot = lgs[indices.layer_group_index].layers.clone();
-
-                        lgs[indices.layer_group_index - 1].layers.extend(ls_bot);
-
-                        lgs.remove(indices.layer_group_index);
-
-                        self.main_window = MainWindow::LayerSetMenu;
-                    }
-                }
-            },
-            ContextData::LayerSet(_) |
-            ContextData::Layer(_) |
-            ContextData::SimpleLayer(_) |
-            ContextData::Condition(_) |
-            ContextData::Tile(_) |
-            ContextData::TilePage(_) |
-            ContextData::CreatureFile(_) |
-            ContextData::Creature(_) |
-            ContextData::None => {
-                //do nothing b/c these can't really be split/merged
-            },
-        }
-
-        self.action = Action::None;
-
-        Ok(())
-    }
-
     fn main_tree(&mut self, ui: &mut Ui, ctx: &Context) {
         let graphics = &mut self.loaded_graphics;
 
@@ -3761,27 +3568,32 @@ impl DFGraphicsHelper {
                 true,
             )
             .show_header(ui, |ui| {
-                if ui.add(egui::Label::new(
+                let tilepage_response = ui.add(egui::Label::new(
                     format!("Tile Page: {}", &tile_page.name))
-                    .sense(Sense::click()))
-                    .context_menu(|ui| {
-                    self.indices = GraphicsIndices::from([i_tile_page, 0, 0, 0, 0, 0, 0, 0]);
-                    self.action = Self::context(ui, ContextData::from(tile_page.clone()));
-                }).clicked() {
-                    self.indices = GraphicsIndices::from([i_tile_page, 0, 0, 0, 0, 0, 0, 0]);
+                    .sense(Sense::click()));
+                if tilepage_response.clicked() {
+                    self.indices = [i_tile_page, 0, 0, 0, 0, 0, 0, 0].into();
                     self.main_window = MainWindow::TilePageMenu;
                 }
+                tilepage_response.context_menu(|ui| {
+                    self.indices = [i_tile_page, 0, 0, 0, 0, 0, 0, 0].into();
+                    self.action = Self::context(ui, ContextData::from(tile_page.clone()));
+                });
             })
             .body(|ui| {
                 for (i_tile, tile) in tile_page.tiles.iter_mut().enumerate() {
-                    if ui.add(egui::Label::new(&tile.name).sense(Sense::click()))
-                        .context_menu(|ui| {
-                        self.indices = GraphicsIndices::from([i_tile_page, i_tile, 0, 0, 0, 0, 0, 0]);
-                        self.action = Self::context(ui, ContextData::from(tile.clone()));
-                    }).clicked() {
-                        self.indices = GraphicsIndices::from([i_tile_page, i_tile, 0, 0, 0, 0, 0, 0]);
+                    let tile_response = ui.add(egui::Label::new(
+                        format!("{}", &tile.name))
+                        .wrap(false)
+                        .sense(Sense::click()));
+                    if tile_response.clicked() {
+                        self.indices = [i_tile_page, i_tile, 0, 0, 0, 0, 0, 0].into();
                         self.main_window = MainWindow::TileMenu;
                     }
+                    tile_response.context_menu(|ui| {
+                        self.indices = [i_tile_page, i_tile, 0, 0, 0, 0, 0, 0].into();
+                        self.action = Self::context(ui, ContextData::from(tile.clone()));
+                    });
                 }
             });
         }
@@ -3793,7 +3605,7 @@ impl DFGraphicsHelper {
         {
             self.main_window = MainWindow::CreatureDefaultMenu;
         };
-        for (i_file, creature_file) in graphics.creature_files.iter_mut().enumerate() {
+        for (i_file, creature_file) in self.loaded_graphics.creature_files.iter_mut().enumerate() {
             let id_cf = ui.make_persistent_id(
                 format!("creature_file{}",
                 i_file)
@@ -3804,16 +3616,17 @@ impl DFGraphicsHelper {
                 true,
             )
             .show_header(ui, |ui| {
-                if ui.add(egui::Label::new(
+                let creature_file_response = ui.add(egui::Label::new(
                     format!("File: {}", &creature_file.name))
-                    .sense(Sense::click()))
-                    .context_menu(|ui| {
-                    self.indices = GraphicsIndices::from([0, 0, i_file, 0, 0, 0, 0, 0]);
-                    self.action = Self::context(ui, ContextData::from(creature_file.clone()));
-                }).clicked() {
-                    self.indices = GraphicsIndices::from([0, 0, i_file, 0, 0, 0, 0, 0]);
+                    .sense(Sense::click()));
+                if creature_file_response.clicked() {
+                    self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
                     self.main_window = MainWindow::CreatureFileMenu;
-                };
+                }
+                creature_file_response.context_menu(|ui| {
+                    self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
+                    self.action = Self::context(ui, ContextData::from(creature_file.clone()));
+                });
             })
             .body(|ui| {
                 for (i_creature, creature) in creature_file.creatures.iter_mut().enumerate() {
@@ -3827,30 +3640,32 @@ impl DFGraphicsHelper {
                         true,
                     )
                     .show_header(ui, |ui| {
-                        if ui .add(egui::Label::new(
+                        let creature_response = ui.add(egui::Label::new(
                             format!("Creature: {}", &creature.name))
-                            .sense(Sense::click()))
-                            .context_menu(|ui| {
-                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, 0, 0, 0, 0]);
-                            self.action = Self::context(ui, ContextData::from(creature.clone()));
-                        }).clicked() {
-                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, 0, 0, 0, 0]);
+                            .sense(Sense::click()));
+                        if creature_response.clicked() {
+                            self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
                             self.main_window = MainWindow::CreatureMenu;
-                        };
+                        }
+                        creature_response.context_menu(|ui| {
+                            self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
+                            self.action = Self::context(ui, ContextData::from(creature.clone()));
+                        });
                     })
                     .body(|ui| {
                         for (i_layer_set, layer_set) in creature.graphics_type.iter_mut().enumerate() {
                             match layer_set {
                                 LayerSet::Empty => {
-                                    if ui.add(egui::Label::new("(empty)")
-                                        .sense(Sense::click()))
-                                        .context_menu(|ui| {
-                                        self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
-                                        self.action = Self::context(ui, ContextData::from(layer_set.clone()));
-                                    }).clicked() {
-                                        self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
+                                    let layerset_response = ui.add(egui::Label::new("(empty)")
+                                        .sense(Sense::click()));
+                                    if layerset_response.clicked() {
+                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
                                         self.main_window = MainWindow::LayerSetMenu;
                                     }
+                                    layerset_response.context_menu(|ui| {
+                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
+                                        self.action = Self::context(ui, ContextData::from(layer_set.clone()));
+                                    });
                                 },
                                 LayerSet::Layered(state, layer_groups) => {
                                     let id_ls = ui.make_persistent_id(
@@ -3862,16 +3677,17 @@ impl DFGraphicsHelper {
                                         true)
                                         .show_header(ui, |ui|
                                         {
-                                        if ui.add(egui::Label::new(
-                                            format!("Set: {}", state.name()))
-                                            .sense(Sense::click()))
-                                            .context_menu(|ui| {
-                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
-                                            self.action = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
-                                        }).clicked() {
-                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, 0, 0]);
-                                            self.main_window = MainWindow::LayerSetMenu;
-                                        }
+                                            let layerset_response = ui.add(egui::Label::new(
+                                                format!("{}", state.name()))
+                                                .sense(Sense::click()));
+                                            if layerset_response.clicked() {
+                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
+                                                self.main_window = MainWindow::LayerSetMenu;
+                                            }
+                                            layerset_response.context_menu(|ui| {
+                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
+                                                self.action = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
+                                            });
                                     })
                                         .body(|ui|
                                         {
@@ -3882,19 +3698,21 @@ impl DFGraphicsHelper {
                                             );
                                             egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
                                                 id_lg,
-                                                true)
+                                                false)
                                                 .show_header(ui, |ui|
                                                 {
-                                                if ui.add(egui::Label::new(
-                                                    format!("Group: {}", &layer_group.name))
-                                                    .sense(Sense::click())).context_menu(|ui| {
-                                                    self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0]);
-                                                    self.action = Self::context(ui, ContextData::from(layer_group.clone()));
-                                                }).clicked() {
-                                                    self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0]);
-                                                    self.main_window = MainWindow::LayerGroupMenu;
-                                                };
-                                            })
+                                                    let layergroup_response = ui.add(egui::Label::new(
+                                                        format!("{}", &layer_group.name))
+                                                        .sense(Sense::click()));
+                                                    if layergroup_response.clicked() {
+                                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
+                                                        self.main_window = MainWindow::LayerGroupMenu;
+                                                    }
+                                                    layergroup_response.context_menu(|ui| {
+                                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
+                                                        self.action = Self::context(ui, ContextData::from(layer_group.clone()));
+                                                    });
+                                                })
                                                 .body(|ui|
                                                 {
                                                 for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
@@ -3907,29 +3725,31 @@ impl DFGraphicsHelper {
                                                         false)
                                                         .show_header(ui, |ui|
                                                         {
-                                                        if ui.add(egui::Label::new(
-                                                            format!("Layer: {}", &layer.name))
-                                                            .sense(Sense::click()))
-                                                            .context_menu(|ui| {
-                                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0]);
-                                                            self.action = Self::context(ui, ContextData::from(layer.clone()));
-                                                        }).clicked() {
-                                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0]);
-                                                            self.main_window = MainWindow::LayerMenu;
-                                                        }
-                                                    })
+                                                            let layer_response = ui.add(egui::Label::new(
+                                                                format!("Layer: {}", &layer.name))
+                                                                .sense(Sense::click()));
+                                                            if layer_response.clicked() {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.main_window = MainWindow::LayerMenu;
+                                                            }
+                                                            layer_response.context_menu(|ui| {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.action = Self::context(ui, ContextData::from(layer.clone()));
+                                                            });
+                                                        })
                                                         .body(|ui|
                                                         {
                                                         for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
-                                                            if ui.add(egui::Label::new(condition.name())
-                                                                .sense(Sense::click()))
-                                                                .context_menu(|ui| {
-                                                                self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition]);
-                                                                self.action = Self::context(ui, ContextData::from(condition.clone()));
-                                                            }).clicked() {
-                                                                self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition]);
+                                                            let condition_response = ui.add(egui::Label::new(condition.name())
+                                                                .sense(Sense::click()));
+                                                            if condition_response.clicked() {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
                                                                 self.main_window = MainWindow::ConditionMenu;
                                                             }
+                                                            condition_response.context_menu(|ui| {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
+                                                                self.action = Self::context(ui, ContextData::from(condition.clone()));
+                                                            });
                                                         }
                                                     });
                                                 }
@@ -3939,7 +3759,7 @@ impl DFGraphicsHelper {
                                 },
                                 LayerSet::Simple(simple_layers) => {
                                     for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
-                                        if ui.add(egui::Label::new(
+                                        let condition_response = ui.add(egui::Label::new(
                                         if let Some(sub_state) = &simple_layer.sub_state {
                                                 format!("\t{} & {}",
                                                 simple_layer.state.name(),
@@ -3948,19 +3768,20 @@ impl DFGraphicsHelper {
                                                 format!("\t{}",
                                                 simple_layer.state.name())
                                             })
-                                            .sense(Sense::click()))
-                                            .context_menu(|ui| {
-                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
-                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
-                                        }).clicked() {
-                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
+                                            .sense(Sense::click()));
+                                        if condition_response.clicked() {
+                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
                                             self.main_window = MainWindow::LayerMenu;
                                         }
+                                        condition_response.context_menu(|ui| {
+                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
+                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
+                                        });
                                     }
                                 },
                                 LayerSet::Statue(simple_layers) => {
                                     for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
-                                        if ui.add(egui::Label::new(
+                                        let condition_response = ui.add(egui::Label::new(
                                         if let Some(sub_state) = &simple_layer.sub_state {
                                                 format!("\tStatue: {} & {}",
                                                 simple_layer.state.name(),
@@ -3969,14 +3790,15 @@ impl DFGraphicsHelper {
                                                 format!("\tStatue: {}",
                                                 simple_layer.state.name())
                                             })
-                                            .sense(Sense::click()))
-                                            .context_menu(|ui| {
-                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
-                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
-                                        }).clicked() {
-                                            self.indices = GraphicsIndices::from([0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0]);
+                                            .sense(Sense::click()));
+                                        if condition_response.clicked() {
+                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
                                             self.main_window = MainWindow::LayerMenu;
                                         }
+                                        condition_response.context_menu(|ui| {
+                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
+                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
+                                        });
                                     }
                                 },
                             }
@@ -4446,86 +4268,116 @@ impl DFGraphicsHelper {
 
         if self.preview_image && self.texture.is_some() {
             //display texture once loaded
-            let texture = self.texture.as_ref().unwrap();//checked
+            let texture: &egui::TextureHandle = self.texture.as_ref().expect("reference to texture should not be empty");//checked
             let size = texture.size_vec2();
 
-            // let image_result = catch_unwind(|| {
-                let image = PlotImage::new(texture, PlotPoint::new(size[0] / 2.0, size[1] / -2.0), size);
-            // });
+            
 
-            // if let Ok(image) = image_result {
-                let x_fmt = |x, _range: &std::ops::RangeInclusive<f64>| {
-                    if x < 0.0 {
-                        // No labels outside value bounds
-                        String::new()
-                    } else {
-                        // Tiles
-                        format!("{}", (x as f64 / 32.0).floor())
-                    }
-                };
-                let y_fmt = |y, _range: &std::ops::RangeInclusive<f64>| {
-                    if y > 0.0 {
-                        // No labels outside value bounds
-                        String::new()
-                    } else {
-                        // Tiles
-                        format!("{}", (y as f64 / -32.0).floor())
-                    }
-                };
-                let label_fmt = |_s: &str, val: &PlotPoint| {
-                    format!(
-                        "{}, {}",
-                        (val.x / 32.0).floor(),
-                        (val.y / -32.0).floor()
-                    )
-                };
+            let image =
+                PlotImage::new(texture, PlotPoint::new(size[0] / 2.0, size[1] / -2.0), size);
 
-                let plot = Plot::new("image_preview")
-                    .auto_bounds_x()
-                    .auto_bounds_y()
-                    .data_aspect(1.0)
-                    .show_background(true)
-                    .allow_boxed_zoom(false)
-                    .clamp_grid(true)
-                    .min_size(egui::vec2(100.0, 400.0))
-                    .set_margin_fraction(egui::vec2(0.005, 0.005))
-                    .x_axis_formatter(x_fmt)
-                    .y_axis_formatter(y_fmt)
-                    .x_grid_spacer(Self::grid)
-                    .y_grid_spacer(Self::grid)
-                    .label_formatter(label_fmt);
-                plot.show(ui, |plot_ui| {
-                    plot_ui.image(image.name("Image"));
-                    if let Some(rect) = rectangle {
-                        let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
-                        let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
-                        let points = vec![
-                            [x1 * 32.0, y1 * -32.0],
-                            [x2 * 32.0 + 32.0, y1 * -32.0],
-                            [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
-                            [x1 * 32.0, y2 * -32.0 - 32.0],
-                        ];
-
-                        let rectangle = egui::plot::Polygon::new(points)
-                            .color(egui::Color32::LIGHT_BLUE)
-                            .fill_alpha(0.01);
-                        plot_ui.polygon(rectangle);
-                    }
-                    self.cursor_coords.take();
-                    if plot_ui.plot_secondary_clicked() {
-                        if let Some(pointer) = plot_ui.pointer_coordinate() {
-                            self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
-                        }
-                    }
-                });
-
-                if self.texture_file_name.ne(&file_name) {
-                    self.texture = None;
+            let x_fmt = 
+            |grid_mk: GridMark, _max_char: usize, _range: &core::ops::RangeInclusive<f64> | {
+                let x = grid_mk.value;
+                if x < 0.0 {
+                    // No labels outside value bounds
+                    String::new()
+                } else {
+                    // Tiles
+                    format!("{}", (x as f64 / 32.0).floor())
                 }
-            // } else {
-            //     return Err(DFGHError::Other(anyhow!("Unknown error loading the image.")))
-            // }
-        } else if self.preview_image {
+            };
+            let y_fmt = 
+            |grid_mk: GridMark, _max_char: usize, _range: &core::ops::RangeInclusive<f64> | {
+                let y = grid_mk.value;
+                if y > 0.0 {
+                    // No labels outside value bounds
+                    String::new()
+                } else {
+                    // Tiles
+                    format!("{}", (y as f64 / -32.0).floor())
+                }
+            };
+            let label_fmt = |_s: &str, val: &PlotPoint| {
+                format!(
+                    "{}, {}",
+                    (val.x / 32.0).floor(),
+                    (val.y / -32.0).floor()
+                )
+            };
+            let grid_fmt = |input: GridInput| -> Vec<GridMark> {
+                let mut marks = vec![];
+
+                let (min, max) = input.bounds;
+                let min = min.floor() as i32;
+                let max = max.ceil() as i32;
+        
+                for i in min..=max {
+                    let step_size = if i % 3200 == 0 {
+                        // 100 tile
+                        3200.0
+                    } else if i % 320 == 0 {
+                        // 10 tile
+                        320.0
+                    } else if i % 32 == 0 {
+                        // 1 tile
+                        32.0
+                    } else {
+                        // skip grids below 1 tile
+                        continue;
+                    };
+        
+                    marks.push(GridMark {
+                        value: i as f64,
+                        step_size,
+                    });
+                }
+        
+                marks
+            };
+
+            let plot = Plot::new("image_preview")
+                .auto_bounds([true, true].into())
+                .data_aspect(1.0)
+                .show_background(true)
+                .allow_boxed_zoom(false)
+                .clamp_grid(true)
+                .min_size(egui::vec2(100.0, 400.0))
+                .set_margin_fraction(egui::vec2(0.005, 0.005))
+                .x_axis_formatter(x_fmt) //todo
+                .y_axis_formatter(y_fmt) //todo
+                .x_grid_spacer(grid_fmt)
+                .y_grid_spacer(grid_fmt)
+                .label_formatter(label_fmt);
+            plot.show(ui, |plot_ui| {
+                plot_ui.image(image.name("Image"));
+                if let Some(rect) = rectangle {
+                    let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
+                    let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
+                    let points = vec![
+                        [x1 * 32.0, y1 * -32.0],
+                        [x2 * 32.0 + 32.0, y1 * -32.0],
+                        [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
+                        [x1 * 32.0, y2 * -32.0 - 32.0],
+                    ];
+
+                    let rectangle = Polygon::new(points)
+                        .stroke(Stroke::new(2.0, egui::Color32::LIGHT_BLUE))
+                        .fill_color(egui::Color32::TRANSPARENT);
+                    plot_ui.polygon(rectangle);
+                }
+                self.cursor_coords.take();
+                if plot_ui.response().secondary_clicked() {
+                    if let Some(pointer) = plot_ui.pointer_coordinate() {
+                        self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
+                    }
+                }
+            });
+
+            if self.texture_file_name.ne(&file_name) {
+                self.texture = None;
+            }
+        } else if self.preview_image && self.texture.is_none() {
             //load texture from path
             let image_path = self.path
                 .join("graphics")
@@ -4536,62 +4388,25 @@ impl DFGraphicsHelper {
                 let dyn_image = image::open(image_path)?;
                 let size = [dyn_image.width() as _, dyn_image.height() as _];
                 let image = dyn_image.as_bytes();
-                
-                let rgba_result = catch_unwind(|| {
-                    egui::ColorImage::from_rgba_unmultiplied(size, image)
-                });
+                let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
 
-                if let Ok(rgba) = rgba_result {
-                    self.loaded_graphics.tile_pages
-                        .get_mut(self.indices.tile_page_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .tiles
-                        .get_mut(self.indices.tile_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .image_size = [dyn_image.width(), dyn_image.height()];
-    
-                    let texture_handle = ui.ctx().load_texture("default_image", rgba, Default::default());
-                    self.texture = Some(texture_handle);
-    
-                    self.texture_file_name = file_name;
-                } else {
-                    return Err(DFGHError::Other(anyhow!("Error loading texture: Image is not 32-bit RGBA")));
-                }
+                self.loaded_graphics.tile_pages
+                    .get_mut(self.indices.tile_page_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .tiles
+                    .get_mut(self.indices.tile_index)
+                    .ok_or(DFGHError::IndexError)?
+                    .image_size = [dyn_image.width(), dyn_image.height()];
+                
+                self.texture.get_or_insert_with(|| {
+                    ui.ctx()
+                        .load_texture("default_image", rgba, Default::default())
+                });
+                self.texture_file_name = file_name;
             }
         }
         
         Ok(())
-    }
-
-    fn grid(input: egui::plot::GridInput) -> Vec<egui::plot::GridMark> {
-        let mut marks = vec![];
-
-        let (min, max) = input.bounds;
-        let min = min.floor() as i32;
-        let max = max.ceil() as i32;
-
-        for i in min..=max {
-            let step_size = if i % 3200 == 0 {
-                // 100 tile
-                3200.0
-            } else if i % 320 == 0 {
-                // 10 tile
-                320.0
-            } else if i % 32 == 0 {
-                // 1 tile
-                32.0
-            } else {
-                // skip grids below 1 tile
-                continue;
-            };
-
-            marks.push(egui::plot::GridMark {
-                value: i as f64,
-                step_size,
-            });
-        }
-
-        marks
     }
 
     fn tile_info(&self) -> Vec<(String, [u32; 2])> {
@@ -4664,11 +4479,11 @@ impl eframe::App for DFGraphicsHelper {
         egui::SidePanel::new(egui::panel::Side::Left, "tree")
             .resizable(true)
             .show(ctx, |ui| {
-            //Draw tree-style selection menu on left side
-            egui::ScrollArea::both().show(ui, |ui| {
-                self.main_tree(ui, ctx)
+                //Draw tree-style selection menu on left side
+                egui::ScrollArea::both().show(ui, |ui| {
+                    self.main_tree(ui, ctx)
+                });
             });
-        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             //Draw main window by matching self.main_window
@@ -4698,34 +4513,37 @@ impl eframe::App for DFGraphicsHelper {
         if !ctx.wants_keyboard_input() {
             let undo = &KeyboardShortcut {
                 modifiers: Modifiers::COMMAND,
-                key: Key::Z
+                logical_key: Key::Z,
             };
-            let redo = &KeyboardShortcut {
-                modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
-                key: Key::Z
-            };
-            let import = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                key: Key::I
-            };
-            let open = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                key: Key::O
-            };
-            let export = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                key: Key::E
-            };
-
             if ctx.input_mut(|i| i.consume_shortcut(undo)) {
                 self.action = Action::Undo;
-            } else if ctx.input_mut(|i| i.consume_shortcut(redo)) {
+            }
+            let redo = &KeyboardShortcut {
+                modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
+                logical_key: Key::Z
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(redo)) {
                 self.action = Action::Redo;
-            } else if ctx.input_mut(|i| i.consume_shortcut(import)) {
+            }
+            let import = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                logical_key: Key::I
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(import)) {
                 self.action = Action::Import;
-            } else if ctx.input_mut(|i| i.consume_shortcut(open)) {
+            }
+            let open = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                logical_key: Key::O
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(open)) {
                 self.action = Action::Import;
-            } else if ctx.input_mut(|i| i.consume_shortcut(export)) {
+            }
+            let export = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                logical_key: Key::E
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(export)) {
                 self.action = Action::Export;
             }
         }
@@ -4765,12 +4583,6 @@ impl eframe::App for DFGraphicsHelper {
                     self.export();
                 },
                 Action::None => {},
-                Action::Split(selected) => {
-                    result = self.split(selected.clone());
-                },
-                Action::Merge(selected) => {
-                    result = self.merge(selected.clone());
-                },
             }
             if result.is_err() {
                 self.exception = result.unwrap_err();
@@ -4783,19 +4595,15 @@ impl eframe::App for DFGraphicsHelper {
                 .collapsible(false)
                 .constrain(true)
                 .title_bar(false)
-                .default_size([500.0, 250.0])
+                .default_size([600.0, 200.0])
                 .show(ctx, |ui| {
 
-                
                 egui::TopBottomPanel::top("exception panel")
                     .show_separator_line(false)
                     .show_inside(ui, |ui| {
                     ui.label("Error:");
-
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        ui.separator();
-                        ui.label(self.exception.to_string());
-                    });
+                    ui.separator();
+                    ui.label(self.exception.to_string());
                 });
 
                 egui::TopBottomPanel::bottom("Ok")
@@ -4805,26 +4613,34 @@ impl eframe::App for DFGraphicsHelper {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                         if ui.button("      Ok      ").clicked() {
                             match self.exception {
-                                DFGHError::ImportError(..) |
+                                DFGHError::IoError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImageError(..) => {
+                                    self.undo();
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImportError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
+                                DFGHError::ImportParseError(..) => {
+                                    self.exception = DFGHError::None;
+                                },
                                 DFGHError::ImportConditionError(..) => {
                                     self.exception = DFGHError::None;
-                                    //self.edit_file(line)
                                 },
-                                DFGHError::IndexError => {
-                                    self.indices = GraphicsIndices::from([0; 8]);
+                                DFGHError::NoGraphicsDirectory(..) => {
                                     self.exception = DFGHError::None;
                                 },
-                                DFGHError::IoError(..) |
-                                DFGHError::ImageError(..) |
-                                DFGHError::ImportParseError(..) |
-                                DFGHError::NoGraphicsDirectory(..) |
                                 DFGHError::UnsupportedFileName(..) => {
                                     self.exception = DFGHError::None;
                                 },
-                                DFGHError::Other(..) => {
+                                DFGHError::IndexError => {
                                     self.undo();
+                                    self.main_window = MainWindow::DefaultMenu;
+                                    self.indices = [0, 0, 0, 0, 0, 0, 0, 0 as usize].into();
                                     self.exception = DFGHError::None;
-                                }
+                                },
                                 DFGHError::None => {},
                             }
                         }
@@ -4835,19 +4651,18 @@ impl eframe::App for DFGraphicsHelper {
     }
 }
 
-fn main() {
-    let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(800.0, 600.0)),
-        resizable: true,
-        maximized: true,
-        follow_system_theme: true,
-        default_theme: eframe::Theme::Dark,
+fn main() -> eframe::Result<()> {
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_maximized(true)
+            //.with_icon(icon(256x256))
+            .with_min_inner_size([800.0, 600.0]),
         ..Default::default()
     };
+    
     eframe::run_native(
-        "DF Graphics Helper",
-        options,
+        "Dwarf Fortress Graphics Helper",
+        native_options,
         Box::new(|cc| Box::new(DFGraphicsHelper::new(cc))),
     )
-    .expect("Should always run if Creation Conteext can be created.");
 }
