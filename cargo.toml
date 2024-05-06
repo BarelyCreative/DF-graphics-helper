@@ -16,3 +16,6 @@ egui_extras = { version = "0.27.2", default-features = false, features = ["image
 image = { version = "0.25.1", default-features = false, features = ["png"] }
 rfd = "0.14.1"
 thiserror = "1.0.40"
+
+[dev-dependencies]
+pretty_assertions = "1.3.0"
