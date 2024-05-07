@@ -1718,8 +1718,7 @@ impl eframe::App for DFGraphicsHelper {
             }
         }
 
-        if !self.exception.is_ok() {
-        } else {
+        if !matches!(self.exception, DFGHError::None) {
             error_window(self, ctx);
         }
     }

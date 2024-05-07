@@ -35,11 +35,6 @@ pub enum DFGHError {
     #[error("Index out of bounds")]
     IndexError,
 }
-impl DFGHError {
-    pub const fn is_ok(&self) -> bool {
-        matches!(*self, DFGHError::None)
-    }
-}
 
 pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
     egui::Window::new("Error Window")
