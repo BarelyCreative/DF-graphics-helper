@@ -1,12 +1,41 @@
+use std::ffi::OsStr;
 use std::path;
 use std::io::prelude::*;
 use std::{fs, io};
 use convert_case::{Boundary, Case, Casing};
 use egui::Ui;
 
-use crate::{app, error, PADDING};
-use app::DFGraphicsHelper;
-use error::{Result, DFGHError};
+pub mod logic;
+use logic::app::DFGraphicsHelper;
+use logic::error::{Result, DFGHError, wrap_import_error, wrap_block_error};
+
+pub const PADDING: f32 = 8.0;
+
+macro_rules! block_err_wrap {
+    ($func:expr, $i_buffer:ident, $i_elem:expr) => {
+        match $func {
+            Ok(inner) => inner,
+            Err(e) => return wrap_block_error(e.into(), [$i_buffer, $i_elem]),
+        }
+    };
+}
+
+macro_rules! index_err {
+    ($i_buffer:ident, $expected:expr, $found:ident) => {
+        let e = DFGHError::ImportIndexError($expected, $found);
+
+        if $expected < $found {
+            return Err::<Tile, DFGHError>(DFGHError::ImportBlockError([$i_buffer, $expected + 1], e.to_string()))
+        } else {
+            return Err::<Tile, DFGHError>(DFGHError::ImportBlockError([$i_buffer, $expected - 1], e.to_string()))
+        }
+    };
+}
+
+// match Self::import_tile(&mut buffer, path) {
+//     Ok(tile) => tiles.push(tile),
+//     Err(e) => return wrap_import_error(e, raw_buffer.clone(), i_line, path),
+// }
 
 #[derive(Clone, Debug, Default)]
 pub struct Graphics {
@@ -14,6 +43,7 @@ pub struct Graphics {
     pub creature_files: Vec<CreatureFile>,
 }
 impl Graphics {
+    /// Generate a blank generic Graphics struct
     pub fn new() -> Graphics {
         Graphics {
             tile_pages: vec![TilePage::new()],
@@ -21,59 +51,79 @@ impl Graphics {
         }
     }
 
-    fn read_brackets(raw_line: &String) -> (bool, Vec<String>, Option<String>) {
-        let brackets = raw_line.trim().starts_with("[") && raw_line.contains("]");
+    /// Take a line loaded from a text file and filter out the valid arguements between '[]'s into a vector.
+    /// 
+    /// Returns a true if there were valid brackets, a vector of the internal arguments, and any text after the closing bracket as an optional comment.
+    /// ```
+    /// # use df_texture_helper::*;
+    /// let commented_line = " ignored pre-text \t \t[CREATURE:DWARF] ignored comment text ".to_string();
+    /// let line_vec = Graphics::read_brackets(&commented_line);
+    /// 
+    /// assert_eq!("CREATURE", line_vec[0]);
+    /// assert_eq!("DWARF", line_vec[1]);
+    /// assert_eq!(2, line_vec.len());
+    /// 
+    /// let empty_line = " Lorem ipsum dolor".to_string();
+    /// assert!(Graphics::read_brackets(&empty_line).is_empty());
+    /// ```
+    pub fn read_brackets(raw_line: &String) -> Vec<String> {
+        // let mut split_line: Vec<&str> = 
+        
         let line_vec: Vec<String>;
-        let comments: Option<String>;
-        if brackets {
-            // let clean_line = raw_line.replace("[", "").replace("]", "").trim().to_string();
-            let start_line = raw_line.trim().replace("[", "");
-            let split_line:Vec<&str>  = start_line.split("]").collect();
-
-            //0 cannot be index out of range b/c checked that there is ] to split at after start
-            line_vec = split_line[0].split(":").map(|s| s.to_string()).collect();
-            if let Some(&c) = split_line.get(1) {
-                comments = Some(c.trim().to_string());
+        if let Some((_, open_brac_line)) = raw_line.split_once('[') {
+            if let Some((valid_line, _)) = open_brac_line.split_once(']') {
+                line_vec = valid_line.split(':').map(|s| s.to_string()).collect();
             } else {
-                comments = None;
+                line_vec = Vec::new();
             }
-            
         } else {
             line_vec = Vec::new();
-            comments = None;
         }
-        (brackets, line_vec, comments) //retain first bracket to ignore commented-out lines
+
+        line_vec
     }
 
+    /// Loads a graphics directory into the program.
+    /// 
+    /// Identifies if the selected path contains or is inside a valid graphics directory, 
+    /// then attempts to each graphics or tilepage file in the graphics directory.
+    /// 
+    /// ```
+    /// # use df_texture_helper::*;
+    /// let mut folder = std::path::PathBuf::from("C:\\Users\\Riley\\Desktop\\DwarfFortress\\Mod Dev Files\\DF Graphics Helper\\df_graphics_helper");
+    ///
+    /// Graphics::import(&mut folder);
+    /// ```
     pub fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf)> {
         let mut tile_pages: Vec<TilePage> = Vec::new();
         let mut creature_files: Vec<CreatureFile> = Vec::new();
 
+        //Check if the path includes or is inside a graphics directory and adjust path to show full mod folder.
         if folder.ends_with("graphics") {
             folder.pop();
         } else if folder.ends_with("images") && folder.parent().get_or_insert(path::Path::new("")).ends_with("graphics") {
             folder.pop();
             folder.pop();
         } else if !folder.read_dir()?.any(|f| f.is_ok_and(|f| f.path().ends_with("graphics"))) {
+            //if no graphics directory in mod folder throw error.
             return Err(DFGHError::NoGraphicsDirectory(folder.clone()));
         }
 
-        let paths = fs::read_dir(&folder.join("graphics"))?; //read graphics directory
+        //read graphics directory from mod folder.
+        let paths = fs::read_dir(&folder.join("graphics"))?;
 
+        //read each tile page or creature graphics text file and import.
         for path in paths {
             let path = path?;
             if let Ok(entry_name) = path.file_name().into_string() {
                 if entry_name.ends_with(".txt") {
                     if entry_name.starts_with("tile_page_") {
-                        //read tile page file
-                        tile_pages.push(Self::import_tile_page(folder, &path)?);
+                        //import tile page file
+                        tile_pages.push(Self::import_tile_page(&path.path())?);
     
                     } else if entry_name.starts_with("graphics_creatures_") {
-                        //read creature file
-                        creature_files.push(Self::import_creature_file(&path)?);
-    
-                        //naming the layer groups
-                        Self::rename_layer_groups(&mut creature_files);
+                        //import creature file
+                        creature_files.push(Self::import_creature_file(&path.path())?);
                     }
                 }
             } else {
@@ -82,116 +132,131 @@ impl Graphics {
         }
 
         Ok(
-            (Graphics {
-                tile_pages: tile_pages,
-                creature_files: creature_files,
-                ..Default::default()
-            },
-            folder.clone())
+            (
+                Graphics {
+                    tile_pages,
+                    creature_files,
+                    ..Default::default()
+                },
+                folder.clone()
+            )
         )
     }
 
-    fn import_tile_page(folder: &mut path::PathBuf, path: &fs::DirEntry) -> Result<TilePage> {
-        let mut tile_page = TilePage::empty();
-        let mut tile = Tile::empty();
+    fn import_tile_page(path: &path::PathBuf) -> Result<TilePage> {
+        let mut tiles = Vec::new();
+        let mut buffer = Vec::with_capacity(10);
+        let mut raw_buffer = Vec::with_capacity(10);
+        let mut buffer_start = 0;
 
-        let f =
-            fs::File::open(path.path())?;
+        let f = fs::File::open(path)?;
+
+        let lines = io::BufReader::new(f).lines()
+            .map(|l| l.expect("should always be a valid line."));
+
+        //first line must match file name and is tile page name.
+        let name = path
+            .file_name().get_or_insert(&OsStr::new("no_name"))
+            .to_str().get_or_insert("no_name")
+            .replace("tile_page_", "")
+            .replace(".txt", "").trim().to_string();
         
-        for (i_line, raw_line_result) in io::BufReader::new(f).lines().enumerate() {
-            //read line-by-line
-            let raw_line = raw_line_result?;
-            let (brackets, line_vec, _) = Self::read_brackets(&raw_line);
-            let len = line_vec.len();
+        //read line-by-line to find starts of all tile definitions.
+        //create vectors of all lines between tile headers and import each vector.
+        for (i_line, raw_line) in lines.enumerate() {
+            let line_vec = Self::read_brackets(&raw_line);
 
-            if tile_page.name.is_empty() {
-                tile_page.name = raw_line.replace("tile_page_", "").trim().to_string();
-
-            } else if brackets && len > 0 {
-                match line_vec[0].as_str() {
-                    "TILE_PAGE" => {
-                        if len > 1{
-                            if !tile.name.is_empty() {
-                                tile_page.tiles.push(tile.clone());
-                                tile = Tile::empty();
-                                tile.name.clear();
-                            }
-                            tile.name = line_vec[1].clone();
-                        } else {
-                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line + 1,
-                                raw_line.trim().to_string(),
-                                path.path()
-                            ))
+            //start filling the buffer at tile start, then process and clear it at next tile start.
+            if line_vec.get(0).is_some() {
+                if line_vec[0].eq("TILE_PAGE") {
+                    if buffer.len() > 0 {
+                        //if the buffer is populated process/clear it and store.
+                        match Self::import_tile(&mut buffer, path) {
+                            Ok(tile) => tiles.push(tile),
+                            Err(e) => return wrap_import_error(e, raw_buffer.clone(), buffer_start, path),
                         }
-                    },
-                    "FILE" => {
-                        if len > 1 {
-                            tile.filename = line_vec[1].clone()
-                                .replace(".png", "")
-                                .replace("images", "")
-                                .replace("/", "")
-                                .replace("/", "");
-                        } else {
-                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line + 1,
-                                raw_line.trim().to_string(),
-                                path.path()
-                            ))
-                        }
-                    },
-                    "TILE_DIM" => {
-                        if len > 2 {
-                            tile.tile_size = 
-                                [line_vec[1].parse()?,
-                                line_vec[2].parse()?];
-                        } else {
-                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line + 1,
-                                raw_line.trim().to_string(),
-                                path.path()
-                            ))
-                        }
-                    },
-                    "PAGE_DIM_PIXELS" => {
-                        let image_path: path::PathBuf = folder
-                            .join("graphics")
-                            .join("images")
-                            .join(format!("{}.png", tile.filename));
-                        if let Ok((x, y)) = image::image_dimensions(image_path) {
-                            tile.image_size = [x, y];
-                        } else {  
-                            if len > 2 {
-                                tile.image_size = 
-                                    [line_vec[1].parse()?,
-                                    line_vec[2].parse()?];
-                            } else {
-                                return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                    i_line + 1,
-                                    raw_line.trim().to_string(),
-                                    path.path()
-                                ))
-                            }
-                        }
-                    },
-                    _ => {
-                        if line_vec != ["OBJECT", "TILE_PAGE"] {
-                            return Err::<TilePage, DFGHError>(DFGHError::ImportError(
-                                i_line + 1,
-                                raw_line.trim().to_string(),
-                                path.path()
-                            ))
-                        }
-                    },
+                        raw_buffer.clear();
+                    }
+                    buffer_start = i_line;
+                    buffer.push(line_vec);
+                    raw_buffer.push(raw_line);
+                } else if line_vec[0].eq("OBJECT") {
+                    //do nothing
+                } else {
+                    buffer.push(line_vec);
+                    raw_buffer.push(raw_line);
                 }
             }
         }
-        tile_page.tiles.push(tile);
 
-        Ok(tile_page)
+        Ok(TilePage {name, tiles})
     }
 
-    fn import_creature_file(path: &fs::DirEntry) -> Result<CreatureFile> {
+    ///Takes a chunk of processed lines and generates a tile from them.
+    fn import_tile(buffer: &mut Vec<Vec<String>>, path: &path::PathBuf) -> Result<Tile> {
+        let mut tile = Tile::new();
+
+        for (i_buffer, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
+            match line_vec[0].as_str() {
+                "TILE_PAGE" => {
+                    if len == 2 {
+                        tile.name = line_vec[1].clone();
+                    } else {
+                        index_err!(i_buffer, 2, len);
+                    }
+                },
+                "FILE" => {
+                    if len == 2 {
+                        tile.filename = line_vec[1].clone()
+                            .replace(".png", "")
+                            .replace("images", "")
+                            .split_off(1);
+                    } else {
+                        index_err!(i_buffer, 2, len);
+                    }
+                },
+                "TILE_DIM" => {
+                    if len == 3 {
+                        tile.tile_size = 
+                            [block_err_wrap!(line_vec[1].parse(), i_buffer, 1),
+                            block_err_wrap!(line_vec[2].parse(), i_buffer, 2)];
+                    } else {
+                        index_err!(i_buffer, 3, len);
+                    }
+                },
+                "PAGE_DIM_PIXELS" => {
+                    // if the image file name is already read attempt to correct the image size based on it.
+                    if !tile.filename.is_empty() {
+                        let mod_path = path.to_path_buf();
+                        let image_path = mod_path.join("graphics").join("images").join(&tile.filename);
+                        if image_path.is_file() && image_path.extension() == Some(OsStr::new("png")) {
+                            let image_dimensions = block_err_wrap!(image::image_dimensions(image_path), i_buffer, 0);
+                            tile.image_size = [image_dimensions.0, image_dimensions.1];
+                        }
+                        continue;
+                    }
+
+                    //if image file is not read yet, attempt to parse tag.
+                    if len == 3 {
+                        tile.image_size = 
+                            [block_err_wrap!(line_vec[1].parse(), i_buffer, 1),
+                            block_err_wrap!(line_vec[2].parse(), i_buffer, 2)];
+                    } else {
+                        index_err!(i_buffer, 3, len);
+                    }
+                },
+                _ => {
+                    return Err::<Tile, DFGHError>(DFGHError::ImportBlockError([i_buffer, 0], DFGHError::ImportUnknownError.to_string()))
+                },
+            }
+        }
+
+        buffer.clear();
+        Ok(tile)
+    }
+
+    fn import_creature_file(path: &path::PathBuf) -> Result<CreatureFile> {
         let mut creature_file = CreatureFile::empty();
         let mut creature = Creature::empty();
         let mut layer_set = LayerSet::default();
@@ -200,11 +265,11 @@ impl Graphics {
         let mut layer = Layer::empty();
         let mut condition = Condition::default();
 
-        let f = fs::File::open(path.path())?;
+        let f = fs::File::open(path)?;
 
         for (i_line, raw_line_result) in io::BufReader::new(f).lines().enumerate() {
             let raw_line = raw_line_result?;
-            let (brackets, mut line_vec, comments) = Self::read_brackets(&raw_line);
+            let mut line_vec = Self::read_brackets(&raw_line);
             //remove any AS_IS elements there are for creature files due to not palletization(?) v50.05
             line_vec.retain(|elem| elem != "AS_IS");
             let len = line_vec.len();
@@ -213,7 +278,7 @@ impl Graphics {
                 //set creature file name
                 creature_file.name =
                     raw_line.replace("graphics_creatures_", "").trim().to_string();
-            } else if brackets && len > 0 {
+            } else if len > 0 {
                 match line_vec[0].as_str() {
                     "CREATURE_GRAPHICS" 
                     | "STATUE_CREATURE_GRAPHICS" | "LAYER_SET" => {
@@ -250,6 +315,7 @@ impl Graphics {
                                 "CREATURE_GRAPHICS" => {
                                     if creature.name.ne("") {
                                         creature.graphics_type.push(layer_set.clone());
+                                        Self::rename_layer_groups(&mut creature);
                                         creature_file.creatures.push(creature.clone());
                                         creature.graphics_type.clear();
                                     }
@@ -259,6 +325,7 @@ impl Graphics {
                                 "STATUE_CREATURE_GRAPHICS" => {
                                     if creature.name.ne("") {
                                         creature.graphics_type.push(layer_set.clone());
+                                        Self::rename_layer_groups(&mut creature);
                                         creature_file.creatures.push(creature.clone());
                                         creature.graphics_type.clear();
                                     }
@@ -302,12 +369,10 @@ impl Graphics {
                                 return Err(DFGHError::ImportError(
                                     i_line + 1,
                                     raw_line.trim().to_string(),
-                                    path.path()
+                                    path.to_path_buf(),
+                                    "".to_string()//todo fix
                                 ))
                             }
-                        }
-                        if let Some(c) = comments {
-                            layer_group.name = c.replace("---", "");
                         }
                     },
                     "LAYER" => {
@@ -333,7 +398,8 @@ impl Graphics {
                                             return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                                 i_line + 1,
                                                 raw_line.trim().to_string(),
-                                                path.path()
+                                                path.to_path_buf(),
+                                                "".to_string()//todo fix
                                             ))
                                         }
                                         layer = Layer{
@@ -357,7 +423,8 @@ impl Graphics {
                                         return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                             i_line + 1,
                                             raw_line.trim().to_string(),
-                                            path.path()
+                                            path.to_path_buf(),
+                                            "".to_string()//todo fix
                                         ))
                                     }
                                 }
@@ -365,7 +432,8 @@ impl Graphics {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                         i_line + 1,
                                         raw_line.trim().to_string(),
-                                        path.path()
+                                        path.to_path_buf(),
+                                        "".to_string()//todo fix
                                     ))
                                 }
                             },
@@ -373,7 +441,8 @@ impl Graphics {
                                 return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                     i_line + 1,
                                     raw_line.trim().to_string(),
-                                    path.path()
+                                    path.to_path_buf(),
+                                    "".to_string()//todo fix
                                 ))
                             }
                         }
@@ -397,7 +466,8 @@ impl Graphics {
                                             return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                                 i_line + 1,
                                                 raw_line.trim().to_string(),
-                                                path.path()
+                                                path.to_path_buf(),
+                                                "".to_string()//todo fix
                                             ))
                                         }
                                         simple_layer = SimpleLayer {
@@ -434,7 +504,8 @@ impl Graphics {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                         i_line + 1,
                                         raw_line.trim().to_string(),
-                                        path.path()
+                                        path.to_path_buf(),
+                                        "".to_string()//todo fix
                                     ))
                                 }
                             },
@@ -455,7 +526,8 @@ impl Graphics {
                                         return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                             i_line + 1,
                                             raw_line.trim().to_string(),
-                                            path.path()
+                                            path.to_path_buf(),
+                                            "".to_string()//todo fix
                                         ))
                                     }
                                     simple_layer = SimpleLayer {
@@ -469,7 +541,8 @@ impl Graphics {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                         i_line + 1,
                                         raw_line.trim().to_string(),
-                                        path.path()
+                                        path.to_path_buf(),
+                                        "".to_string()//todo fix
                                     ))
                                 }
                             },
@@ -484,7 +557,8 @@ impl Graphics {
                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
                                         i_line + 1,
                                         raw_line.trim().to_string(),
-                                        path.path()
+                                        path.to_path_buf(),
+                                        "".to_string()//todo fix
                                     ))
                                 }
                             }
@@ -506,11 +580,13 @@ impl Graphics {
             LayerSet::Layered(_, layer_groups) => {
                 layer_groups.push(layer_group);
                 creature.graphics_type.push(layer_set);
+                Self::rename_layer_groups(&mut creature);
                 creature_file.creatures.push(creature);
             },
             LayerSet::Simple(simple_layers) | LayerSet::Statue(simple_layers) => {
                 simple_layers.push(simple_layer);
                 creature.graphics_type.push(layer_set);
+                Self::rename_layer_groups(&mut creature);
                 creature_file.creatures.push(creature);
             }
         }
@@ -518,30 +594,26 @@ impl Graphics {
         Ok(creature_file)
     }
 
-    fn rename_layer_groups(creature_files: &mut Vec<CreatureFile>) {
-        for cf in creature_files.iter_mut() {
-            for c in cf.creatures.iter_mut() {
-                for gt in c.graphics_type.iter_mut() {
-                    if let LayerSet::Layered(state, lgs) = gt {
-                        for lg in lgs.iter_mut() {
-                            if lg.name.eq("") {
-                                let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
-                                layer_names.sort();
-                                layer_names.dedup();
+    fn rename_layer_groups(creature: &mut Creature) {
+        for gt in creature.graphics_type.iter_mut() {
+            if let LayerSet::Layered(state, lgs) = gt {
+                for lg in lgs.iter_mut() {
+                    if lg.name.eq("") {
+                        let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
+                        layer_names.sort();
+                        layer_names.dedup();
 
-                                match layer_names.len() {
-                                    0 => lg.name = state.name().to_case(Case::Title),
-                                    1 => lg.name = layer_names[0].clone(),
-                                    _ => {
-                                        let mut words: Vec<&str> = layer_names[0].split("_").collect();
-                                        words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
+                        match layer_names.len() {
+                            0 => lg.name = state.name().to_case(Case::Title),
+                            1 => lg.name = layer_names[0].clone(),
+                            _ => {
+                                let mut words: Vec<&str> = layer_names[0].split("_").collect();
+                                words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
 
-                                        if words.is_empty() {
-                                            lg.name = state.name().to_case(Case::Title);
-                                        } else {
-                                            lg.name = words.join("_");
-                                        }
-                                    }
+                                if words.is_empty() {
+                                    lg.name = state.name().to_case(Case::Title);
+                                } else {
+                                    lg.name = words.join("_");
                                 }
                             }
                         }
@@ -1530,7 +1602,8 @@ impl ItemType {
                         strings[3..].to_vec())
                     )
                 } else {
-                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    return Err(DFGHError::None)//todo fix
                 }
             },
             "BY_TOKEN" => {
@@ -1541,7 +1614,8 @@ impl ItemType {
                         strings[3..].to_vec())
                     )
                 } else {
-                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    return Err(DFGHError::None)//todo fix
                 }
             },
             "ANY_HELD" => {
@@ -1551,7 +1625,8 @@ impl ItemType {
                         strings[2..].to_vec())
                     )
                 } else {
-                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    return Err(DFGHError::None)//todo fix
                 }
             },
             "WIELD" => {
@@ -1561,7 +1636,8 @@ impl ItemType {
                         strings[2..].to_vec())
                     )
                 } else {
-                    return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
+                    return Err(DFGHError::None)//todo fix
                 }
             },
             _ => {Ok((ItemType::None, strings))}
@@ -1760,7 +1836,8 @@ impl Condition {
                     if len > 1 {
                         Ok(Condition::Dye(line_vec[1].clone()))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_NOT_DYED" => Ok(Condition::NotDyed),
@@ -1773,7 +1850,8 @@ impl Condition {
                                 .collect()
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_MATERIAL_TYPE" => {
@@ -1782,7 +1860,8 @@ impl Condition {
                             Metal::from(line_vec[2].clone())
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_PROFESSION_CATEGORY" => {
@@ -1794,7 +1873,8 @@ impl Condition {
                                 .collect()
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_RANDOM_PART_INDEX" => {
@@ -1805,7 +1885,8 @@ impl Condition {
                             line_vec[3].parse()?
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_HAUL_COUNT_MIN" => {
@@ -1814,7 +1895,8 @@ impl Condition {
                             line_vec[1].parse()?
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_HAUL_COUNT_MAX" => {
@@ -1823,7 +1905,8 @@ impl Condition {
                             line_vec[1].parse()?
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_CHILD" => Ok(Condition::Child),
@@ -1834,7 +1917,8 @@ impl Condition {
                             line_vec[1].clone()
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_GHOST" => Ok(Condition::Ghost),
@@ -1844,7 +1928,8 @@ impl Condition {
                             line_vec.drain(1..).collect()
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "CONDITION_TISSUE_LAYER" => {
@@ -1854,7 +1939,8 @@ impl Condition {
                             line_vec[3].clone(),
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "TISSUE_MIN_LENGTH" => {
@@ -1863,7 +1949,8 @@ impl Condition {
                             line_vec[1].parse()?
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "TISSUE_MAX_LENGTH" => {
@@ -1872,7 +1959,8 @@ impl Condition {
                             line_vec[1].parse()?
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "TISSUE_MAY_HAVE_COLOR" => {
@@ -1881,7 +1969,8 @@ impl Condition {
                             line_vec.drain(1..).collect()
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "TISSUE_MAY_HAVE_SHAPING" => {
@@ -1890,7 +1979,8 @@ impl Condition {
                             line_vec.drain(1..).collect()
                         ))
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 "TISSUE_NOT_SHAPED" => Ok(Condition::TissueNotShaped),
@@ -1912,7 +2002,8 @@ impl Condition {
                                     Some(large),
                                 ))
                             } else {
-                                return Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                                // return Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                                return Err(DFGHError::None)//todo fix
                             }
                         } else {
                             Ok(Condition::TissueSwap(
@@ -1925,13 +2016,15 @@ impl Condition {
                             ))
                         }
                     } else {
-                        Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+                        return Err(DFGHError::None)//todo fix
                     }
                 },
                 other => Ok(Condition::Custom(other.to_string())),
             }
         } else {
-            Err(DFGHError::ImportConditionError(line_vec.join(":")))
+            // Err(DFGHError::ImportConditionError(line_vec.join(":")))
+            Err(DFGHError::None)//todo fix
         }
     }
 
@@ -2733,13 +2826,6 @@ impl TilePage {
         }
     }
 
-    fn empty() -> TilePage {
-        TilePage {
-            name: String::new(),
-            tiles:Vec::new(),
-        }
-    }
-
     fn export(&self, path: &path::PathBuf) -> Result<()> {
         let tile_page_file = fs::File::create(
             path
@@ -2782,15 +2868,6 @@ impl Tile {
     pub fn new() -> Tile {
         Tile {
             name: "(new)".to_string(),
-            filename: String::new(),
-            image_size: [0, 0],
-            tile_size: [32, 32],
-        }
-    }
-
-    fn empty() -> Tile {
-        Tile {
-            name: String::new(),
             filename: String::new(),
             image_size: [0, 0],
             tile_size: [32, 32],

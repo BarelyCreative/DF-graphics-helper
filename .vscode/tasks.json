@@ -2,12 +2,12 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "rust: cargo run",
 			"type": "cargo",
 			"command": "run",
 			"problemMatcher": [
 				"$rustc"
 			],
-			"label": "rust: cargo run",
 			"group": {
 				"kind": "build",
 				"isDefault": true
@@ -20,6 +20,23 @@
 				"showReuseMessage": true,
 				"clear": true
 			}
+		},
+		{
+			"label": "rust: cargo test",
+			"type": "cargo",
+			"command": "test",
+			"args": ["--doc", "--no-fail-fast"],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "rust: doctest",
+			"type": "shell",	
+			"command": "rustdoc",
+			"args": ["src/lib.rs"],
+			"group": "test"
 		}
 	]
 }

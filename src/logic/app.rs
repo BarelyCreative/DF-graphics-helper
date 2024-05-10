@@ -1,13 +1,15 @@
-use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut, Stroke};
+use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut, Stroke, TextureHandle};
 use egui_plot::{GridInput, GridMark, Plot, PlotImage, PlotPoint, Polygon};
 use convert_case::{Case, Casing};
 use rfd;
 use std::path::PathBuf;
 use std::path;
 
-use crate::{error, structs, PADDING};
-use structs::{Graphics, TilePage, Tile, CreatureFile, Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State};
+use crate::PADDING;
+use super::error;
+use crate::{Graphics, TilePage, Tile, CreatureFile, Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State};
 use error::{DFGHError, Result, error_window};
+
 
 #[derive(Debug, Default, Clone, Copy)]
 pub enum MainWindow {
@@ -166,7 +168,7 @@ pub struct DFGraphicsHelper {
     pub indices: GraphicsIndices,
     path: std::path::PathBuf,
     texture_file_name: String,
-    texture: Option<egui::TextureHandle>,
+    texture: Option<TextureHandle>,
     preview_image: bool,
     cursor_coords: Option<[u32; 2]>,
     action: Action,
@@ -1397,7 +1399,7 @@ impl DFGraphicsHelper {
 
         if self.preview_image && self.texture.is_some() {
             //display texture once loaded
-            let texture: &egui::TextureHandle = self.texture.as_ref().expect("reference to texture should not be empty");//checked
+            let texture: &TextureHandle = self.texture.as_ref().expect("reference to texture should not be empty");//checked
             let size = texture.size_vec2();
 
             
