@@ -26,7 +26,7 @@ pub enum DFGHError {
     #[error("Unrecognized Tag found.")]
     ImportUnknownError,
 
-    #[error("Failed to find an integer in the expected field")]
+    #[error("Expected integer in the marked field.")]
     ImportParseError(#[from] std::num::ParseIntError),
 
     #[error("Expected {0} fields, found {1}")]
@@ -48,13 +48,11 @@ pub enum DFGHError {
 fn highlight_error(raw_buffer: Vec<String>, i_b_line: usize, i_b_elem: usize) -> String {
     let mut highlighted = String::new();
     for (i_line, raw_line) in raw_buffer.iter().enumerate() {
-        let line = raw_line.trim();
+        let line = raw_line;//.trim();
         if i_line.ne(&i_b_line) {
             highlighted.push_str(line);
             highlighted.push('\n');
         } else {
-            let mut highlight = String::with_capacity(raw_line.len());
-
             let breaks = line
                 .chars()
                 .enumerate()
@@ -62,12 +60,20 @@ fn highlight_error(raw_buffer: Vec<String>, i_b_line: usize, i_b_elem: usize) ->
                 .map(|(i, _)| i)
                 .collect::<Vec<usize>>();
 
-            for _ in 0..breaks[i_b_elem] {
-                highlight.push(' ');
-            }
-            for _ in breaks[i_b_elem]..=(breaks[i_b_elem + 1]) {
-                highlight.push('^');
-            }
+            let highlight: String = line.chars().enumerate()
+                .map(|(i, c)| 
+                if i < breaks[i_b_elem] {
+                    if c == '\t' {
+                        '\t'
+                    } else {
+                        ' '
+                    }
+                } else if i <= breaks[i_b_elem + 1] {
+                    '^'
+                } else {
+                    ' '
+                })
+                .collect::<String>();
 
             highlighted.push_str(line);
             highlighted.push('\n');

@@ -226,13 +226,13 @@ impl DFGraphicsHelper {
             if let Some(path) = rfd::FileDialog::new()
                 .set_title("Choose Mod Folder")
                 .pick_folder() {
-                let export_result = self.loaded_graphics.export(&path);
+                let export_result = self.loaded_graphics.display(&path);
                 if export_result.is_err() {
                     self.exception = export_result.unwrap_err();
                 };
             }
         } else {
-            let export_result = self.loaded_graphics.export(&self.path);
+            let export_result = self.loaded_graphics.display(&self.path);
             if export_result.is_err() {
                 self.exception = export_result.unwrap_err();
             };
@@ -772,7 +772,7 @@ impl DFGraphicsHelper {
                     )
                     .show_header(ui, |ui| {
                         let creature_response = ui.add(egui::Label::new(
-                            format!("Creature: {}", &creature.name))
+                            format!("{}", &creature.name))
                             .sense(Sense::click()));
                         if creature_response.clicked() {
                             self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
@@ -857,7 +857,7 @@ impl DFGraphicsHelper {
                                                         .show_header(ui, |ui|
                                                         {
                                                             let layer_response = ui.add(egui::Label::new(
-                                                                format!("Layer: {}", &layer.name))
+                                                                format!("{}", &layer.name))
                                                                 .sense(Sense::click()));
                                                             if layer_response.clicked() {
                                                                 self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
@@ -871,7 +871,9 @@ impl DFGraphicsHelper {
                                                         .body(|ui|
                                                         {
                                                         for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
-                                                            let condition_response = ui.add(egui::Label::new(condition.name())
+                                                            let condition_response = ui.add(egui::Label::new(
+                                                                format!("\t{}", condition.name()))
+                                                                .wrap(false)
                                                                 .sense(Sense::click()));
                                                             if condition_response.clicked() {
                                                                 self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
@@ -892,13 +894,14 @@ impl DFGraphicsHelper {
                                     for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
                                         let condition_response = ui.add(egui::Label::new(
                                         if let Some(sub_state) = &simple_layer.sub_state {
-                                                format!("\t{} & {}",
+                                                format!("\t{} + {}",
                                                 simple_layer.state.name(),
                                                 sub_state.name())
                                             } else {
                                                 format!("\t{}",
                                                 simple_layer.state.name())
                                             })
+                                            .wrap(false)
                                             .sense(Sense::click()));
                                         if condition_response.clicked() {
                                             self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
@@ -914,13 +917,14 @@ impl DFGraphicsHelper {
                                     for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
                                         let condition_response = ui.add(egui::Label::new(
                                         if let Some(sub_state) = &simple_layer.sub_state {
-                                                format!("\tStatue: {} & {}",
+                                                format!("\t{} + {}",
                                                 simple_layer.state.name(),
                                                 sub_state.name())
                                             } else {
-                                                format!("\tStatue: {}",
+                                                format!("\t{}",
                                                 simple_layer.state.name())
                                             })
+                                            .wrap(false)
                                             .sense(Sense::click()));
                                         if condition_response.clicked() {
                                             self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
