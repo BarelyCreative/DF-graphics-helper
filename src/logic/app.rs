@@ -1612,6 +1612,7 @@ impl eframe::App for DFGraphicsHelper {
         });
 
         egui::SidePanel::new(egui::panel::Side::Left, "tree")
+            .default_width(300.0)
             .resizable(true)
             .show(ctx, |ui| {
                 //Draw tree-style selection menu on left side

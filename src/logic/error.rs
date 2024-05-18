@@ -1,4 +1,5 @@
 use std::path;
+use std::ops::RangeInclusive;
 
 use egui::Context;
 
@@ -23,7 +24,7 @@ pub enum DFGHError {
     #[error("Failed to process an image.")]
     ImageError(#[from] image::ImageError),
 
-    #[error("Unrecognized Tag found.")]
+    #[error("Unkown import error.")]
     ImportUnknownError,
 
     #[error("Expected integer in the marked field.")]
@@ -38,44 +39,49 @@ pub enum DFGHError {
     #[error("No valid directory found at:\n\t{0}\n\nFormat is mod_name (numeric version)/graphics/")]
     NoGraphicsDirectory(std::path::PathBuf),
 
-    #[error("Failed to import a chunk of a file. This error is not intended to be displayed.\n\n{1}")]
-    ImportBlockError([usize; 2], String),
+    #[error("Should not be displayed. {4}")]
+    ImportBlockError(usize, usize, RangeInclusive<usize>, Vec<String>, String),
 
     #[error("Failed to import line {0} in file:\n\n{2}\n\n{1}\n\n{3}")]
     ImportError(usize, String, std::path::PathBuf, String),
 }
 
-fn highlight_error(raw_buffer: Vec<String>, i_b_line: usize, i_b_elem: usize) -> String {
+fn highlight_error(raw_buffer: Vec<String>, i_b_line: usize, r_elem: RangeInclusive<usize>) -> String {
     let mut highlighted = String::new();
+    
     for (i_line, raw_line) in raw_buffer.iter().enumerate() {
-        let line = raw_line;//.trim();
         if i_line.ne(&i_b_line) {
-            highlighted.push_str(line);
+            highlighted.push_str(&raw_line);
             highlighted.push('\n');
         } else {
-            let breaks = line
+            let breaks = raw_line
                 .chars()
                 .enumerate()
                 .filter(|(_, c)| *c == '[' || *c == ']' || *c == ':')
                 .map(|(i, _)| i)
                 .collect::<Vec<usize>>();
 
-            let highlight: String = line.chars().enumerate()
+            dbg!(raw_buffer.clone());
+            dbg!(breaks.clone());
+            dbg!(i_b_line.clone());
+            dbg!(r_elem.clone());
+            let highlight: String = raw_line.chars().enumerate()
                 .map(|(i, c)| 
-                if i < breaks[i_b_elem] {
+                if i < breaks[*r_elem.start()] {
                     if c == '\t' {
                         '\t'
                     } else {
                         ' '
                     }
-                } else if i <= breaks[i_b_elem + 1] {
+                } else if i <= breaks[*r_elem.end() + 1] {
                     '^'
                 } else {
                     ' '
-                })
+                }
+                )
                 .collect::<String>();
 
-            highlighted.push_str(line);
+            highlighted.push_str(&raw_line);
             highlighted.push('\n');
             highlighted.push_str(&highlight);
             highlighted.push('\n');
@@ -88,33 +94,45 @@ fn highlight_error(raw_buffer: Vec<String>, i_b_line: usize, i_b_elem: usize) ->
     highlighted
 }
 
-pub fn wrap_import_error<T>(e: DFGHError, raw_buffer: Vec<String>, buffer_start: usize, path: &path::PathBuf) -> Result<T> {
+pub fn wrap_import_error<T>(e: DFGHError, buffer_start: usize, path: &path::PathBuf) -> Result<T> {
     match e {
-        DFGHError::ImportBlockError([i_b_line, i_b_elem], e_string) => {
+        DFGHError::ImportBlockError(i_line, i_b_line, r_elem, raw_buffer, e_string) => {
+            dbg!(&i_line+&i_b_line);
             Err(
                 DFGHError::ImportError(
-                    buffer_start + i_b_line + 1,
-                    highlight_error(raw_buffer, i_b_line, i_b_elem),
+                    buffer_start + i_line,
+                    highlight_error(raw_buffer, i_b_line, r_elem),
                     path.to_path_buf(),
                     e_string,
                 )
             )
         },
-        _ => panic!(),
+        _ => Err(DFGHError::ImportUnknownError),
     }
 }
 
-pub fn wrap_block_error<T>(e: DFGHError, block_indices: [usize; 2]) -> Result<T> {
+pub fn wrap_block_error<T>(i_b_line: usize, r_elem: RangeInclusive<usize>, raw_buffer: Vec<String>, e: DFGHError) -> Result<T> {
     match e {
         DFGHError::IoError(_) |
         DFGHError::ImageError(_) |
         DFGHError::ImportParseError(_) |
         DFGHError::UnsupportedFileName(_) => {
+            dbg!("block wrapping outside error.");
+            dbg!(&i_b_line);
+            dbg!(&r_elem);
             Err(
-                DFGHError::ImportBlockError(block_indices, e.to_string())
+                DFGHError::ImportBlockError(i_b_line, i_b_line, r_elem, raw_buffer, e.to_string())
             )
         },
-        _ => panic!(),
+        DFGHError::ImportBlockError(i_l, i_b, r, r_b, e_string) => {
+            dbg!("block re-wrapping block");
+            dbg!(&i_l);
+            dbg!(&i_l + &i_b_line);
+            Err(
+                DFGHError::ImportBlockError(i_l + i_b_line, i_b, r, r_b, e_string)
+            )
+        },
+        _ => Err(DFGHError::ImportUnknownError),
     }
 }
 

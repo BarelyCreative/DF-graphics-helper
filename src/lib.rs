@@ -10,34 +10,38 @@ use logic::app::DFGraphicsHelper;
 use logic::error::{Result, DFGHError, wrap_import_error, wrap_block_error};
 
 pub const PADDING: f32 = 8.0;
-
+// i_b_line: usize, r_elem: RangeInclusive<usize>, raw_buffer: Vec<String>, e: DFGHError
 macro_rules! block_err_wrap {
-    ($func:expr, $i_buffer:ident, $i_elem:expr) => {
+    ($func:expr, $i_b_line:ident, $raw_buffer:ident, $r_elem:expr) => {
         match $func {
             Ok(inner) => inner,
-            Err(e) => return wrap_block_error(DFGHError::from(e), [$i_buffer, $i_elem]),
+            //i_b_line: usize, r_elem: RangeInclusive<usize>, raw_buffer: Vec<String>, e: DFGHError
+            Err(e) => return wrap_block_error($i_b_line, $r_elem, $raw_buffer, DFGHError::from(e)),
         }
     };
 }
 
 macro_rules! index_err {
-    ($i_buffer:ident, $expected:expr, $found:ident, $type:ty) => {
-        let e = DFGHError::ImportIndexError($expected, $found);
+    ($i_b_line:ident, $len:ident, $expected:expr, $raw_buffer:ident, $type:ty) => {
+        let e = DFGHError::ImportIndexError($expected, $len);
 
-        if $expected < $found {
-            return Err::<$type, DFGHError>(DFGHError::ImportBlockError([$i_buffer, $expected + 1], e.to_string()))
+        if $len < $expected {
+            return Err::<$type, DFGHError>(DFGHError::ImportBlockError($i_b_line, $i_b_line, 0..=$len, $raw_buffer, e.to_string()))
         } else {
-            return Err::<$type, DFGHError>(DFGHError::ImportBlockError([$i_buffer, $expected - 1], e.to_string()))
+            return Err::<$type, DFGHError>(DFGHError::ImportBlockError($i_b_line, $i_b_line, $expected..=$len, $raw_buffer, e.to_string()))
         }
     };
 }
 
 macro_rules! ls_push {
-    ($creature:ident, $graphics_type:ident, $ls_buffer:ident, $i_buffer:ident) => {
+    ($creature:ident, $graphics_type:ident, $ls_buffer:ident, $i_b_line:ident, $raw_buffer:ident) => {
         if let LayerSet::Layered(state, _) = $graphics_type {
             if !$ls_buffer.is_empty() {
                 $creature.graphics_type.push(
-                    block_err_wrap!(Self::import_layer_set(state, $ls_buffer.clone()), $i_buffer, 0)//todo adjust index
+                    block_err_wrap!(
+                        Self::import_layer_set(state, $ls_buffer.clone(), $raw_buffer.clone()),
+                        $i_b_line, $raw_buffer, 0..=0
+                    )
                 );
                 $ls_buffer.clear();
             }
@@ -46,10 +50,13 @@ macro_rules! ls_push {
 }
 
 macro_rules! lg_push {
-    ($layer_groups:ident, $lg_buffer:ident, $i_buffer:ident) => {
+    ($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident) => {
         if !$lg_buffer.is_empty() {
             $layer_groups.push(
-                block_err_wrap!(Self::import_layer_group($lg_buffer.clone()), $i_buffer, 0)//todo adjust index
+                block_err_wrap!(
+                    Self::import_layer_group($lg_buffer.clone(), $raw_buffer.clone()),
+                    $i_b_line, $raw_buffer, 0..=0
+                )
             );
             $lg_buffer.clear();
         }
@@ -190,9 +197,10 @@ impl Graphics {
                 if line_vec[0].eq("TILE_PAGE") {
                     if buffer.len() > 0 {
                         //if the buffer is populated process/clear it and store.
-                        match Self::import_tile(&buffer, path) {
+                        // wrap_import_error<T>(e: DFGHError, buffer_start: usize, path: &path::PathBuf) -> Result<T> {
+                        match Self::import_tile(buffer.clone(), raw_buffer.clone(), path) {
                             Ok(tile) => tiles.push(tile),
-                            Err(e) => return wrap_import_error(e, raw_buffer.clone(), buffer_start, path),
+                            Err(e) => return wrap_import_error(e, buffer_start, path),
                         }
                         raw_buffer.clear();
                     }
@@ -212,17 +220,17 @@ impl Graphics {
     }
 
     ///Takes a chunk of processed lines and generates a tile from them.
-    fn import_tile(buffer: &Vec<Vec<String>>, path: &path::PathBuf) -> Result<Tile> {
+    fn import_tile(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: &path::PathBuf) -> Result<Tile> {
         let mut tile = Tile::new();
 
-        for (i_buffer, line_vec) in buffer.iter().enumerate() {
+        for (i_b_line, line_vec) in buffer.iter().enumerate() {
             let len = line_vec.len();
             match line_vec[0].as_str() {
                 "TILE_PAGE" => {
                     if len >= 2 {
                         tile.name = line_vec[1].clone();
                     } else {
-                        index_err!(i_buffer, 2, len, Tile);
+                        index_err!(i_b_line, len, 2, raw_buffer, Tile);
                     }
                 },
                 "FILE" => {
@@ -232,16 +240,17 @@ impl Graphics {
                             .replace("images", "")
                             .split_off(1);
                     } else {
-                        index_err!(i_buffer, 2, len, Tile);
+                        index_err!(i_b_line, len, 2, raw_buffer, Tile);
                     }
                 },
+                //($func:expr, $i_b_line:ident, $raw_buffer:ident, $r_elem:expr)
                 "TILE_DIM" => {
                     if len >= 3 {
                         tile.tile_size = 
-                            [block_err_wrap!(line_vec[1].parse(), i_buffer, 1),
-                            block_err_wrap!(line_vec[2].parse(), i_buffer, 2)];
+                            [block_err_wrap!(line_vec[1].parse(), i_b_line, raw_buffer, 1..=1),
+                            block_err_wrap!(line_vec[2].parse(), i_b_line, raw_buffer, 2..=2)];
                     } else {
-                        index_err!(i_buffer, 3, len, Tile);
+                        index_err!(i_b_line, len, 3, raw_buffer, Tile);
                     }
                 },
                 "PAGE_DIM_PIXELS" => {
@@ -250,7 +259,7 @@ impl Graphics {
                         let mod_path = path.to_path_buf();
                         let image_path = mod_path.join("graphics").join("images").join(&tile.filename);
                         if image_path.is_file() && image_path.extension() == Some(OsStr::new("png")) {
-                            let image_dimensions = block_err_wrap!(image::image_dimensions(image_path), i_buffer, 0);
+                            let image_dimensions = block_err_wrap!(image::image_dimensions(image_path), i_b_line, raw_buffer, 0..=len);
                             tile.image_size = [image_dimensions.0, image_dimensions.1];
                         }
                         continue;
@@ -259,14 +268,14 @@ impl Graphics {
                     //if image file is not read yet, attempt to parse tag.
                     if len >= 3 {
                         tile.image_size = 
-                            [block_err_wrap!(line_vec[1].parse(), i_buffer, 1),
-                            block_err_wrap!(line_vec[2].parse(), i_buffer, 2)];
+                            [block_err_wrap!(line_vec[1].parse(), i_b_line, raw_buffer, 1..=1),
+                            block_err_wrap!(line_vec[2].parse(), i_b_line, raw_buffer, 2..=2)];
                     } else {
-                        index_err!(i_buffer, 3, len, Tile);
+                        index_err!(i_b_line, len, 3, raw_buffer, Tile);
                     }
                 },
                 _ => {
-                    return Err::<Tile, DFGHError>(DFGHError::ImportBlockError([i_buffer, 0], DFGHError::ImportUnknownError.to_string()))
+                    return Err::<Tile, DFGHError>(DFGHError::ImportBlockError(i_b_line, i_b_line, 0..=len, raw_buffer, DFGHError::ImportUnknownError.to_string()))
                 },
             }
         }
@@ -305,9 +314,9 @@ impl Graphics {
                 | "STATUE_CREATURE_CASTE_GRAPHICS" => {
                     if buffer.len() > 0 {
                         //if the buffer is populated process/clear it and store.
-                        match Self::import_creature(&buffer) {
+                        match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
                             Ok(creature) => creatures.push(creature),
-                            Err(e) => return wrap_import_error(e, raw_buffer.clone(), buffer_start, path),
+                            Err(e) => return wrap_import_error(e, buffer_start, path),
                         }
                         buffer.clear();
                         raw_buffer.clear();
@@ -329,9 +338,9 @@ impl Graphics {
 
         if buffer.len() > 0 {
             //if the buffer is populated process/clear it and store.
-            match Self::import_creature(&buffer) {
+            match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
                 Ok(creature) => creatures.push(creature),
-                Err(e) => return wrap_import_error(e, raw_buffer.clone(), buffer_start, path),
+                Err(e) => return wrap_import_error(e, buffer_start, path),
             }
         }
 
@@ -341,59 +350,59 @@ impl Graphics {
         })
     }
 
-    fn import_creature(buffer: &Vec<Vec<String>>) -> Result<Creature> {
+    fn import_creature(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Creature> {
         let mut creature = Creature::new();
         let mut graphics_type = LayerSet::Empty;
         let mut caste = None;
         let mut ls_buffer = Vec::new();
 
-        for (i_buffer, line_vec) in buffer.iter().enumerate() {
+        for (i_b_line, line_vec) in buffer.iter().enumerate() {
             let len = line_vec.len();
             match line_vec[0].as_str() {
                 "CREATURE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_buffer);
+                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
                     if len >= 2 {
                         creature.name = line_vec[1].clone();
                         graphics_type = LayerSet::Simple(Vec::new());
                     } else {
-                        index_err!(i_buffer, 2, len, Creature);
+                        index_err!(i_b_line, len, 2, raw_buffer, Creature);
                     }
                 },
                 "CREATURE_CASTE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_buffer);
+                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
                     if len >= 3 {
                         creature.name = line_vec[1].clone();
                         caste = Some(State::from(line_vec[2].clone()));
                         graphics_type = LayerSet::Simple(Vec::new());
                     } else {
-                        index_err!(i_buffer, 3, len, Creature);
+                        index_err!(i_b_line, len, 3, raw_buffer, Creature);
                     }
                 },
                 "STATUE_CREATURE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_buffer);
+                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
                     if len >= 2 {
                         creature.name = line_vec[1].clone();
                         graphics_type = LayerSet::Statue(Vec::new());
                     } else {
-                        index_err!(i_buffer, 2, len, Creature);
+                        index_err!(i_b_line, len, 2, raw_buffer, Creature);
                     }
                 },
                 "STATUE_CREATURE_CASTE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_buffer);
+                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
                     if len >= 3 {
                         creature.name = line_vec[1].clone();
                         caste = Some(State::from(line_vec[2].clone()));
                         graphics_type = LayerSet::Statue(Vec::new());
                     } else {
-                        index_err!(i_buffer, 3, len, Creature);
+                        index_err!(i_b_line, len, 3, raw_buffer, Creature);
                     }
                 },
                 "LAYER_SET" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_buffer);
+                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
                     if len >= 2 {
                         graphics_type = LayerSet::Layered(State::from(line_vec[1].clone()), Vec::new());
                     } else {
-                        index_err!(i_buffer, 2, len, Creature);
+                        index_err!(i_b_line, len, 2, raw_buffer, Creature);
                     }
                 },
                 _ => {
@@ -410,8 +419,8 @@ impl Graphics {
                                         state: State::from(line_vec[0].clone()),
                                         tile: reduced_line[1].clone(),
                                         coords:
-                                            [block_err_wrap!(reduced_line[2].parse(), i_buffer, 2),
-                                            block_err_wrap!(reduced_line[3].parse(), i_buffer, 3)],
+                                            [block_err_wrap!(reduced_line[2].parse(), i_b_line, raw_buffer, 2..=2),
+                                            block_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3)],
                                         large_coords: None,
                                         sub_state: if reduced_line.get(4).is_some() {
                                             Some(State::from(reduced_line[4].clone()))
@@ -419,11 +428,11 @@ impl Graphics {
                                     }]));
                                 } else if reduced_len == 7 || reduced_len == 8 {
                                     let (x,y) = 
-                                        (block_err_wrap!(line_vec[3].parse::<u32>(), i_buffer, 3),
-                                        block_err_wrap!(line_vec[4].parse::<u32>(), i_buffer, 4));
+                                        (block_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3),
+                                        block_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4));
                                     let (x_l,y_l) = 
-                                        (block_err_wrap!(line_vec[5].parse::<u32>(), i_buffer, 5),
-                                        block_err_wrap!(line_vec[6].parse::<u32>(), i_buffer, 6));
+                                        (block_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5),
+                                        block_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6));
                                     creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
                                         state: State::from(line_vec[0].clone()),
                                         tile: reduced_line[1].clone(),
@@ -434,22 +443,22 @@ impl Graphics {
                                         } else {None},
                                     }]));
                                 } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
-                                    index_err!(i_buffer, 7, len, Creature);
+                                    index_err!(i_b_line, len, 7, raw_buffer, Creature);
                                 } else {
-                                    index_err!(i_buffer, 4, len, Creature);
+                                    index_err!(i_b_line, len, 4, raw_buffer, Creature);
                                 }
                             } else {
-                                index_err!(i_buffer, 4, len, Creature);
+                                index_err!(i_b_line, len, 4, raw_buffer, Creature);
                             }
                         },
                         LayerSet::Statue(_) => {
                             if len >= 6 {
                                 let (x,y) = 
-                                    (block_err_wrap!(line_vec[2].parse::<u32>(), i_buffer, 2),
-                                    block_err_wrap!(line_vec[3].parse::<u32>(), i_buffer, 3));
+                                    (block_err_wrap!(line_vec[2].parse::<u32>(), i_b_line, raw_buffer, 2..=2),
+                                    block_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3));
                                 let (x_l,y_l) = 
-                                    (block_err_wrap!(line_vec[4].parse::<u32>(), i_buffer, 4),
-                                    block_err_wrap!(line_vec[5].parse::<u32>(), i_buffer, 5));
+                                    (block_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
+                                    block_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
                                 creature.graphics_type.push(LayerSet::Statue(vec![SimpleLayer{
                                     state: State::from(line_vec[0].clone()),
                                     tile: line_vec[1].clone(),
@@ -458,7 +467,7 @@ impl Graphics {
                                     sub_state: caste,
                                 }]));
                             } else {
-                                index_err!(i_buffer, 6, len, Creature);
+                                index_err!(i_b_line, len, 6, raw_buffer, Creature);
                             }
                             break;
                         },
@@ -470,25 +479,25 @@ impl Graphics {
             }
         }
 
-        let i_buffer = buffer.len() - 1;
-        ls_push!(creature, graphics_type, ls_buffer, i_buffer);
+        let i_b_line = buffer.len() - 1;
+        ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
 
         Ok(creature)
     }
 
-    fn import_layer_set(state: State, ls_buffer: Vec<Vec<String>>) -> Result<LayerSet> {
+    fn import_layer_set(state: State, ls_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerSet> {
         let mut layer_groups = Vec::new();
         let mut lg_buffer = Vec::new();
 
-        for (i_buffer, line_vec) in ls_buffer.iter().enumerate() {
+        for (i_b_line, line_vec) in ls_buffer.iter().enumerate() {
             match line_vec[0].as_str() {
                 "LAYER_SET" => {},//do nothing
-                "LAYER_GROUP" => {
-                    lg_push!(layer_groups, lg_buffer, i_buffer);
+                "LAYER_GROUP" => {//($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident)
+                    lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
                     lg_buffer.push(line_vec.clone());
                 },
                 "END_LAYER_GROUP" => {
-                    lg_push!(layer_groups, lg_buffer, i_buffer);
+                    lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
                     lg_buffer.push(line_vec.clone());
                 },
                 _ => {
@@ -497,26 +506,26 @@ impl Graphics {
             }
         }
 
-        let i_buffer = ls_buffer.len() - 1; 
-        lg_push!(layer_groups, lg_buffer, i_buffer);
+        let i_b_line = ls_buffer.len() - 1;
+        lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
 
         Self::rename_layer_groups(state.clone(), &mut layer_groups);
         
         Ok(LayerSet::Layered(state, layer_groups))
     }
 
-    fn import_layer_group(lg_buffer: Vec<Vec<String>>) -> Result<LayerGroup> {
+    fn import_layer_group(lg_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerGroup> {
         let name = String::new();
         let mut layers = Vec::new();
         let mut l_buffer = Vec::new();
 
-        for (i_buffer, line_vec) in lg_buffer.iter().enumerate() {
+        for (i_b_line, line_vec) in lg_buffer.iter().enumerate() {
             match line_vec[0].as_str() {
                 "LAYER_GROUP" | "END_LAYER_GROUP" => {},
                 "LAYER" => {
                     if !l_buffer.is_empty() {
                         layers.push(
-                            block_err_wrap!(Self::import_layer(l_buffer.clone()), i_buffer, 0)//todo adjust index
+                            block_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
                         );
                         l_buffer.clear();
                     }
@@ -528,10 +537,10 @@ impl Graphics {
             }
         }
         
-        let i_buffer = lg_buffer.len() - 1;
+        let i_b_line = lg_buffer.len() - 1;
         if !l_buffer.is_empty() {
             layers.push(
-                block_err_wrap!(Self::import_layer(l_buffer.clone()), i_buffer, 0)//todo adjust index
+                block_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
             );
             l_buffer.clear();
         }
@@ -539,11 +548,12 @@ impl Graphics {
         Ok(LayerGroup {name, layers})
     }
 
-    fn import_layer(l_buffer: Vec<Vec<String>>) -> Result<Layer> {
+    fn import_layer(l_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Layer> {
         let mut layer = Layer::new();
         let mut conditions = Vec::new();
+        let mut i_start = 0;
 
-        for (i_buffer, line_vec) in l_buffer.iter().enumerate() {
+        for (i_b_line, line_vec) in l_buffer.iter().enumerate() {
             let len = line_vec.len();
             match line_vec[0].as_str() {
                 "LAYER" => {
@@ -553,23 +563,22 @@ impl Graphics {
                         let reduced_len = reduced_line.len();
 
                         if reduced_len == 5 {
-                            // Layer{ name: todo!(), conditions: todo!(), tile: todo!(), coords: todo!(), large_coords: todo!() } 
                             layer = Layer {
                                 name: reduced_line[1].clone(),
                                 tile: reduced_line[2].clone(),
                                 coords:
-                                    [block_err_wrap!(reduced_line[3].parse(), i_buffer, 3),
-                                    block_err_wrap!(reduced_line[4].parse(), i_buffer, 4)],
+                                    [block_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3),
+                                    block_err_wrap!(reduced_line[4].parse(), i_b_line, raw_buffer, 4..=4)],
                                 large_coords: None,
                                 conditions: conditions.clone(),
                             };
                         } else if reduced_len == 8 {
                             let (x,y) = 
-                                (block_err_wrap!(line_vec[4].parse::<u32>(), i_buffer, 4),
-                                block_err_wrap!(line_vec[5].parse::<u32>(), i_buffer, 5));
+                                (block_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
+                                block_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
                             let (x_l,y_l) = 
-                                (block_err_wrap!(line_vec[6].parse::<u32>(), i_buffer, 6),
-                                block_err_wrap!(line_vec[7].parse::<u32>(), i_buffer, 7));
+                                (block_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6),
+                                block_err_wrap!(line_vec[7].parse::<u32>(), i_b_line, raw_buffer, 7..=7));
                             layer = Layer {
                                 name: reduced_line[1].clone(),
                                 tile: reduced_line[2].clone(),
@@ -578,16 +587,16 @@ impl Graphics {
                                 conditions: conditions.clone(),
                             };
                         } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
-                            index_err!(i_buffer, 8, len, Layer);
+                            index_err!(i_b_line, len, 8, raw_buffer, Layer);
                         } else {
-                            index_err!(i_buffer, 5, len, Layer);
+                            index_err!(i_b_line, len, 5, raw_buffer, Layer);
                         }
                     } else {
-                        index_err!(i_buffer, 5, len, Layer);
+                        index_err!(i_b_line, len, 5, raw_buffer, Layer);
                     }
                 },
                 _ => {
-                    conditions.push(block_err_wrap!(Condition::from(line_vec.clone()), i_buffer, 0));//todo fix index
+                    conditions.push(block_err_wrap!(Condition::from(line_vec.clone()), i_b_line, raw_buffer, 0..=0));//todo fix index
                 },
             }
         }
@@ -596,78 +605,6 @@ impl Graphics {
 
         Ok(layer)
     }
-
-    // match State::from(other.to_string()) {
-    //     State::Custom(_) => {
-    //         //import condition
-    //     },
-    //     _ => {
-    //         return Err::<LayerGroup, DFGHError>(DFGHError::ImportBlockError([i_buffer, 0], DFGHError::ImportUnknownError.to_string()))
-    //     }
-    // }
-//
-    //             "LAYER" => {
-    //                 match &mut layer_set {
-    //                         if len > 3 {
-    //                             if line_vec[3].eq("LARGE_IMAGE") && len > 7 {
-    //                                 let c = [line_vec[4].parse()?,
-    //                                     line_vec[5].parse()?];
-    //                                 let l_c = [line_vec[6].parse()?,
-    //                                     line_vec[7].parse()?];
-    //                                 let large;
-    //                                 if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-    //                                     large = [l_c[0]-c[0], l_c[1]-c[1]];
-    //                                 } else {
-    //                                     return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-    //                                         i_line + 1,
-    //                                         raw_line.trim().to_string(),
-    //                                         path.to_path_buf(),
-    //                                         "".to_string()//todo fix
-    //                                     ))
-    //                                 }
-    //                                 layer = Layer{
-    //                                     name: line_vec[1].clone(),
-    //                                     conditions: Vec::new(),
-    //                                     tile: line_vec[2].clone(),
-    //                                     coords: c,
-    //                                     large_coords: Some(large),
-    //                                 }
-    //                             } else if line_vec.len() > 4 {
-    //                                 layer = Layer{
-    //                                     name: line_vec[1].clone(),
-    //                                     conditions: Vec::new(),
-    //                                     tile: line_vec[2].clone(),
-    //                                     coords:
-    //                                         [line_vec[3].parse()?,
-    //                                         line_vec[4].parse()?],
-    //                                     large_coords: None,
-    //                                 }
-    //                             }
-    //                         }
-    //                     },
-    //                     _ => {
-    //                         return Err::<CreatureFile, DFGHError>(DFGHError::ImportError(
-    //                             i_line + 1,
-    //                             raw_line.trim().to_string(),
-    //                             path.to_path_buf(),
-    //                             "".to_string()//todo fix
-    //                         ))
-    //                     }
-    //                 }
-    //             },
-    //             _ => {//if there's a bracketed tag that is not already covered
-    //                 match &mut layer_set {
-    //                     LayerSet::Layered(..) => {
-    //                         if condition.ne(&Condition::default()) {
-    //                             layer.conditions.push(condition.clone());
-    //                         }
-    //                         condition = Condition::from(line_vec.clone())?;
-    //                     },
-    //                 }
-    //             }                                
-    //         }
-    //     }
-    // }
 
     fn rename_layer_groups(state: State, layer_groups: &mut Vec<LayerGroup>) {
         for lg in layer_groups.iter_mut() {
