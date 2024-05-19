@@ -11,7 +11,7 @@ use logic::error::{Result, DFGHError, wrap_import_buffer_error, wrap_import_file
 
 pub const PADDING: f32 = 8.0;
 
-// $func:expr, $rel_line:ident, $r_error:expr
+//$func:expr, $rel_line:ident, $r_error:expr
 macro_rules! buffer_err_wrap {
     ($func:expr, $rel_line:ident, $buffer_len:ident, $r_error:expr) => {
         match $func {
@@ -20,7 +20,6 @@ macro_rules! buffer_err_wrap {
         }
     };
 }
-
 //$rel_line:ident, $actual:ident, $expected:expr, $type:ty
 macro_rules! index_err {
     ($rel_line:ident, $buffer_len:ident, $actual:ident, $expected:expr, $type:ty) => {
@@ -31,6 +30,38 @@ macro_rules! index_err {
         } else {
             return Err::<$type, DFGHError>(DFGHError::ImportBufferError($rel_line, $buffer_len, $expected..=$actual, e.to_string()))
         }
+    };
+}
+//$prefix:expr, $name:ident, $suffix:expr, $vector:ident
+macro_rules! graphics_file_export {
+    ($prefix:expr, $name:ident, $suffix:expr, $vector:ident, $path:ident) => {
+        let bare_name = $name.clone()
+            .replace($prefix, "")
+            .replace($suffix, "")
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake);
+
+        let gf_name = format!("{0}{1}{2}.txt", $prefix, bare_name, $suffix);
+
+        let graphics_file = fs::File::create(
+            $path
+            .join("graphics")
+            .join(gf_name.clone()))?;
+        
+        let mut graphics_file_writer = io::LineWriter::new(graphics_file);
+        
+        graphics_file_writer.write_all(
+            format!("{}\n\n[OBJECT:GRAPHICS]\n\n", gf_name.clone())
+            .as_bytes()
+        )?;
+
+        for elem in $vector {
+            graphics_file_writer.write_all(elem.display().as_bytes())?;
+        }
+        
+        graphics_file_writer.flush()?;
+
+        return Ok(())  
     };
 }
 
@@ -71,178 +102,8 @@ pub trait RAW {
 
     fn display(&self) -> String;
 }
-
 pub trait Menu {
     fn menu(&mut self, ui: &mut Ui);
-}
-
-
-#[derive(Clone, Debug, Default)]
-pub struct Graphics {
-    pub tile_page_files: Vec<TilePageFile>,
-    pub creature_files: Vec<CreatureFile>,//todo
-}
-impl Graphics {
-    /// Generate a blank generic Graphics struct
-    pub fn new() -> Graphics {
-        Graphics {
-            tile_page_files: vec![TilePageFile::new()],
-            creature_files: vec![CreatureFile::new()],
-        }
-    }
-
-    /// Take a line loaded from a text file and filter out the valid arguements between '[]'s into a vector.
-    /// 
-    /// Returns a true if there were valid brackets, a vector of the internal arguments, and any text after the closing bracket as an optional comment.
-    /// ```
-    /// # use df_texture_helper::*;
-    /// let commented_line = " ignored pre-text \t \t[CREATURE:DWARF] ignored comment text ".to_string();
-    /// let line_vec = Graphics::read_brackets(&commented_line);
-    /// 
-    /// assert_eq!("CREATURE", line_vec[0]);
-    /// assert_eq!("DWARF", line_vec[1]);
-    /// assert_eq!(2, line_vec.len());
-    /// 
-    /// let empty_line = " Lorem ipsum dolor".to_string();
-    /// assert!(Graphics::read_brackets(&empty_line).is_empty());
-    /// ```
-    pub fn read_brackets(raw_line: &String) -> Vec<String> {
-        // let mut split_line: Vec<&str> = 
-        
-        let line_vec: Vec<String>;
-        //split at first '[' for the start of a line that DF will attempt to read. Throw away any leading characters.
-        if let Some((_, open_brac_line)) = raw_line.split_once('[') {
-            //if the line also has a closing bracket, proceed with vectorization. Throw away trailing characters.
-            if let Some((valid_line, _)) = open_brac_line.split_once(']') {
-                //split line at ':'s and gather the parameters into a vector of strings.
-                line_vec = valid_line.split(':').map(|s| s.to_string()).collect();
-            //if the line has no closing bracket, treat it as a blank line. //todo throw error
-            } else {
-                line_vec = Vec::new();
-            }
-        //if the line has no opening '[', treat it as a blank line
-        } else {
-            line_vec = Vec::new();
-        }
-
-        //return the vector of parameters in a line with unbracketed lines treated as empty parameter vectors
-        line_vec
-    }
-
-    /// Loads a graphics directory into the program.
-    /// 
-    /// Identifies if the selected path contains or is inside a valid graphics directory, 
-    /// then attempts to each graphics or tilepage file in the graphics directory.
-    /// 
-    /// ```
-    /// # use df_texture_helper::*;
-    /// let mut folder = std::path::PathBuf::from("C:\\Users\\Riley\\Desktop\\DwarfFortress\\Mod Dev Files\\DF Graphics Helper\\df_graphics_helper");
-    ///
-    /// Graphics::import(&mut folder);
-    /// ```
-    pub fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf)> {
-        let mut tile_page_files: Vec<TilePageFile> = Vec::new();
-        let mut creature_files: Vec<CreatureFile> = Vec::new();
-
-        //Check if the path includes or is inside a graphics directory and adjust path to show full mod folder.
-        if folder.ends_with("graphics") {
-            folder.pop();
-        } else if folder.ends_with("images") && folder.parent().get_or_insert(path::Path::new("")).ends_with("graphics") {
-            folder.pop();
-            folder.pop();
-        } else if !folder.read_dir()?.any(|f| f.is_ok_and(|f| f.path().ends_with("graphics"))) {
-            //if no graphics directory in mod folder throw error.
-            return Err(DFGHError::NoGraphicsDirectory(folder.clone()));
-        }
-
-        //read graphics directory from mod folder.
-        let paths = fs::read_dir(&folder.join("graphics"))?;
-
-        //read each tile page or creature graphics text file and import.
-        for path_result in paths {
-            let path = path_result?;
-            let mut tile_page_file = false;
-            let mut graphics_file = false;
-
-            if path.path().is_file() {
-                if path.file_name().into_string().unwrap_or(String::new()).ends_with(".txt") {
-                    let f = fs::File::open(path.path())?;
-
-                    let raw_lines = io::BufReader::new(f)
-                        .lines()
-                        .map(|l| l.expect("All lines in a text file should be valid"))
-                        .collect::<Vec<String>>();
-
-                    let lines = raw_lines.clone().iter()
-                        .map(|l| Self::read_brackets(l))
-                        .collect::<Vec<Vec<String>>>();
-
-                    //identify file type
-                    for raw_line in raw_lines.clone().iter() {
-                        let line_vec = Self::read_brackets(&raw_line);
-                        let len = line_vec.len();
-
-                        if len >=2 {
-                            match line_vec[0].as_str() {
-                                "OBJECT" => {
-                                    match line_vec[1].as_str() {
-                                        "TILE_PAGE" => {
-                                            tile_page_file = true;
-                                            break
-                                        },
-                                        "GRAPHICS" => {
-                                            graphics_file = true;
-                                        },
-                                        _ => return Err(DFGHError::ImportUnknownError)//todo more specific error
-                                    }
-                                },
-                                "CREATURE_GRAPHICS"
-                                | "CREATURE_CASTE_GRAPHICS"
-                                | "STATUE_CREATURE_GRAPHICS"
-                                | "STATUE_CREATURE_CASTE_GRAPHICS" => {
-                                    
-                                },
-                                _ => {}
-                            }
-                        }
-                    }
-                
-                    if tile_page_file {
-                        tile_page_files.push(TilePageFile::read(lines, raw_lines, Some(&path.path()))?)
-                    } else if graphics_file {
-
-                    }
-                }
-            }
-        }
-
-        Ok(
-            (
-                Graphics {
-                    tile_page_files,
-                    creature_files,
-                    ..Default::default()
-                },
-                folder.clone()
-            )
-        )
-    }
-
-    pub fn export(&self, path: &path::PathBuf) -> Result<()> {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .create(path.join("graphics").join("images"))?;
-
-        for tile_page_file in self.tile_page_files.iter() {
-            tile_page_file.export(&path)?;
-        }
-
-        // for creature_file in self.creature_files.iter() {
-        //     creature_file.display(&path)?;
-        // }
-
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -355,421 +216,6 @@ impl From<String> for State {
             "SKELETON_WITH_SKULL" => State::SkeletonWithSkull,
             other => { State::Custom(other.to_uppercase().to_string()) }
         }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum LayerSet {
-    #[default]
-    Empty,
-    Simple(Vec<SimpleLayer>),
-    Layered(State, Vec<LayerGroup>),
-    Statue(Vec<SimpleLayer>),
-}
-impl LayerSet {
-    pub fn layer_set_menu(&mut self, ui: &mut Ui) {
-        ui.separator();
-
-        match self {
-            LayerSet::Layered(state, layer_groups) => {
-                egui::ComboBox::from_label("State")
-                    .selected_text(state.name())
-                    .show_ui(ui, |ui| {
-                    for s in State::iterator() {
-                        ui.selectable_value(state, s.clone(), s.name());
-                    }
-                    ui.selectable_value(state, State::Custom(String::new()), "Custom");
-                });
-                if let State::Custom(s) = state {
-                    ui.text_edit_singleline(s);
-                }
-                ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
-
-                ui.add_space(PADDING);
-                if ui.button("Add layer group").clicked() {
-                    layer_groups.push(LayerGroup::new());
-                }
-            },
-            LayerSet::Empty => {
-                egui::ComboBox::from_label("Graphics Type")
-                    .selected_text("(none)")
-                    .show_ui(ui, |ui| {
-                    ui.selectable_value(self, LayerSet::Layered(State::Default, Vec::new()), "Layered");
-                    ui.selectable_value(self, LayerSet::Simple(vec![SimpleLayer::new()]), "Simple");
-                    ui.selectable_value(self, LayerSet::Statue(vec![SimpleLayer::new()]), "Statue");
-                });
-            }
-            _ => {},
-        }
-    }
-
-    fn rename_layer_groups(state: State, layer_groups: &mut Vec<LayerGroup>) {
-        for lg in layer_groups.iter_mut() {
-            if lg.name.eq("") {
-                let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
-                layer_names.sort();
-                layer_names.dedup();
-
-                match layer_names.len() {
-                    0 => lg.name = state.name().to_case(Case::Title),
-                    1 => lg.name = layer_names[0].clone(),
-                    _ => {
-                        let mut words: Vec<&str> = layer_names[0].split("_").collect();
-                        words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
-
-                        if words.is_empty() {
-                            lg.name = state.name().to_case(Case::Title);
-                        } else {
-                            lg.name = words.join("_");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn display(&self) -> String {
-        let mut out = String::new();
-
-        match self {
-            LayerSet::Simple(simple_layers) => {
-                for simple_layer in simple_layers {
-                    out.push_str(&simple_layer.display());
-                }
-
-                out.push_str("\n");
-            },
-            LayerSet::Statue(simple_layers) => {
-                for simple_layer in simple_layers {
-                    out.push_str(&simple_layer.display_statue());
-                }
-
-                out.push_str("\n");
-            },
-            LayerSet::Layered(state, layer_groups) => {
-                out.push_str(&format!("\t[LAYER_SET:{}]\n", state.name()));
-
-                for layer_group in layer_groups {
-                    out.push_str(&layer_group.display());
-                }
-            },
-            LayerSet::Empty => {}
-        }
-
-        out
-    }
-}
-
-#[derive(Clone, Default, Debug, PartialEq)]
-pub struct Creature {
-    pub name: String,                 //file name of creature_graphics_file_name.txt
-    pub graphics_type: Vec<LayerSet>, //which type of graphics (layered, simple, caste, fb)
-}
-impl Creature {
-    pub fn new() -> Creature {
-        Creature {
-            name: String::from("(new)"),
-            graphics_type: Vec::new(),
-        }
-    }
-
-    pub fn creature_menu(&mut self, ui: &mut Ui) {
-        ui.separator();
-        ui.text_edit_singleline(&mut self.name);
-
-        ui.add_space(PADDING);
-        if ui.button("Add simple layer").clicked() {
-            if self.graphics_type.iter().any(|ls| match ls { LayerSet::Layered(..) => true, _ => false}) {
-                self.graphics_type.insert(0, LayerSet::Simple(vec![SimpleLayer::empty()]));
-            } else {
-                self.graphics_type.push(LayerSet::Simple(vec![SimpleLayer::empty()]));
-            }
-        }
-        if ui.button("Add layer set").clicked() {
-            self.graphics_type.push(LayerSet::Layered(State::Default, Vec::new()));
-        }
-        if self.graphics_type.is_empty() {
-            if ui.button("Add statue graphics (requires empty creature)").clicked() {
-                self.graphics_type.push(LayerSet::Statue(vec![SimpleLayer::empty()]));
-            }
-        } else {
-            ui.label("Statue graphics require an empty creature.");
-        }
-    }
-
-    fn sort_layer_sets(layer_sets: &Vec<LayerSet>) -> Vec<LayerSet> {
-        let mut statues = layer_sets.clone();
-        let mut simples = layer_sets.clone();
-        let mut layereds = layer_sets.clone();
-
-        statues.retain(|ls| if let LayerSet::Statue(..) = ls {true} else {false});
-        simples.retain(|ls| if let LayerSet::Simple(..) = ls {true} else {false});
-        layereds.retain(|ls| if let LayerSet::Layered(..) = ls {true} else {false});
-        
-        [statues, simples, layereds].concat()
-    }
-
-    fn display(&self) -> String {
-        let mut out = String::new();
-
-        let mut layer_sets = Self::sort_layer_sets(&self.graphics_type);
-
-        for layer_set in layer_sets.iter_mut() {//test
-            if let LayerSet::Statue(simple_layers) = layer_set {
-                if !out.contains("[STATUE_CREATURE_GRAPHICS ") {
-                    out.push_str(&format!(
-                        "[STATUE_CREATURE_GRAPHICS:{}]\n",
-                        self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
-                    ));
-                } else if simple_layers.len() > 1 {
-                    simple_layers.drain(1..);
-                }
-            } else if let LayerSet::Empty = layer_set {
-                
-            } else {
-                if !out.contains("[CREATURE_GRAPHICS") {
-                    out.push_str(&format!(
-                        "[CREATURE_GRAPHICS:{}]\n",
-                        self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
-                    ));
-                }
-            }
-            
-            out.push_str(&layer_set.display());
-        }
-
-        out
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SimpleLayer {
-    pub state: State,
-    pub tile_name: String,
-    pub coords: [u32; 2],
-    pub large_coords: Option<[u32; 2]>,
-    pub sub_state: Option<State>,
-}
-impl SimpleLayer {
-    fn empty() -> SimpleLayer {
-        SimpleLayer {
-            state: State::default(),
-            tile_name: String::new(),
-            coords: [0, 0],
-            large_coords: None,
-            sub_state: None,
-        }
-    }
-
-    pub fn new() -> SimpleLayer {
-        SimpleLayer {
-            state: State::Default,
-            tile_name: String::new(),
-            coords: [0, 0],
-            large_coords: None,
-            sub_state: None,
-        }
-    }
-
-    pub fn layer_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32;2])>) {
-        let [x1, y1] = &mut self.coords;
-        let state = &mut self.state;
-        let sub_state = &mut self.sub_state;
-        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
-        
-        egui::ComboBox::from_label("State")
-            .selected_text(state.name())
-            .show_ui(ui, |ui| {
-            for s in State::iterator() {
-                ui.selectable_value(state, s.clone(), s.name());
-            }
-            ui.selectable_value(state, State::Custom(String::new()), "Custom");
-        });
-        if let State::Custom(cust_state) = state {
-            ui.label("Custom state:");
-            ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
-        }
-
-        ui.add_space(PADDING);
-        egui::ComboBox::from_label("Second state (optional)")
-            .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
-            .show_ui(ui, |ui| {
-            ui.selectable_value(sub_state, Some(State::Empty), State::Empty.name());
-            for s in State::iterator() {
-                ui.selectable_value(sub_state, Some(s.clone()), s.name());
-            }
-            ui.selectable_value(sub_state, Some(State::Custom(String::new())), "Custom");
-        });
-        if let Some(State::Custom(cust_state)) = sub_state {
-            ui.label("Custom state:");
-            ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
-        }
-
-        ui.add_space(PADDING);
-        egui::ComboBox::from_label("TilePage")
-            .selected_text(&self.tile_name)
-            .show_ui(ui, |ui| {
-            for (t, _) in &tile_info {
-                ui.selectable_value(&mut self.tile_name, t.clone(), t);
-            }
-            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
-        });
-        if !tile_names.contains(&self.tile_name) {
-            ui.label("Custom tile name:");
-            ui.text_edit_singleline(&mut self.tile_name);
-        }
-
-        ui.add_space(PADDING);
-        let mut large = self.large_coords.is_some();
-        ui.checkbox(&mut large, "Large Image:");
-
-        if large {
-            let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
-            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                .unwrap_or_default()).prefix("TilePage X: "));
-            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                .unwrap_or_default()).prefix("TilePage Y: "));
-
-            ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
-            ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
-        } else {
-            ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
-            ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
-
-            if self.large_coords.is_some() {
-                self.large_coords.take();
-            }
-        }
-
-        ui.add_space(PADDING);
-        ui.label("Preview:");
-        egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.add(egui::Label::new(self.display()).wrap(false));
-        });
-    }
-
-    pub fn statue_layer_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32;2])>) {
-        let [x1, y1] = &mut self.coords;
-        let state = &mut self.state;
-        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
-        
-        egui::ComboBox::from_label("State")
-            .selected_text(state.name())
-            .show_ui(ui, |ui| {
-            for s in State::iterator() {
-                ui.selectable_value(state,  s.clone(), s.name());
-            }
-            ui.selectable_value(state, State::Custom(String::new()), "Custom");
-        });
-        if let State::Custom(cust_state) = state {
-            ui.label("Custom state:");
-            ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
-        }
-        ui.label("Note: only DEFAULT is known to work v50.05");
-
-        ui.add_space(PADDING);
-        egui::ComboBox::from_label("TilePage")
-            .selected_text(&self.tile_name)
-            .show_ui(ui, |ui| {
-            for t in &tile_names {
-                ui.selectable_value(&mut self.tile_name, t.clone(), t);
-            }
-            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
-        });
-        if !tile_names.contains(&self.tile_name) {
-            ui.label("Custom tile name:");
-            ui.text_edit_singleline(&mut self.tile_name);
-        }
-
-        ui.add_space(PADDING);
-        let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
-
-        ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-            .unwrap_or_default()).prefix("TilePage X: "));
-        ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-            .unwrap_or_default()).prefix("TilePage Y: "));
-
-        ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
-        ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
-
-        ui.add_space(PADDING);
-        ui.label("Preview:");
-        egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.add(egui::Label::new(self.display()).wrap(false));
-        });
-    }
-
-    fn display(&self) -> String {
-        if let Some([x2, y2]) = self.large_coords {
-            if let Some(sub_state) = &self.sub_state {
-                format!(
-                    "\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS:{}]\n",
-                    self.state.name(),
-                    self.tile_name.with_boundaries(&[Boundary::Space])
-                        .to_case(Case::UpperSnake)
-                        .to_string(),
-                    self.coords[0],
-                    self.coords[1],
-                    self.coords[0] + x2,
-                    self.coords[1] + y2,
-                    sub_state.name(),
-                )
-            } else {
-                format!(
-                    "\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
-                    self.state.name(),
-                    self.tile_name.with_boundaries(&[Boundary::Space])
-                        .to_case(Case::UpperSnake)
-                        .to_string(),
-                    self.coords[0],
-                    self.coords[1],
-                    self.coords[0] + x2,
-                    self.coords[1] + y2,
-                )
-            }
-        } else {
-            if let Some(sub_state) = &self.sub_state {
-                format!(
-                    "\t\t[{}:{}:{}:{}:AS_IS:{}]\n",
-                    self.state.name(),
-                    self.tile_name.with_boundaries(&[Boundary::Space])
-                        .to_case(Case::UpperSnake)
-                        .to_string(),
-                    self.coords[0],
-                    self.coords[1],
-                    sub_state.name(),
-                )
-            } else {
-                format!(
-                    "\t[{}:{}:{}:{}:AS_IS]\n",
-                    self.state.name(),
-                    self.tile_name.with_boundaries(&[Boundary::Space])
-                        .to_case(Case::UpperSnake)
-                        .to_string(),
-                    self.coords[0],
-                    self.coords[1],
-                )
-            }
-        }
-    }
-
-    fn display_statue(&self) -> String {
-        if let Some([x2, y2]) = self.large_coords {
-            format!(
-                "\t[{}:{}:{}:{}:{}:{}]\n",
-                self.state.name(),
-                self.tile_name.with_boundaries(&[Boundary::Space])
-                    .to_case(Case::UpperSnake)
-                    .to_string(),
-                self.coords[0],
-                self.coords[1],
-                self.coords[0] + x2,
-                self.coords[1] + y2,
-            )
-        } else {String::new()}
     }
 }
 
@@ -971,6 +417,35 @@ impl LayerGroup {
         out.push_str("\n");
 
         out
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Caste {
+    #[default]
+    Female,
+    Male,
+    Custom(String),
+}
+impl Caste {
+    fn name(&self) -> String {
+        match self {
+            Caste::Female => "FEMALE".to_string(),
+            Caste::Male => "MALE".to_string(),
+            Caste::Custom(caste) => {
+                caste.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
+        }
+    }
+
+    fn from(string: String) -> Caste {
+        match string.as_str() {
+            "FEMALE" => Caste::Female,
+            "MALE" => Caste::Male,
+            caste => Caste::Custom(caste.to_string()),
+        }
     }
 }
 
@@ -2418,122 +1893,161 @@ impl Condition {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum GraphicsFile {
-    #[default]
-    DefaultFile,
-    CreatureFile(String, Vec<Creature>),
-    StatueCreatureFile(String, Vec<Statue>),
-    PlantFile(String, Vec<Plant>),
-    TileGraphicsFile(String, Vec<TileGraphics>),
-    PaletteFile(String, Vec<Palette>),
-    ASCIIFile(String, Vec<ASCIIGraphics>),
+#[derive(Clone, Debug, Default)]
+pub struct Graphics {
+    pub tile_page_files: Vec<TilePageFile>,
+    pub graphics_files: Vec<GraphicsFile>,
 }
-impl RAW for GraphicsFile {
-    fn new() -> Self {
-        Self::default()
+impl Graphics {
+    /// Generate a blank generic Graphics struct
+    pub fn new() -> Graphics {
+        Graphics {
+            tile_page_files: vec![TilePageFile::new()],
+            graphics_files: vec![GraphicsFile::default()],
+        }
     }
 
-    fn read(_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
-        let mut buffer = Vec::with_capacity(100);
-        let mut raw_buffer = Vec::with_capacity(100);
-        let buffer_len = buffer.len();
-        let mut file_type = Self::default();
-
-        let file_path = path.unwrap_or(&path::PathBuf::new()).to_path_buf();
-        let f = fs::File::open(&file_path)?;
-        let lines = io::BufReader::new(f).lines()
-            .map(|l| l.expect("should always be a valid line."));//todo error def
-
-        //first line must match file name.
-        let name = file_path
-            .file_name().get_or_insert(&OsStr::new("no_name"))
-            .to_str().get_or_insert("no_name")
-            .replace(".txt", "").trim().to_string();
+    /// Take a line loaded from a text file and filter out the valid arguements between '[]'s into a vector.
+    /// 
+    /// Returns a true if there were valid brackets, a vector of the internal arguments, and any text after the closing bracket as an optional comment.
+    /// ```
+    /// # use df_texture_helper::*;
+    /// let commented_line = " ignored pre-text \t \t[CREATURE:DWARF] ignored comment text ".to_string();
+    /// let line_vec = Graphics::read_brackets(&commented_line);
+    /// 
+    /// assert_eq!("CREATURE", line_vec[0]);
+    /// assert_eq!("DWARF", line_vec[1]);
+    /// assert_eq!(2, line_vec.len());
+    /// 
+    /// let empty_line = " Lorem ipsum dolor".to_string();
+    /// assert!(Graphics::read_brackets(&empty_line).is_empty());
+    /// ```
+    pub fn read_brackets(raw_line: &String) -> Vec<String> {
+        // let mut split_line: Vec<&str> = 
         
-        //read line-by-line to find start of graphics object and identify type.
-        //create vector (buffer) of all lines between relevant headers and import each buffer.
-        for (i_line, raw_line) in lines.enumerate() {
-            let line_vec = Graphics::read_brackets(&raw_line);
-            buffer.push(line_vec.clone());
-            raw_buffer.push(raw_line.clone());
-
-            match line_vec[0].as_str() {
-                "OBJECT" => {
-                    match line_vec[1].as_str() {
-                        "TILE_PAGE" => {
-                            todo!()
-                        },
-                        "GRAPHICS" => {
-
-                        },
-                        _ => {
-                            return Err(DFGHError::ImportBufferError(i_line, buffer_len, 0..=line_vec.len(), DFGHError::ImportUnknownError.to_string()));//todo more specific import error
-                        }
-                    }
-                },
-                "" => {},
-                _ => {}
+        let line_vec: Vec<String>;
+        //split at first '[' for the start of a line that DF will attempt to read. Throw away any leading characters.
+        if let Some((_, open_brac_line)) = raw_line.split_once('[') {
+            //if the line also has a closing bracket, proceed with vectorization. Throw away trailing characters.
+            if let Some((valid_line, _)) = open_brac_line.split_once(']') {
+                //split line at ':'s and gather the parameters into a vector of strings.
+                line_vec = valid_line.split(':').map(|s| s.to_string()).collect();
+            //if the line has no closing bracket, treat it as a blank line. //todo throw error
+            } else {
+                line_vec = Vec::new();
             }
-
-
-
-            // //start filling the buffer at first heading, then process and clear it at next heading.
-            // if line_vec.get(0).is_some() {
-            //     if line_vec[0].eq("TILE_PAGE") {
-            //         if buffer.len() > 0 {
-            //             //if the buffer is populated process/clear it and store.
-            //             // wrap_import_error<T>(e: DFGHError, buffer_start: usize, file_path: &file_path::PathBuf) -> Result<T> {
-            //             match Self::import_tile(buffer.clone(), raw_buffer.clone(), file_path) {
-            //                 Ok(tile) => tiles.push(tile),
-            //                 Err(e) => return wrap_import_error(e, buffer_start, file_path),
-            //             }
-            //             raw_buffer.clear();
-            //         }
-            //         buffer_start = i_line;
-            //         buffer.push(line_vec);
-            //         raw_buffer.push(raw_line);
-            //     } else if line_vec[0].eq("OBJECT") {
-            //         //do nothing
-            //     } else {
-            //         buffer.push(line_vec);
-            //         raw_buffer.push(raw_line);
-            //     }
-            // }
+        //if the line has no opening '[', treat it as a blank line
+        } else {
+            line_vec = Vec::new();
         }
 
-        // Ok(TilePageFile {name, tiles})
-        Ok(todo!())
+        //return the vector of parameters in a line with unbracketed lines treated as empty parameter vectors
+        line_vec
     }
 
-    fn display(&self) -> String {
-        todo!()
+    /// Loads a graphics directory into the program.
+    /// 
+    /// Identifies if the selected path contains or is inside a valid graphics directory, 
+    /// then attempts to each graphics or tilepage file in the graphics directory.
+    /// 
+    /// ```
+    /// # use df_texture_helper::*;
+    /// let mut folder = std::path::PathBuf::from("C:\\Users\\Riley\\Desktop\\DwarfFortress\\Mod Dev Files\\DF Graphics Helper\\df_graphics_helper");
+    ///
+    /// Graphics::import(&mut folder);
+    /// ```
+    pub fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf)> {
+        let mut tile_page_files = Vec::new();
+        let mut graphics_files = Vec::new();
+
+        //Check if the path includes or is inside a graphics directory and adjust path to show full mod folder.
+        if folder.ends_with("graphics") {
+            folder.pop();
+        } else if folder.ends_with("images") && folder.parent().get_or_insert(path::Path::new("")).ends_with("graphics") {
+            folder.pop();
+            folder.pop();
+        } else if !folder.read_dir()?.any(|f| f.is_ok_and(|f| f.path().ends_with("graphics"))) {
+            //if no graphics directory in mod folder throw error.
+            return Err(DFGHError::NoGraphicsDirectory(folder.clone()));
+        }
+
+        //read graphics directory from mod folder.
+        let paths = fs::read_dir(&folder.join("graphics"))?;
+
+        //read each tile page or creature graphics text file and import.
+        for path_result in paths {
+            let path = path_result?;
+            let mut tile_page_file = false;
+            let mut graphics_file = false;
+
+            if path.path().is_file() {
+                if path.file_name().into_string().unwrap_or(String::new()).ends_with(".txt") {
+                    let f = fs::File::open(path.path())?;
+
+                    let raw_lines = io::BufReader::new(f)
+                        .lines()
+                        .map(|l| l.expect("All lines in a text file should be valid"))
+                        .collect::<Vec<String>>();
+
+                    let lines = raw_lines.clone().iter()
+                        .map(|l| Self::read_brackets(l))
+                        .collect::<Vec<Vec<String>>>();
+
+                    //identify file type
+                    for raw_line in raw_lines.clone().iter() {
+                        let line_vec = Self::read_brackets(&raw_line);
+                        let len = line_vec.len();
+
+                        if len >=2 {
+                            match line_vec[0].as_str() {
+                                "OBJECT" => {
+                                    match line_vec[1].as_str() {
+                                        "TILE_PAGE" => {
+                                            tile_page_file = true;
+                                            break
+                                        },
+                                        "GRAPHICS" => {
+                                            graphics_file = true;
+                                            break
+                                        },
+                                        _ => return Err(DFGHError::ImportUnknownError)//todo more specific error
+                                    }
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                
+                    if tile_page_file {
+                        tile_page_files.push(TilePageFile::read(lines, raw_lines, Some(&path.path()))?)
+                    } else if graphics_file {
+                        graphics_files.push(GraphicsFile::read(lines, raw_lines, Some(&path.path()))?)
+                    }
+                }
+            }
+        }
+
+        Ok((
+            Graphics { tile_page_files, graphics_files },
+            folder.clone()
+        ))
     }
-}
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Statue {
-    
-}
+    pub fn export(&self, path: &path::PathBuf) -> Result<()> {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(path.join("graphics").join("images"))?;
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Plant {
-    
-}
+        for tile_page_file in self.tile_page_files.iter() {
+            tile_page_file.export(&path)?;
+        }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TileGraphics {
-    
-}
+        for graphics_file in self.graphics_files.iter() {
+            graphics_file.export(&path)?;
+        }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Palette {
-    
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ASCIIGraphics {
-    
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2552,9 +2066,7 @@ impl RAW for TilePageFile {
     fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
         let mut block_buffer: Vec<Vec<String>> = Vec::with_capacity(100);
         let mut tile_pages = Vec::new();
-
         let blank_path = path::PathBuf::new();
-        let empty = Vec::new();
         let file_path = path.unwrap_or(&blank_path);
 
         //tile page file name must match file name.
@@ -2570,7 +2082,7 @@ impl RAW for TilePageFile {
                 match line_vec[0].as_str() {
                     "TILE_PAGE" => {
                         if block_buffer.len() > 0 {
-                            match TilePage::read(block_buffer.clone(), empty.clone(), path) {
+                            match TilePage::read(block_buffer.clone(), Vec::new(), path) {
                                 Ok(tile_page) => {
                                     if tile_page.ne(&TilePage::new()) {
                                         tile_pages.push(tile_page.clone());
@@ -2588,13 +2100,12 @@ impl RAW for TilePageFile {
         }
         let last_line = buffer.len();
         if block_buffer.len() > 0 {
-            match TilePage::read(block_buffer.clone(), empty.clone(), path) {
+            match TilePage::read(block_buffer.clone(), Vec::new(), path) {
                 Ok(tile_page) => {
                     tile_pages.push(tile_page.clone());
                 },
                 Err(e) => return wrap_import_file_error(raw_buffer, e, last_line, file_path)
             }
-            block_buffer.clear();
         }
         Ok(TilePageFile {name, tile_pages})
     }
@@ -2811,208 +2322,878 @@ impl Menu for TilePage {//todo edit menu
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum GraphicsFile {
+    #[default]
+    DefaultFile,
+    CreatureFile(String, Vec<Creature>),
+    StatueCreatureFile(String, Vec<Statue>),
+    PlantFile(String, Vec<Plant>),
+    TileGraphicsFile(String, Vec<TileGraphic>),
+}
+impl RAW for GraphicsFile {
+    fn new() -> Self {
+        Self::default()
+    }
 
-    // fn import_creature_file(path: &path::PathBuf) -> Result<CreatureFile> {
-    //     let mut creatures = Vec::new();
-    //     let mut buffer = Vec::with_capacity(10);
-    //     let mut raw_buffer = Vec::with_capacity(10);
-    //     let mut buffer_start = 0;
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        let mut block_buffer: Vec<Vec<String>> = Vec::with_capacity(100);
+        let mut graphics_file = GraphicsFile::default();
 
-    //     let f = fs::File::open(path)?;
+        let blank_path = path::PathBuf::new();
+        let file_path = path.unwrap_or(&blank_path);
 
-    //     let lines = io::BufReader::new(f).lines()
-    //         .map(|l| l.expect("should always be a valid line."));
+        //name must match file name.
+        let file_name = file_path
+            .file_name().get_or_insert(&OsStr::new("no_name"))
+            .to_str().get_or_insert("no_name")
+            .replace(".txt", "").trim().to_string();
+        
+        //create vector (buffer) of all lines between relevant headers and import each buffer.
+        for (rel_line, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
 
-    //     //first line must match file name and is tile page name.
-    //     let name = path
-    //         .file_name().get_or_insert(&OsStr::new("no_name"))
-    //         .to_str().get_or_insert("no_name")
-    //         .replace("graphics_creatures_", "")
-    //         .replace(".txt", "").trim().to_string();
+            match graphics_file {
+                GraphicsFile::DefaultFile => {//identify graphics file type
+                    if len >=2 {
+                        match line_vec[0].as_str() {
+                            "CREATURE_CASTE_GRAPHICS" |
+                            "CREATURE_GRAPHICS" => {
+                                graphics_file = GraphicsFile::CreatureFile(file_name.clone(), Vec::new());
+                            },
+                            "STATUE_CREATURE_CASTE_GRAPHICS" |
+                            "STATUE_CREATURE_GRAPHICS" => {
+                                graphics_file = GraphicsFile::StatueCreatureFile(file_name.clone(), Vec::new());
+                            },
+                            "PLANT_GRAPHICS" => {
+                                graphics_file = GraphicsFile::PlantFile(file_name.clone(), Vec::new());
+                            },
+                            "TILE_GRAPHICS" |
+                            "HELM_GRAPHICS" |
+                            "ARMOR_GRAPHICS" |
+                            "PANTS_GRAPHICS" |
+                            "GLOVES_GRAPHICS" |
+                            "SHOES_GRAPHICS" |
+                            "AMMO_GRAPHICS" |
+                            "SIEGEAMMO_GRAPHICS" |
+                            "WEAPON_GRAPHICS" |
+                            "SHIELD_GRAPHICS" |
+                            "TRAPCOMP_GRAPHICS" |
+                            "BOULDER_GRAPHICS" |
+                            "ROUGH_GEM_GRAPHICS" |
+                            "BARS_GRAPHICS" |
+                            "FOOD_GRAPHICS" |
+                            "TOY_GRAPHICS" |
+                            "TOOL_GRAPHICS" |
+                            "ADD_TOOL_GRAPHICS" |
+                            "FOOD_CONTAINER_GRAPHICS" => {
+                                graphics_file = GraphicsFile::TileGraphicsFile(file_name.clone(), Vec::new());
+                            },
+                            _ => {continue}
+                        }
+                        //if this doesn't get skipped then we have a graphics file type and need to start buffering.
+                        block_buffer.push(line_vec.clone());
+                    }
+                    continue;
+                },
+                GraphicsFile::CreatureFile(_, ref mut creatures) => {
+                    if len >=1 {
+                        match line_vec[0].as_str() {
+                            "CREATURE_CASTE_GRAPHICS" |
+                            "CREATURE_GRAPHICS" => {
+                                if block_buffer.len() > 0 {
+                                    match Creature::read(block_buffer.clone(), Vec::new(), path) {
+                                        Ok(creature) => {
+                                            if creature.ne(&Creature::new()) {
+                                                creatures.push(creature.clone());
+                                            }
+                                        },
+                                        Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
+                                    }
+                                    block_buffer.clear();
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                },
+                GraphicsFile::StatueCreatureFile(_, ref mut statues) => {
+                    if len >=1 {
+                        match line_vec[0].as_str() {
+                            "STATUE_CREATURE_CASTE_GRAPHICS" |
+                            "STATUE_CREATURE_GRAPHICS" => {
+                                if block_buffer.len() > 0 {
+                                    match Statue::read(block_buffer.clone(), Vec::new(), path) {
+                                        Ok(statue) => {
+                                            if statue.ne(&Statue::new()) {
+                                                statues.push(statue.clone());
+                                            }
+                                        },
+                                        Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
+                                    }
+                                    block_buffer.clear();
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                },
+                GraphicsFile::PlantFile(_, ref mut plants) => {
+                    if len >=1 {
+                        match line_vec[0].as_str() {
+                            "PLANT_GRAPHICS" => {
+                                if block_buffer.len() > 0 {
+                                    match Plant::read(block_buffer.clone(), Vec::new(), path) {
+                                        Ok(plant) => {
+                                            if plant.ne(&Plant::new()) {
+                                                plants.push(plant.clone());
+                                            }
+                                        },
+                                        Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
+                                    }
+                                    block_buffer.clear();
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                },
+                GraphicsFile::TileGraphicsFile(_, ref mut tile_graphics) => {
+                    if len >=1 {
+                        match line_vec[0].as_str() {
+                            "TILE_GRAPHICS" |
+                            "HELM_GRAPHICS" |
+                            "ARMOR_GRAPHICS" |
+                            "PANTS_GRAPHICS" |
+                            "GLOVES_GRAPHICS" |
+                            "SHOES_GRAPHICS" |
+                            "AMMO_GRAPHICS" |
+                            "SIEGEAMMO_GRAPHICS" |
+                            "WEAPON_GRAPHICS" |
+                            "SHIELD_GRAPHICS" |
+                            "TRAPCOMP_GRAPHICS" |
+                            "BOULDER_GRAPHICS" |
+                            "ROUGH_GEM_GRAPHICS" |
+                            "BARS_GRAPHICS" |
+                            "FOOD_GRAPHICS" |
+                            "TOY_GRAPHICS" |
+                            "TOOL_GRAPHICS" |
+                            "ADD_TOOL_GRAPHICS" |
+                            "FOOD_CONTAINER_GRAPHICS" => {
+                                if block_buffer.len() > 0 {
+                                    match TileGraphic::read(block_buffer.clone(), Vec::new(), path) {
+                                        Ok(tile_graphic) => {
+                                            if tile_graphic.ne(&TileGraphic::new()) {
+                                                tile_graphics.push(tile_graphic.clone());
+                                            }
+                                        },
+                                        Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
+                                    }
+                                    block_buffer.clear();
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                },
+            }
+            block_buffer.push(line_vec.clone());
+        }
+
+        let last_line = buffer.len();
+        if block_buffer.len() > 0 {//flush buffer
+            match graphics_file {
+                GraphicsFile::DefaultFile => {},
+                GraphicsFile::CreatureFile(_, ref mut creatures) => {
+                    match Creature::read(block_buffer.clone(), Vec::new(), path) {
+                        Ok(creature) => {
+                            if creature.ne(&Creature::new()) {
+                                creatures.push(creature.clone());
+                            }
+                        },
+                        Err(e) => return wrap_import_file_error(raw_buffer, e, last_line, file_path)
+                    }
+                },
+                GraphicsFile::StatueCreatureFile(_, ref mut statues) => {
+                    match Statue::read(block_buffer.clone(), Vec::new(), path) {
+                        Ok(statue) => {
+                            if statue.ne(&Statue::new()) {
+                                statues.push(statue.clone());
+                            }
+                        },
+                        Err(e) => return wrap_import_file_error(raw_buffer, e, last_line, file_path)
+                    }
+                },
+                GraphicsFile::PlantFile(_, ref mut plants) => {
+                    match Plant::read(block_buffer.clone(), Vec::new(), path) {
+                        Ok(plant) => {
+                            if plant.ne(&Plant::new()) {
+                                plants.push(plant.clone());
+                            }
+                        },
+                        Err(e) => return wrap_import_file_error(raw_buffer, e, last_line, file_path)
+                    }
+                },
+                GraphicsFile::TileGraphicsFile(_, ref mut tile_graphics) => {
+                    match TileGraphic::read(block_buffer.clone(), Vec::new(), path) {
+                        Ok(tile_graphic) => {
+                            if tile_graphic.ne(&TileGraphic::new()) {
+                                tile_graphics.push(tile_graphic.clone());
+                            }
+                        },
+                        Err(e) => return wrap_import_file_error(raw_buffer, e, last_line, file_path)
+                    }
+                },
+            }
+        }
+        
+        Ok(graphics_file)
+    }
+
+    fn display(&self) -> String {
+        todo!()
+    }
+}
+impl GraphicsFile {
+    fn export(&self, path: &path::PathBuf) -> Result<()> {
+        match self {
+            GraphicsFile::DefaultFile => return Ok(()),
+            GraphicsFile::CreatureFile(name, creatures) => {
+                graphics_file_export!("graphics_creatures_", name, "", creatures, path);
+            },
+            GraphicsFile::StatueCreatureFile(name, statues) => {
+                graphics_file_export!("graphics_creatures_", name, "_statue", statues, path);
+            },
+            GraphicsFile::PlantFile(name, plants) => {
+                graphics_file_export!("graphics_", name, "", plants, path);
+            },
+            GraphicsFile::TileGraphicsFile(name, tile_graphics) => {
+                graphics_file_export!("graphics_", name, "", tile_graphics, path);
+            },
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct Creature {
+    pub name: String,
+    pub caste: Option<Caste>,
+    pub simple_layers: Vec<SimpleLayer>,
+    pub layer_sets: Vec<LayerSet>, 
+}
+impl RAW for Creature {
+    fn new() -> Creature {
+        Creature {
+            name: String::from("(new)"),
+            caste: None,
+            simple_layers: Vec::new(),
+            layer_sets: Vec::new(),
+        }
+    }
+
+    fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        let mut creature = Creature::new();
+        let mut block_buffer: Vec<Vec<String>> = Vec::with_capacity(100);
+        let buffer_len = buffer.len();
+
+        for (i_line, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
+
+            if len >= 2 {
+                match line_vec[0].as_str() {
+                    "CREATURE_GRAPHICS" => {
+                        creature.name = line_vec[1].clone();
+                    },
+                    "CREATURE_CASTE_GRAPHICS" => {
+                        if len >= 3 {
+                            creature.name = line_vec[1].clone();
+                            creature.caste = Some(Caste::from(line_vec[2].clone()));
+                        } else {
+                            index_err!(i_line, buffer_len, len, 3, Creature);
+                        }
+                    },
+                    "LAYER_SET" => {
+                        if block_buffer.len() > 0 {
+                            match LayerSet::read(block_buffer.clone(), Vec::new(), path) {
+                                Ok(layer_set) => {
+                                    if layer_set.ne(&LayerSet::new()) {
+                                        creature.layer_sets.push(layer_set.clone());
+                                    }
+                                },
+                                Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
+                            }
+                            block_buffer.clear();
+                        }
+                    },
+                    other => {
+                        match State::from(other.to_string()) {
+                            State::Custom(_) => {
+                                return Err::<Creature, DFGHError>(
+                                    DFGHError::ImportBufferError(i_line, buffer_len, 0..=(len-1),
+                                    DFGHError::ImportUnknownError.to_string())
+                                )
+                            },
+                            _ => {
+                                if block_buffer.len() > 0 {
+                                    match LayerSet::read(block_buffer.clone(), Vec::new(), path) {
+                                        Ok(layer_set) => {
+                                            if layer_set.ne(&LayerSet::new()) {
+                                                creature.layer_sets.push(layer_set.clone());
+                                            }
+                                        },
+                                        Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
+                                    }
+                                    block_buffer.clear();
+                                }
+                                if len >= 4 {
+                                    let mut reduced_line = line_vec.clone();
+                                    reduced_line.retain(|l| l.ne("AS_IS"));
+                                    let reduced_len = reduced_line.len();
     
-    //     //read line-by-line to find starts of all tile definitions.
-    //     //create vectors of all lines between tile headers and import each vector.
-    //     for (i_line, raw_line) in lines.enumerate() {
-    //         let line_vec = Self::read_brackets(&raw_line);
+                                    if reduced_len == 4 || reduced_len == 5 {
+                                        creature.simple_layers.push(SimpleLayer{
+                                            state: State::from(line_vec[0].clone()),
+                                            tile_name: reduced_line[1].clone(),
+                                            coords:
+                                                [buffer_err_wrap!(reduced_line[2].parse(), i_line, buffer_len, 2..=2),
+                                                buffer_err_wrap!(reduced_line[3].parse(), i_line, buffer_len, 3..=3)],
+                                            large_coords: None,
+                                            sub_state: if reduced_line.get(4).is_some() {
+                                                Some(State::from(reduced_line[4].clone()))
+                                            } else {None},
+                                        });
+                                    } else if reduced_len == 7 || reduced_len == 8 {
+                                        let (x,y) = 
+                                            (buffer_err_wrap!(line_vec[3].parse::<u32>(), i_line, buffer_len, 3..=3),
+                                            buffer_err_wrap!(line_vec[4].parse::<u32>(), i_line, buffer_len, 4..=4));
+                                        let (x_l,y_l) = 
+                                            (buffer_err_wrap!(line_vec[5].parse::<u32>(), i_line, buffer_len, 5..=5),
+                                            buffer_err_wrap!(line_vec[6].parse::<u32>(), i_line, buffer_len, 6..=6));
+                                        creature.simple_layers.push(SimpleLayer{
+                                            state: State::from(line_vec[0].clone()),
+                                            tile_name: reduced_line[1].clone(),
+                                            coords: [x, y],
+                                            large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
+                                            sub_state: if reduced_line.get(7).is_some() {
+                                                Some(State::from(reduced_line[7].clone()))
+                                            } else {None},
+                                        });
+                                    } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
+                                        index_err!(i_line, buffer_len, len, 7, Creature);
+                                    } else {
+                                        index_err!(i_line, buffer_len, len, 4, Creature);
+                                    }
+                                } else {
+                                    index_err!(i_line, buffer_len, len, 4, Creature);
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+            block_buffer.push(line_vec.clone());
+        }
+        Ok(creature)
+    }
 
-    //         //start filling the buffer at tile start, then process and clear it at next tile start.
-    //         match line_vec.get(0).unwrap_or(&"".to_string()).as_str() {
-    //             "CREATURE_GRAPHICS"
-    //             | "CREATURE_CASTE_GRAPHICS"
-    //             | "STATUE_CREATURE_GRAPHICS"
-    //             | "STATUE_CREATURE_CASTE_GRAPHICS" => {
-    //                 if buffer.len() > 0 {
-    //                     //if the buffer is populated process/clear it and store.
-    //                     match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
-    //                         Ok(creature) => creatures.push(creature),
-    //                         Err(e) => return wrap_import_error(e, buffer_start, path),
-    //                     }
-    //                     buffer.clear();
-    //                     raw_buffer.clear();
-    //                 }
-    //                 buffer_start = i_line;
-    //                 buffer.push(line_vec);
-    //                 raw_buffer.push(raw_line);
-    //             },
-    //             "OBJECT"
-    //             | "" => {
-    //                 //do nothing
-    //             },
-    //             _ => {
-    //                 buffer.push(line_vec);
-    //                 raw_buffer.push(raw_line);
-    //             }
-    //         }
-    //     }
+    fn display(&self) -> String {
+        let mut out = String::new();
 
-    //     if buffer.len() > 0 {
-    //         //if the buffer is populated process/clear it and store.
-    //         match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
-    //             Ok(creature) => creatures.push(creature),
-    //             Err(e) => return wrap_import_error(e, buffer_start, path),
-    //         }
-    //     }
+        let mut layer_sets = self.layer_sets.clone();
 
-    //     Ok(CreatureFile{
-    //         name,
-    //         creatures,
-    //     })
-    // }
+        for layer_set in layer_sets.iter_mut() {//test
+            // if let LayerSet::Statue(simple_layers) = layer_set {
+            //     if !out.contains("[STATUE_CREATURE_GRAPHICS ") {
+            //         out.push_str(&format!(
+            //             "[STATUE_CREATURE_GRAPHICS:{}]\n",
+            //             self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+            //         ));
+            //     } else if simple_layers.len() > 1 {
+            //         simple_layers.drain(1..);
+            //     }
+            // } else 
+            // if let LayerSet::Empty = layer_set {
+                
+            // } else {
+            //     if !out.contains("[CREATURE_GRAPHICS") {
+            //         out.push_str(&format!(
+            //             "[CREATURE_GRAPHICS:{}]\n",
+            //             self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+            //         ));
+            //     }
+            // }
+            
+            out.push_str(&layer_set.display());
+        }
 
-    // fn import_creature(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Creature> {
-    //     let mut creature = Creature::new();
-    //     let mut graphics_type = LayerSet::Empty;
-    //     let mut caste = None;
-    //     let mut ls_buffer = Vec::new();
+        out
+    }
+}
+impl Menu for Creature {
+    fn menu(&mut self, ui: &mut Ui) {
+        ui.separator();
+        ui.text_edit_singleline(&mut self.name);
 
-    //     for (i_b_line, line_vec) in buffer.iter().enumerate() {
-    //         let len = line_vec.len();
-    //         match line_vec[0].as_str() {
-    //             "CREATURE_GRAPHICS" => {
-    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-    //                 if len >= 2 {
-    //                     creature.name = line_vec[1].clone();
-    //                     graphics_type = LayerSet::Simple(Vec::new());
-    //                 } else {
-    //                     index_err!(i_b_line, len, 2, raw_buffer, Creature);
-    //                 }
-    //             },
-    //             "CREATURE_CASTE_GRAPHICS" => {
-    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-    //                 if len >= 3 {
-    //                     creature.name = line_vec[1].clone();
-    //                     caste = Some(State::from(line_vec[2].clone()));
-    //                     graphics_type = LayerSet::Simple(Vec::new());
-    //                 } else {
-    //                     index_err!(i_b_line, len, 3, raw_buffer, Creature);
-    //                 }
-    //             },
-    //             "STATUE_CREATURE_GRAPHICS" => {
-    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-    //                 if len >= 2 {
-    //                     creature.name = line_vec[1].clone();
-    //                     graphics_type = LayerSet::Statue(Vec::new());
-    //                 } else {
-    //                     index_err!(i_b_line, len, 2, raw_buffer, Creature);
-    //                 }
-    //             },
-    //             "STATUE_CREATURE_CASTE_GRAPHICS" => {
-    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-    //                 if len >= 3 {
-    //                     creature.name = line_vec[1].clone();
-    //                     caste = Some(State::from(line_vec[2].clone()));
-    //                     graphics_type = LayerSet::Statue(Vec::new());
-    //                 } else {
-    //                     index_err!(i_b_line, len, 3, raw_buffer, Creature);
-    //                 }
-    //             },
-    //             "LAYER_SET" => {
-    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-    //                 if len >= 2 {
-    //                     graphics_type = LayerSet::Layered(State::from(line_vec[1].clone()), Vec::new());
-    //                 } else {
-    //                     index_err!(i_b_line, len, 2, raw_buffer, Creature);
-    //                 }
-    //             },
-    //             _ => {
-    //                 match graphics_type {
-    //                     LayerSet::Empty => {},//do nothing, haven't entered creature somehow
-    //                     LayerSet::Simple(_) => {
-    //                         if len >= 4 {
-    //                             let mut reduced_line = line_vec.clone();
-    //                             reduced_line.retain(|l| l.ne("AS_IS"));
-    //                             let reduced_len = reduced_line.len();
+        ui.add_space(PADDING);
+        // if ui.button("Add simple layer").clicked() {
+        //     if self.graphics_type.iter().any(|ls| match ls { LayerSet::Layered(..) => true, _ => false}) {
+        //         self.graphics_type.insert(0, LayerSet::Simple(vec![SimpleLayer::empty()]));
+        //     } else {
+        //         self.graphics_type.push(LayerSet::Simple(vec![SimpleLayer::empty()]));
+        //     }
+        // }
+        // if ui.button("Add layer set").clicked() {
+        //     self.graphics_type.push(LayerSet::Layered(State::Default, Vec::new()));
+        // }
+        // if self.graphics_type.is_empty() {
+        //     if ui.button("Add statue graphics (requires empty creature)").clicked() {
+        //         // self.graphics_type.push(LayerSet::Statue(vec![SimpleLayer::empty()]));
+        //     }
+        // } else {
+        //     ui.label("Statue graphics require an empty creature.");
+        // }
+    }
+}
 
-    //                             if reduced_len == 4 || reduced_len == 5 {
-    //                                 creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
-    //                                     state: State::from(line_vec[0].clone()),
-    //                                     tile: reduced_line[1].clone(),
-    //                                     coords:
-    //                                         [buffer_err_wrap!(reduced_line[2].parse(), i_b_line, raw_buffer, 2..=2),
-    //                                         buffer_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3)],
-    //                                     large_coords: None,
-    //                                     sub_state: if reduced_line.get(4).is_some() {
-    //                                         Some(State::from(reduced_line[4].clone()))
-    //                                     } else {None},
-    //                                 }]));
-    //                             } else if reduced_len == 7 || reduced_len == 8 {
-    //                                 let (x,y) = 
-    //                                     (buffer_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3),
-    //                                     buffer_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4));
-    //                                 let (x_l,y_l) = 
-    //                                     (buffer_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5),
-    //                                     buffer_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6));
-    //                                 creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
-    //                                     state: State::from(line_vec[0].clone()),
-    //                                     tile: reduced_line[1].clone(),
-    //                                     coords: [x, y],
-    //                                     large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-    //                                     sub_state: if reduced_line.get(7).is_some() {
-    //                                         Some(State::from(reduced_line[7].clone()))
-    //                                     } else {None},
-    //                                 }]));
-    //                             } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
-    //                                 index_err!(i_b_line, len, 7, raw_buffer, Creature);
-    //                             } else {
-    //                                 index_err!(i_b_line, len, 4, raw_buffer, Creature);
-    //                             }
-    //                         } else {
-    //                             index_err!(i_b_line, len, 4, raw_buffer, Creature);
-    //                         }
-    //                     },
-    //                     LayerSet::Statue(_) => {
-    //                         if len >= 6 {
-    //                             let (x,y) = 
-    //                                 (buffer_err_wrap!(line_vec[2].parse::<u32>(), i_b_line, raw_buffer, 2..=2),
-    //                                 buffer_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3));
-    //                             let (x_l,y_l) = 
-    //                                 (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
-    //                                 buffer_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
-    //                             creature.graphics_type.push(LayerSet::Statue(vec![SimpleLayer{
-    //                                 state: State::from(line_vec[0].clone()),
-    //                                 tile: line_vec[1].clone(),
-    //                                 coords: [x, y],
-    //                                 large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-    //                                 sub_state: caste,
-    //                             }]));
-    //                         } else {
-    //                             index_err!(i_b_line, len, 6, raw_buffer, Creature);
-    //                         }
-    //                         break;
-    //                     },
-    //                     LayerSet::Layered(_, _) => {
-    //                         ls_buffer.push(line_vec.clone());
-    //                     },
-    //                 }
-    //             },
-    //         }
-    //     }
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SimpleLayer {
+    pub state: State,
+    pub tile_name: String,
+    pub coords: [u32; 2],
+    pub large_coords: Option<[u32; 2]>,
+    pub sub_state: Option<State>,
+}
+impl RAW for SimpleLayer {
+    fn new() -> Self {
+        Self {
+            state: State::Default,
+            tile_name: String::new(),
+            coords: [0, 0],
+            large_coords: None,
+            sub_state: None,
+        }
+    }
 
-    //     let i_b_line = buffer.len() - 1;
-    //     ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
 
-    //     Ok(creature)
-    // }
+    fn display(&self) -> String {
+        if let Some([x2, y2]) = self.large_coords {
+            if let Some(sub_state) = &self.sub_state {
+                format!(
+                    "\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS:{}]\n",
+                    self.state.name(),
+                    self.tile_name.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
+                    self.coords[0],
+                    self.coords[1],
+                    self.coords[0] + x2,
+                    self.coords[1] + y2,
+                    sub_state.name(),
+                )
+            } else {
+                format!(
+                    "\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
+                    self.state.name(),
+                    self.tile_name.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
+                    self.coords[0],
+                    self.coords[1],
+                    self.coords[0] + x2,
+                    self.coords[1] + y2,
+                )
+            }
+        } else {
+            if let Some(sub_state) = &self.sub_state {
+                format!(
+                    "\t\t[{}:{}:{}:{}:AS_IS:{}]\n",
+                    self.state.name(),
+                    self.tile_name.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
+                    self.coords[0],
+                    self.coords[1],
+                    sub_state.name(),
+                )
+            } else {
+                format!(
+                    "\t[{}:{}:{}:{}:AS_IS]\n",
+                    self.state.name(),
+                    self.tile_name.with_boundaries(&[Boundary::Space])
+                        .to_case(Case::UpperSnake)
+                        .to_string(),
+                    self.coords[0],
+                    self.coords[1],
+                )
+            }
+        }
+    }
+}
+impl Menu for SimpleLayer {
+    fn menu(&mut self, ui: &mut Ui) {
+        //, tile_info: Vec<(String, [u32;2])>
+
+        let [x1, y1] = &mut self.coords;
+        let state = &mut self.state;
+        let sub_state = &mut self.sub_state;
+        // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
+        
+        egui::ComboBox::from_label("State")
+            .selected_text(state.name())
+            .show_ui(ui, |ui| {
+            for s in State::iterator() {
+                ui.selectable_value(state, s.clone(), s.name());
+            }
+            ui.selectable_value(state, State::Custom(String::new()), "Custom");
+        });
+        if let State::Custom(cust_state) = state {
+            ui.label("Custom state:");
+            ui.text_edit_singleline(cust_state);
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+        }
+
+        ui.add_space(PADDING);
+        egui::ComboBox::from_label("Second state (optional)")
+            .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
+            .show_ui(ui, |ui| {
+            ui.selectable_value(sub_state, Some(State::Empty), State::Empty.name());
+            for s in State::iterator() {
+                ui.selectable_value(sub_state, Some(s.clone()), s.name());
+            }
+            ui.selectable_value(sub_state, Some(State::Custom(String::new())), "Custom");
+        });
+        if let Some(State::Custom(cust_state)) = sub_state {
+            ui.label("Custom state:");
+            ui.text_edit_singleline(cust_state);
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+        }
+
+        ui.add_space(PADDING);
+        egui::ComboBox::from_label("TilePage")
+            .selected_text(&self.tile_name)
+            .show_ui(ui, |ui| {
+            // for (t, _) in &tile_info {
+            //     ui.selectable_value(&mut self.tile_name, t.clone(), t);
+            // }
+            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
+        });
+        // if !tile_names.contains(&self.tile_name) {
+        //     ui.label("Custom tile name:");
+        //     ui.text_edit_singleline(&mut self.tile_name);
+        // }
+
+        ui.add_space(PADDING);
+        let mut large = self.large_coords.is_some();
+        ui.checkbox(&mut large, "Large Image:");
+
+        // if large {
+        //     let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+        //     ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+        //         .unwrap_or_default()).prefix("TilePage X: "));
+        //     ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+        //         .unwrap_or_default()).prefix("TilePage Y: "));
+
+        //     ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+        //     ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+        // } else {
+        //     ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
+        //     ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
+
+        //     if self.large_coords.is_some() {
+        //         self.large_coords.take();
+        //     }
+        // }
+
+        ui.add_space(PADDING);
+        ui.label("Preview:");
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.display()).wrap(false));
+        });
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LayerSet {
+    state: State,
+    layer_groups: Vec<LayerGroup>,
+}
+impl RAW for LayerSet {
+    fn new() -> Self {
+        Self {
+            state: State::default(),
+            layer_groups: Vec::new(),
+        }
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
+
+    fn display(&self) -> String {
+        let mut out = String::new();
+
+        // match self {
+        //     LayerSet::Simple(simple_layers) => {
+        //         for simple_layer in simple_layers {
+        //             out.push_str(&simple_layer.display());
+        //         }
+
+        //         out.push_str("\n");
+        //     },
+        //     LayerSet::Statue(simple_layers) => {
+        //         for simple_layer in simple_layers {
+        //             out.push_str(&simple_layer.display_statue());
+        //         }
+
+        //         out.push_str("\n");
+        //     },
+        //     LayerSet::Layered(state, layer_groups) => {
+        //         out.push_str(&format!("\t[LAYER_SET:{}]\n", state.name()));
+
+        //         for layer_group in layer_groups {
+        //             out.push_str(&layer_group.display());
+        //         }
+        //     },
+        //     LayerSet::Empty => {}
+        // }
+        out
+    }
+}
+impl Menu for LayerSet {
+    fn menu(&mut self, ui: &mut Ui) {
+        ui.separator();
+
+        // match self {
+        //     LayerSet::Layered(state, layer_groups) => {
+        //         egui::ComboBox::from_label("State")
+        //             .selected_text(state.name())
+        //             .show_ui(ui, |ui| {
+        //             for s in State::iterator() {
+        //                 ui.selectable_value(state, s.clone(), s.name());
+        //             }
+        //             ui.selectable_value(state, State::Custom(String::new()), "Custom");
+        //         });
+        //         if let State::Custom(s) = state {
+        //             ui.text_edit_singleline(s);
+        //         }
+        //         ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
+
+        //         ui.add_space(PADDING);
+        //         if ui.button("Add layer group").clicked() {
+        //             layer_groups.push(LayerGroup::new());
+        //         }
+        //     },
+        //     LayerSet::Empty => {
+        //         egui::ComboBox::from_label("Graphics Type")
+        //             .selected_text("(none)")
+        //             .show_ui(ui, |ui| {
+        //             ui.selectable_value(self, LayerSet::Layered(State::Default, Vec::new()), "Layered");
+        //             ui.selectable_value(self, LayerSet::Simple(vec![SimpleLayer::new()]), "Simple");
+        //             // ui.selectable_value(self, LayerSet::Statue(vec![SimpleLayer::new()]), "Statue");
+        //         });
+        //     }
+        //     _ => {},
+        // }
+    }
+}
+impl LayerSet {
+    fn rename_layer_groups(state: State, layer_groups: &mut Vec<LayerGroup>) {
+        for lg in layer_groups.iter_mut() {
+            if lg.name.eq("") {
+                let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
+                layer_names.sort();
+                layer_names.dedup();
+
+                match layer_names.len() {
+                    0 => lg.name = state.name().to_case(Case::Title),
+                    1 => lg.name = layer_names[0].clone(),
+                    _ => {
+                        let mut words: Vec<&str> = layer_names[0].split("_").collect();
+                        words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
+
+                        if words.is_empty() {
+                            lg.name = state.name().to_case(Case::Title);
+                        } else {
+                            lg.name = words.join("_");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Statue {
+    pub state: State,
+    pub tile_name: String,
+    pub coords: [u32; 2],
+    pub large_coords: Option<[u32; 2]>,
+}
+impl RAW for Statue {
+    fn new() -> Self {
+        Self {
+            state: State::Default,
+            tile_name: String::new(),
+            coords: [0, 0],
+            large_coords: None,
+        }
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
+
+    fn display(&self) -> String {
+        if let Some([x2, y2]) = self.large_coords {
+            format!(
+                "\t[{}:{}:{}:{}:{}:{}]\n",
+                self.state.name(),
+                self.tile_name.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string(),
+                self.coords[0],
+                self.coords[1],
+                self.coords[0] + x2,
+                self.coords[1] + y2,
+            )
+        } else {String::new()}
+    }
+}
+impl Menu for Statue {
+    fn menu(&mut self, ui: &mut Ui) {
+        //, tile_info: Vec<(String, [u32;2])>
+
+        let [x1, y1] = &mut self.coords;
+        let state = &mut self.state;
+        // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
+        
+        egui::ComboBox::from_label("State")
+            .selected_text(state.name())
+            .show_ui(ui, |ui| {
+            for s in State::iterator() {
+                ui.selectable_value(state,  s.clone(), s.name());
+            }
+            ui.selectable_value(state, State::Custom(String::new()), "Custom");
+        });
+        if let State::Custom(cust_state) = state {
+            ui.label("Custom state:");
+            ui.text_edit_singleline(cust_state);
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+        }
+        ui.label("Note: only DEFAULT is known to work v50.05");
+
+        ui.add_space(PADDING);
+        egui::ComboBox::from_label("TilePage")
+            .selected_text(&self.tile_name)
+            .show_ui(ui, |ui| {
+            // for t in &tile_names {
+            //     ui.selectable_value(&mut self.tile_name, t.clone(), t);
+            // }
+            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
+        });
+        // if !tile_names.contains(&self.tile_name) {
+        //     ui.label("Custom tile name:");
+        //     ui.text_edit_singleline(&mut self.tile_name);
+        // }
+
+        ui.add_space(PADDING);
+        let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+
+        // ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+        //     .unwrap_or_default()).prefix("TilePage X: "));
+        // ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+        //     .unwrap_or_default()).prefix("TilePage Y: "));
+
+        ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+        ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+
+        ui.add_space(PADDING);
+        ui.label("Preview:");
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.add(egui::Label::new(self.display()).wrap(false));
+        });
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Plant {
+    
+}
+impl RAW for Plant {
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
+
+    fn display(&self) -> String {
+        todo!()
+    }
+}
+
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TileGraphic {
+    
+}
+impl RAW for TileGraphic {
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
+
+    fn display(&self) -> String {
+        todo!()
+    }
+}
+
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Palette {
+    
+}
+impl RAW for Palette {
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
+
+    fn display(&self) -> String {
+        todo!()
+    }
+}
+
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ASCIIGraphics {
+    
+}
+impl RAW for ASCIIGraphics {
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        todo!()
+    }
+
+    fn display(&self) -> String {
+        todo!()
+    }
+}
+
 
     // fn import_layer_set(state: State, ls_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerSet> {
     //     let mut layer_groups = Vec::new();

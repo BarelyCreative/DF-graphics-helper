@@ -7,7 +7,8 @@ use std::path;
 
 use crate::PADDING;
 use super::error;
-use crate::{RAW, Menu, Graphics, TilePageFile, TilePage, CreatureFile, Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State};
+use crate::{RAW, Menu, Graphics, TilePageFile, TilePage, GraphicsFile, 
+    Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State, Caste};
 use error::{DFGHError, Result, error_window};
 
 
@@ -19,7 +20,7 @@ pub enum MainWindow {
     TilePageFileMenu,
     TilePageMenu,
     CreatureDefaultMenu,
-    CreatureFileMenu,
+    GraphicsFileMenu,
     CreatureMenu,
     LayerGroupMenu,
     LayerSetMenu,
@@ -34,7 +35,7 @@ enum ContextData {
     None,
     TilePageFile(TilePageFile),
     TilePage(TilePage),
-    CreatureFile(CreatureFile),
+    GraphicsFile(GraphicsFile),
     Creature(Creature),
     LayerSet(LayerSet),
     LayerGroup(LayerGroup),
@@ -52,9 +53,9 @@ impl From<TilePage> for ContextData {
         ContextData::TilePage(value)
     }
 }
-impl From<CreatureFile> for ContextData {
-    fn from(value: CreatureFile) -> Self {
-        ContextData::CreatureFile(value)
+impl From<GraphicsFile> for ContextData {
+    fn from(value: GraphicsFile) -> Self {
+        ContextData::GraphicsFile(value)
     }
 }
 impl From<Creature> for ContextData {
@@ -90,15 +91,15 @@ impl From<Condition> for ContextData {
 impl From<MainWindow> for ContextData {
     fn from(main_window: MainWindow) -> Self {
         match main_window {
-            MainWindow::DefaultMenu => ContextData::CreatureFile(CreatureFile::new()),
+            MainWindow::DefaultMenu => ContextData::GraphicsFile(GraphicsFile::default()),
             MainWindow::TilePageFileDefaultMenu => ContextData::TilePageFile(TilePageFile::new()),
             MainWindow::TilePageFileMenu => ContextData::TilePageFile(TilePageFile::new()),
             MainWindow::TilePageMenu => ContextData::TilePage(TilePage::new()),
             MainWindow::CreatureDefaultMenu => ContextData::Creature(Creature::new()),
-            MainWindow::CreatureFileMenu => ContextData::CreatureFile(CreatureFile::new()),
+            MainWindow::GraphicsFileMenu => ContextData::GraphicsFile(GraphicsFile::default()),
             MainWindow::CreatureMenu => ContextData::Creature(Creature::new()),
             MainWindow::LayerGroupMenu => ContextData::LayerGroup(LayerGroup::new()),
-            MainWindow::LayerSetMenu => ContextData::LayerSet(LayerSet::Empty),
+            MainWindow::LayerSetMenu => ContextData::LayerSet(LayerSet::new()),
             MainWindow::LayerMenu => ContextData::Layer(Layer::new()),
             MainWindow::ConditionMenu => ContextData::Condition(Condition::Default),
             MainWindow::ReferenceMenu => ContextData::None,
@@ -126,8 +127,8 @@ enum Action {
 pub struct GraphicsIndices {
     tile_page_file_index: usize,
     tile_page_index: usize,
-    creature_file_index: usize,
-    creature_index: usize,
+    graphics_file_index: usize,
+    graphics_index: usize,
     layer_set_index: usize,
     layer_group_index: usize,
     layer_index: usize,
@@ -138,8 +139,8 @@ impl GraphicsIndices {
         Self {
             tile_page_file_index: 0,
             tile_page_index: 0,
-            creature_file_index: 0,
-            creature_index: 0,
+            graphics_file_index: 0,
+            graphics_index: 0,
             layer_set_index: 0,
             layer_group_index: 0,
             layer_index: 0,
@@ -152,8 +153,8 @@ impl From<[usize; 8]> for GraphicsIndices {
         GraphicsIndices {
             tile_page_file_index:   index_array[0],
             tile_page_index:        index_array[1],
-            creature_file_index:    index_array[2],
-            creature_index:         index_array[3],
+            graphics_file_index:    index_array[2],
+            graphics_index:         index_array[3],
             layer_set_index:        index_array[4],
             layer_group_index:      index_array[5],
             layer_index:            index_array[6],
@@ -295,16 +296,16 @@ impl DFGraphicsHelper {
                             inner_action = Action::Insert(data);
                         }
                     },
-                    ContextData::CreatureFile(_) |
+                    ContextData::GraphicsFile(_) |
                     ContextData::Creature(_) |
                     ContextData::LayerSet(_) |
                     ContextData::LayerGroup(_) |
                     ContextData::Layer(_) |
                     ContextData::SimpleLayer(_) |
                     ContextData::Condition(_) => {
-                        if ui.button("Creature File").clicked() {
+                        if ui.button("Graphics File").clicked() {
                             ui.close_menu();
-                            let data = ContextData::from(CreatureFile::new());
+                            let data = ContextData::from(GraphicsFile::new());
                             inner_action = Action::Insert(data);
                         } else if ui.button("Creature").clicked() {
                             ui.close_menu();
@@ -316,7 +317,7 @@ impl DFGraphicsHelper {
                             inner_action = Action::Insert(data);
                         } else if ui.button("Layer Set").clicked() {
                             ui.close_menu();
-                            let data = ContextData::from(LayerSet::Layered(State::Default, vec![LayerGroup::new()]));
+                            let data = ContextData::from(LayerSet::new());
                             inner_action = Action::Insert(data);
                         } else if ui.button("Layer Group").clicked() {
                             ui.close_menu();
@@ -394,112 +395,112 @@ impl DFGraphicsHelper {
                     self.main_window = MainWindow::TilePageMenu;
                 }
             },
-            ContextData::CreatureFile(creature_file) => {
-                let cfs = &mut graphics.creature_files;
-                if indices.creature_file_index < cfs.len() {
-                    cfs.insert(indices.creature_file_index, creature_file.clone());//checked
-                    self.main_window = MainWindow::CreatureFileMenu;
+            ContextData::GraphicsFile(graphics_file) => {
+                let gfs = &mut graphics.graphics_files;
+                if indices.graphics_file_index < gfs.len() {
+                    gfs.insert(indices.graphics_file_index, graphics_file.clone());//checked
+                    self.main_window = MainWindow::GraphicsFileMenu;
                 }
             },
             ContextData::Creature(creature) => {
-                let cs = &mut graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures;
-                if indices.creature_index < cs.len() {
-                    cs.insert(indices.creature_index, creature.clone());//checked
-                    self.main_window = MainWindow::CreatureMenu;
-                }
+                // let cs = &mut graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures;
+                // if indices.graphics_index < cs.len() {
+                //     cs.insert(indices.graphics_index, creature.clone());//checked
+                //     self.main_window = MainWindow::CreatureMenu;
+                // }
             },
             ContextData::LayerSet(layer_set) => {
-                let lss = &mut graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type;
-                if indices.layer_set_index < lss.len() {
-                    lss.insert(indices.layer_set_index, layer_set.clone());//checked
-                    self.main_window = MainWindow::LayerSetMenu;
-                }
+                // let lss = &mut graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type;
+                // if indices.layer_set_index < lss.len() {
+                //     lss.insert(indices.layer_set_index, layer_set.clone());//checked
+                //     self.main_window = MainWindow::LayerSetMenu;
+                // }
             },
             ContextData::LayerGroup(layer_group) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    if indices.layer_group_index < layer_groups.len() {
-                        layer_groups.insert(indices.layer_group_index, layer_group.clone());//checked
-                        self.main_window = MainWindow::LayerGroupMenu;
-                    }
-                }
+                // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     if indices.layer_group_index < layer_groups.len() {
+                //         layer_groups.insert(indices.layer_group_index, layer_group.clone());//checked
+                //         self.main_window = MainWindow::LayerGroupMenu;
+                //     }
+                // }
             },
             ContextData::SimpleLayer(simple_layer) => {
-                if let LayerSet::Simple(simple_layers) |
-                    LayerSet::Statue(simple_layers) = 
-                    graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    if indices.layer_index < simple_layers.len() {
-                        simple_layers.insert(indices.layer_index, simple_layer.clone());//checked
-                        self.main_window = MainWindow::LayerMenu;
-                    }
-                }
+                // if let LayerSet::Simple(simple_layers) |
+                //     LayerSet::Statue(simple_layers) = 
+                //     graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     if indices.layer_index < simple_layers.len() {
+                //         simple_layers.insert(indices.layer_index, simple_layer.clone());//checked
+                //         self.main_window = MainWindow::LayerMenu;
+                //     }
+                // }
             },
             ContextData::Layer(layer) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    let ls = &mut layer_groups
-                        .get_mut(indices.layer_group_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .layers;
-                    if indices.layer_index < ls.len() {
-                        ls.insert(indices.layer_index, layer.clone());//checked
-                        self.main_window = MainWindow::LayerMenu;
-                    }
-                }
+                // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     let ls = &mut layer_groups
+                //         .get_mut(indices.layer_group_index)
+                //         .ok_or(DFGHError::IndexError)?
+                //         .layers;
+                //     if indices.layer_index < ls.len() {
+                //         ls.insert(indices.layer_index, layer.clone());//checked
+                //         self.main_window = MainWindow::LayerMenu;
+                //     }
+                // }
             },
             ContextData::Condition(condition) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    let cs = &mut layer_groups
-                        .get_mut(indices.layer_group_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .layers
-                        .get_mut(indices.layer_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .conditions;
-                    if indices.condition_index < cs.len() {
-                        cs.insert(indices.condition_index, condition.clone());//checked
-                        self.main_window = MainWindow::ConditionMenu;
-                    }
-                }
+                // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     let cs = &mut layer_groups
+                //         .get_mut(indices.layer_group_index)
+                //         .ok_or(DFGHError::IndexError)?
+                //         .layers
+                //         .get_mut(indices.layer_index)
+                //         .ok_or(DFGHError::IndexError)?
+                //         .conditions;
+                //     if indices.condition_index < cs.len() {
+                //         cs.insert(indices.condition_index, condition.clone());//checked
+                //         self.main_window = MainWindow::ConditionMenu;
+                //     }
+                // }
             },
             ContextData::None => {},
         }
@@ -539,140 +540,140 @@ impl DFGraphicsHelper {
                     }
                 }
             },
-            ContextData::CreatureFile(_) => {
-                let cfs = &mut graphics.creature_files;
-                if indices.creature_file_index < cfs.len() {
-                    cfs.remove(indices.creature_file_index);//checked
-                    if indices.creature_file_index >=1 {
-                        indices.creature_file_index -= 1;
+            ContextData::GraphicsFile(_) => {
+                let cfs = &mut graphics.graphics_files;
+                if indices.graphics_file_index < cfs.len() {
+                    cfs.remove(indices.graphics_file_index);//checked
+                    if indices.graphics_file_index >=1 {
+                        indices.graphics_file_index -= 1;
                     } else {
                         self.main_window = MainWindow::CreatureDefaultMenu;
                     }
                 }
             },
             ContextData::Creature(_) => {
-                let cs = &mut graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures;
-                if indices.creature_index < cs.len() {
-                    cs.remove(indices.creature_index);//checked
-                    if indices.creature_index >=1 {
-                        indices.creature_index -= 1;
-                    } else {
-                        self.main_window = MainWindow::CreatureFileMenu;
-                    }
-                }
+                // let cs = &mut graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures;
+                // if indices.graphics_index < cs.len() {
+                //     cs.remove(indices.graphics_index);//checked
+                //     if indices.graphics_index >=1 {
+                //         indices.graphics_index -= 1;
+                //     } else {
+                //         self.main_window = MainWindow::GraphicsFileMenu;
+                //     }
+                // }
             },
             ContextData::LayerSet(_) => {
-                let lss = &mut graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type;
-                if indices.layer_set_index < lss.len() {
-                    lss.remove(indices.layer_set_index);//checked
-                    if indices.layer_set_index >=1 {
-                        indices.layer_set_index -= 1;
-                    } else {
-                        self.main_window = MainWindow::CreatureMenu;
-                    }
-                }
+                // let lss = &mut graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type;
+                // if indices.layer_set_index < lss.len() {
+                //     lss.remove(indices.layer_set_index);//checked
+                //     if indices.layer_set_index >=1 {
+                //         indices.layer_set_index -= 1;
+                //     } else {
+                //         self.main_window = MainWindow::CreatureMenu;
+                //     }
+                // }
             },
             ContextData::LayerGroup(_) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    if indices.layer_group_index < layer_groups.len() {
-                        layer_groups.remove(indices.layer_group_index);//checked
-                        if indices.layer_group_index >=1 {
-                            indices.layer_group_index -= 1;
-                        } else {
-                            self.main_window = MainWindow::LayerSetMenu;
-                        }
-                    }
-                }
+                // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     if indices.layer_group_index < layer_groups.len() {
+                //         layer_groups.remove(indices.layer_group_index);//checked
+                //         if indices.layer_group_index >=1 {
+                //             indices.layer_group_index -= 1;
+                //         } else {
+                //             self.main_window = MainWindow::LayerSetMenu;
+                //         }
+                //     }
+                // }
             },
             ContextData::SimpleLayer(_) => {
-                if let LayerSet::Simple(simple_layers) |
-                    LayerSet::Statue(simple_layers) = 
-                    graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    if indices.layer_index < simple_layers.len() {
-                        simple_layers.remove(indices.layer_index);//checked
-                        if indices.layer_index >=1 {
-                            indices.layer_index -= 1;
-                        } else {
-                            self.main_window = MainWindow::CreatureMenu;
-                        }
-                    }
-                }
+                // if let LayerSet::Simple(simple_layers) |
+                //     LayerSet::Statue(simple_layers) = 
+                //     graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     if indices.layer_index < simple_layers.len() {
+                //         simple_layers.remove(indices.layer_index);//checked
+                //         if indices.layer_index >=1 {
+                //             indices.layer_index -= 1;
+                //         } else {
+                //             self.main_window = MainWindow::CreatureMenu;
+                //         }
+                //     }
+                // }
             },
             ContextData::Layer(_) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    let ls = &mut layer_groups
-                        .get_mut(indices.layer_group_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .layers;
-                    if indices.layer_index < ls.len() {
-                        ls.remove(indices.layer_index);//checked
-                        if indices.layer_index >=1 {
-                            indices.layer_index -= 1;
-                        } else {
-                            self.main_window = MainWindow::LayerGroupMenu;
-                        }
-                    }
-                }
+                // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     let ls = &mut layer_groups
+                //         .get_mut(indices.layer_group_index)
+                //         .ok_or(DFGHError::IndexError)?
+                //         .layers;
+                //     if indices.layer_index < ls.len() {
+                //         ls.remove(indices.layer_index);//checked
+                //         if indices.layer_index >=1 {
+                //             indices.layer_index -= 1;
+                //         } else {
+                //             self.main_window = MainWindow::LayerGroupMenu;
+                //         }
+                //     }
+                // }
             },
             ContextData::Condition(_) => {
-                if let LayerSet::Layered(_, layer_groups) = graphics.creature_files
-                    .get_mut(indices.creature_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .creatures
-                    .get_mut(indices.creature_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .graphics_type
-                    .get_mut(indices.layer_set_index)
-                    .ok_or(DFGHError::IndexError)? {
-                    let cs = &mut layer_groups
-                        .get_mut(indices.layer_group_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .layers
-                        .get_mut(indices.layer_index)
-                        .ok_or(DFGHError::IndexError)?
-                        .conditions;
-                    if indices.condition_index < cs.len() {
-                        cs.remove(indices.condition_index);//checked
-                        if indices.condition_index >=1 {
-                            indices.condition_index -= 1;
-                        } else {
-                            self.main_window = MainWindow::LayerMenu;
-                        }
-                    }
-                }
+                // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
+                //     .get_mut(indices.graphics_file_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .creatures
+                //     .get_mut(indices.graphics_index)
+                //     .ok_or(DFGHError::IndexError)?
+                //     .graphics_type
+                //     .get_mut(indices.layer_set_index)
+                //     .ok_or(DFGHError::IndexError)? {
+                //     let cs = &mut layer_groups
+                //         .get_mut(indices.layer_group_index)
+                //         .ok_or(DFGHError::IndexError)?
+                //         .layers
+                //         .get_mut(indices.layer_index)
+                //         .ok_or(DFGHError::IndexError)?
+                //         .conditions;
+                //     if indices.condition_index < cs.len() {
+                //         cs.remove(indices.condition_index);//checked
+                //         if indices.condition_index >=1 {
+                //             indices.condition_index -= 1;
+                //         } else {
+                //             self.main_window = MainWindow::LayerMenu;
+                //         }
+                //     }
+                // }
             },
             ContextData::None => {},
         }
@@ -736,212 +737,212 @@ impl DFGraphicsHelper {
         {
             self.main_window = MainWindow::CreatureDefaultMenu;
         };
-        for (i_file, creature_file) in self.loaded_graphics.creature_files.iter_mut().enumerate() {
-            let id_cf = ui.make_persistent_id(
-                format!("creature_file{}",
-                i_file)
-            );
-            egui::collapsing_header::CollapsingState::load_with_default_open(
-                ctx,
-                id_cf,
-                true,
-            )
-            .show_header(ui, |ui| {
-                let creature_file_response = ui.add(egui::Label::new(
-                    format!("{}", &creature_file.name))
-                    .sense(Sense::click()));
-                if creature_file_response.clicked() {
-                    self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
-                    self.main_window = MainWindow::CreatureFileMenu;
-                }
-                creature_file_response.context_menu(|ui| {
-                    self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
-                    self.action = Self::context(ui, ContextData::from(creature_file.clone()));
-                });
-            })
-            .body(|ui| {
-                for (i_creature, creature) in creature_file.creatures.iter_mut().enumerate() {
-                    let id_c = ui.make_persistent_id(
-                        format!("creature{}{}",
-                        i_file, i_creature)
-                    );
-                    egui::collapsing_header::CollapsingState::load_with_default_open(
-                        ctx,
-                        id_c,
-                        true,
-                    )
-                    .show_header(ui, |ui| {
-                        let creature_response = ui.add(egui::Label::new(
-                            format!("{}", &creature.name))
-                            .sense(Sense::click()));
-                        if creature_response.clicked() {
-                            self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
-                            self.main_window = MainWindow::CreatureMenu;
-                        }
-                        creature_response.context_menu(|ui| {
-                            self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
-                            self.action = Self::context(ui, ContextData::from(creature.clone()));
-                        });
-                    })
-                    .body(|ui| {
-                        for (i_layer_set, layer_set) in creature.graphics_type.iter_mut().enumerate() {
-                            match layer_set {
-                                LayerSet::Empty => {
-                                    let layerset_response = ui.add(egui::Label::new("(empty)")
-                                        .sense(Sense::click()));
-                                    if layerset_response.clicked() {
-                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
-                                        self.main_window = MainWindow::LayerSetMenu;
-                                    }
-                                    layerset_response.context_menu(|ui| {
-                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
-                                        self.action = Self::context(ui, ContextData::from(layer_set.clone()));
-                                    });
-                                },
-                                LayerSet::Layered(state, layer_groups) => {
-                                    let id_ls = ui.make_persistent_id(
-                                        format!("layer_set{}{}{}",
-                                        i_file, i_creature, i_layer_set)
-                                    );
-                                    egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                        id_ls,
-                                        true)
-                                        .show_header(ui, |ui|
-                                        {
-                                            let layerset_response = ui.add(egui::Label::new(
-                                                format!("{}", state.name()))
-                                                .sense(Sense::click()));
-                                            if layerset_response.clicked() {
-                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
-                                                self.main_window = MainWindow::LayerSetMenu;
-                                            }
-                                            layerset_response.context_menu(|ui| {
-                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
-                                                self.action = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
-                                            });
-                                    })
-                                        .body(|ui|
-                                        {
-                                        for (i_layer_group, layer_group) in layer_groups.iter_mut().enumerate() {
-                                            let id_lg = ui.make_persistent_id(
-                                                format!("layer_group{}{}{}{}",
-                                                i_file, i_creature, i_layer_set, i_layer_group)
-                                            );
-                                            egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                                id_lg,
-                                                false)
-                                                .show_header(ui, |ui|
-                                                {
-                                                    let layergroup_response = ui.add(egui::Label::new(
-                                                        format!("{}", &layer_group.name))
-                                                        .sense(Sense::click()));
-                                                    if layergroup_response.clicked() {
-                                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
-                                                        self.main_window = MainWindow::LayerGroupMenu;
-                                                    }
-                                                    layergroup_response.context_menu(|ui| {
-                                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
-                                                        self.action = Self::context(ui, ContextData::from(layer_group.clone()));
-                                                    });
-                                                })
-                                                .body(|ui|
-                                                {
-                                                for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
-                                                    let id_l = ui.make_persistent_id(
-                                                        format!("layer{}{}{}{}{}",
-                                                        i_file, i_creature, i_layer_set, i_layer_group, i_layer)
-                                                    );
-                                                    egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                                        id_l,
-                                                        false)
-                                                        .show_header(ui, |ui|
-                                                        {
-                                                            let layer_response = ui.add(egui::Label::new(
-                                                                format!("{}", &layer.name))
-                                                                .sense(Sense::click()));
-                                                            if layer_response.clicked() {
-                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                                self.main_window = MainWindow::LayerMenu;
-                                                            }
-                                                            layer_response.context_menu(|ui| {
-                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                                self.action = Self::context(ui, ContextData::from(layer.clone()));
-                                                            });
-                                                        })
-                                                        .body(|ui|
-                                                        {
-                                                        for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
-                                                            let condition_response = ui.add(egui::Label::new(
-                                                                format!("\t{}", condition.name()))
-                                                                .wrap(false)
-                                                                .sense(Sense::click()));
-                                                            if condition_response.clicked() {
-                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
-                                                                self.main_window = MainWindow::ConditionMenu;
-                                                            }
-                                                            condition_response.context_menu(|ui| {
-                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
-                                                                self.action = Self::context(ui, ContextData::from(condition.clone()));
-                                                            });
-                                                        }
-                                                    });
-                                                }
-                                            });
-                                        }
-                                    });
-                                },
-                                LayerSet::Simple(simple_layers) => {
-                                    for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
-                                        let condition_response = ui.add(egui::Label::new(
-                                        if let Some(sub_state) = &simple_layer.sub_state {
-                                                format!("\t{} + {}",
-                                                simple_layer.state.name(),
-                                                sub_state.name())
-                                            } else {
-                                                format!("\t{}",
-                                                simple_layer.state.name())
-                                            })
-                                            .wrap(false)
-                                            .sense(Sense::click()));
-                                        if condition_response.clicked() {
-                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
-                                            self.main_window = MainWindow::LayerMenu;
-                                        }
-                                        condition_response.context_menu(|ui| {
-                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
-                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
-                                        });
-                                    }
-                                },
-                                LayerSet::Statue(simple_layers) => {
-                                    for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
-                                        let condition_response = ui.add(egui::Label::new(
-                                        if let Some(sub_state) = &simple_layer.sub_state {
-                                                format!("\t{} + {}",
-                                                simple_layer.state.name(),
-                                                sub_state.name())
-                                            } else {
-                                                format!("\t{}",
-                                                simple_layer.state.name())
-                                            })
-                                            .wrap(false)
-                                            .sense(Sense::click()));
-                                        if condition_response.clicked() {
-                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
-                                            self.main_window = MainWindow::LayerMenu;
-                                        }
-                                        condition_response.context_menu(|ui| {
-                                            self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, i_layer, 0].into();
-                                            self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
-                                        });
-                                    }
-                                },
-                            }
-                        }
-                    });
-                }
-            });
-        }
+        // for (i_file, graphics_file) in self.loaded_graphics.graphics_files.iter_mut().enumerate() {
+        //     let id_cf = ui.make_persistent_id(
+        //         format!("graphics_file{}",
+        //         i_file)
+        //     );
+        //     egui::collapsing_header::CollapsingState::load_with_default_open(
+        //         ctx,
+        //         id_cf,
+        //         true,
+        //     )
+        //     .show_header(ui, |ui| {
+        //         let graphics_file_response = ui.add(egui::Label::new(
+        //             format!("{}", &graphics_file.name))
+        //             .sense(Sense::click()));
+        //         if graphics_file_response.clicked() {
+        //             self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
+        //             self.main_window = MainWindow::GraphicsFileMenu;
+        //         }
+        //         graphics_file_response.context_menu(|ui| {
+        //             self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
+        //             self.action = Self::context(ui, ContextData::from(graphics_file.clone()));
+        //         });
+        //     })
+        //     .body(|ui| {
+        //         for (i_graphics, graphics) in graphics_file.creatures.iter_mut().enumerate() {
+        //             let id_c = ui.make_persistent_id(
+        //                 format!("graphics{}{}",
+        //                 i_file, i_graphics)
+        //             );
+        //             egui::collapsing_header::CollapsingState::load_with_default_open(
+        //                 ctx,
+        //                 id_c,
+        //                 true,
+        //             )
+        //             .show_header(ui, |ui| {
+        //                 let graphics_response = ui.add(egui::Label::new(
+        //                     format!("{}", &graphics.name))
+        //                     .sense(Sense::click()));
+        //                 if graphics_response.clicked() {
+        //                     self.indices = [0, 0, i_file, i_graphics, 0, 0, 0, 0].into();
+        //                     self.main_window = MainWindow::CreatureMenu;
+        //                 }
+        //                 graphics_response.context_menu(|ui| {
+        //                     self.indices = [0, 0, i_file, i_graphics, 0, 0, 0, 0].into();
+        //                     self.action = Self::context(ui, ContextData::from(graphics.clone()));
+        //                 });
+        //             })
+        //             .body(|ui| {
+        //                 for (i_layer_set, layer_set) in graphics.graphics_type.iter_mut().enumerate() {
+        //                     match layer_set {
+        //                         LayerSet::Empty => {
+        //                             let layerset_response = ui.add(egui::Label::new("(empty)")
+        //                                 .sense(Sense::click()));
+        //                             if layerset_response.clicked() {
+        //                                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, 0, 0].into();
+        //                                 self.main_window = MainWindow::LayerSetMenu;
+        //                             }
+        //                             layerset_response.context_menu(|ui| {
+        //                                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, 0, 0].into();
+        //                                 self.action = Self::context(ui, ContextData::from(layer_set.clone()));
+        //                             });
+        //                         },
+        //                         LayerSet::Layered(state, layer_groups) => {
+        //                             let id_ls = ui.make_persistent_id(
+        //                                 format!("layer_set{}{}{}",
+        //                                 i_file, i_graphics, i_layer_set)
+        //                             );
+        //                             egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+        //                                 id_ls,
+        //                                 true)
+        //                                 .show_header(ui, |ui|
+        //                                 {
+        //                                     let layerset_response = ui.add(egui::Label::new(
+        //                                         format!("{}", state.name()))
+        //                                         .sense(Sense::click()));
+        //                                     if layerset_response.clicked() {
+        //                                         self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, 0, 0].into();
+        //                                         self.main_window = MainWindow::LayerSetMenu;
+        //                                     }
+        //                                     layerset_response.context_menu(|ui| {
+        //                                         self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, 0, 0].into();
+        //                                         self.action = Self::context(ui, ContextData::from(LayerSet::Layered(state.clone(), layer_groups.clone())));
+        //                                     });
+        //                             })
+        //                                 .body(|ui|
+        //                                 {
+        //                                 for (i_layer_group, layer_group) in layer_groups.iter_mut().enumerate() {
+        //                                     let id_lg = ui.make_persistent_id(
+        //                                         format!("layer_group{}{}{}{}",
+        //                                         i_file, i_graphics, i_layer_set, i_layer_group)
+        //                                     );
+        //                                     egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+        //                                         id_lg,
+        //                                         false)
+        //                                         .show_header(ui, |ui|
+        //                                         {
+        //                                             let layergroup_response = ui.add(egui::Label::new(
+        //                                                 format!("{}", &layer_group.name))
+        //                                                 .sense(Sense::click()));
+        //                                             if layergroup_response.clicked() {
+        //                                                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, 0, 0].into();
+        //                                                 self.main_window = MainWindow::LayerGroupMenu;
+        //                                             }
+        //                                             layergroup_response.context_menu(|ui| {
+        //                                                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, 0, 0].into();
+        //                                                 self.action = Self::context(ui, ContextData::from(layer_group.clone()));
+        //                                             });
+        //                                         })
+        //                                         .body(|ui|
+        //                                         {
+        //                                         for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
+        //                                             let id_l = ui.make_persistent_id(
+        //                                                 format!("layer{}{}{}{}{}",
+        //                                                 i_file, i_graphics, i_layer_set, i_layer_group, i_layer)
+        //                                             );
+        //                                             egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+        //                                                 id_l,
+        //                                                 false)
+        //                                                 .show_header(ui, |ui|
+        //                                                 {
+        //                                                     let layer_response = ui.add(egui::Label::new(
+        //                                                         format!("{}", &layer.name))
+        //                                                         .sense(Sense::click()));
+        //                                                     if layer_response.clicked() {
+        //                                                         self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, 0].into();
+        //                                                         self.main_window = MainWindow::LayerMenu;
+        //                                                     }
+        //                                                     layer_response.context_menu(|ui| {
+        //                                                         self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, 0].into();
+        //                                                         self.action = Self::context(ui, ContextData::from(layer.clone()));
+        //                                                     });
+        //                                                 })
+        //                                                 .body(|ui|
+        //                                                 {
+        //                                                 for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
+        //                                                     let condition_response = ui.add(egui::Label::new(
+        //                                                         format!("\t{}", condition.name()))
+        //                                                         .wrap(false)
+        //                                                         .sense(Sense::click()));
+        //                                                     if condition_response.clicked() {
+        //                                                         self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, i_condition].into();
+        //                                                         self.main_window = MainWindow::ConditionMenu;
+        //                                                     }
+        //                                                     condition_response.context_menu(|ui| {
+        //                                                         self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, i_condition].into();
+        //                                                         self.action = Self::context(ui, ContextData::from(condition.clone()));
+        //                                                     });
+        //                                                 }
+        //                                             });
+        //                                         }
+        //                                     });
+        //                                 }
+        //                             });
+        //                         },
+        //                         LayerSet::Simple(simple_layers) => {
+        //                             for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
+        //                                 let condition_response = ui.add(egui::Label::new(
+        //                                 if let Some(sub_state) = &simple_layer.sub_state {
+        //                                         format!("\t{} + {}",
+        //                                         simple_layer.state.name(),
+        //                                         sub_state.name())
+        //                                     } else {
+        //                                         format!("\t{}",
+        //                                         simple_layer.state.name())
+        //                                     })
+        //                                     .wrap(false)
+        //                                     .sense(Sense::click()));
+        //                                 if condition_response.clicked() {
+        //                                     self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, i_layer, 0].into();
+        //                                     self.main_window = MainWindow::LayerMenu;
+        //                                 }
+        //                                 condition_response.context_menu(|ui| {
+        //                                     self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, i_layer, 0].into();
+        //                                     self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
+        //                                 });
+        //                             }
+        //                         },
+        //                         LayerSet::Statue(simple_layers) => {
+        //                             for (i_layer, simple_layer) in simple_layers.iter_mut().enumerate() {
+        //                                 let condition_response = ui.add(egui::Label::new(
+        //                                 if let Some(sub_state) = &simple_layer.sub_state {
+        //                                         format!("\t{} + {}",
+        //                                         simple_layer.state.name(),
+        //                                         sub_state.name())
+        //                                     } else {
+        //                                         format!("\t{}",
+        //                                         simple_layer.state.name())
+        //                                     })
+        //                                     .wrap(false)
+        //                                     .sense(Sense::click()));
+        //                                 if condition_response.clicked() {
+        //                                     self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, i_layer, 0].into();
+        //                                     self.main_window = MainWindow::LayerMenu;
+        //                                 }
+        //                                 condition_response.context_menu(|ui| {
+        //                                     self.indices = [0, 0, i_file, i_graphics, i_layer_set, 0, i_layer, 0].into();
+        //                                     self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
+        //                                 });
+        //                             }
+        //                         },
+        //                     }
+        //                 }
+        //             });
+        //         }
+        //     });
+        // }
 
         ui.separator();
         if ui
@@ -1039,47 +1040,47 @@ impl DFGraphicsHelper {
         Ok(())
     }
 
-    fn creature_default_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        ui.label("Creature File Menu");
+    fn graphics_default_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.label("Graphics File Menu");
         ui.separator();
 
-        if ui.small_button("New Creature File").clicked() {
-            self.action = Action::Insert(ContextData::CreatureFile(CreatureFile::new()));
+        if ui.small_button("New Graphics File").clicked() {
+            self.action = Action::Insert(ContextData::GraphicsFile(GraphicsFile::new()));
         }
         Ok(())
     }
 
-    fn creature_file_menu(&mut self, ui: &mut Ui) -> Result<()> {
+    fn graphics_file_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
-            ui.label("Creature File Menu");
+            ui.label("Graphics File Menu");
             if ui.button("Delete").clicked() {
-                self.action = Action::Delete(ContextData::CreatureFile(CreatureFile::new()));
+                self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
             }
         });
         
         let indices = &mut self.indices;
 
-        if self.loaded_graphics.creature_files.is_empty() {
+        if self.loaded_graphics.graphics_files.is_empty() {
             self.main_window = MainWindow::CreatureDefaultMenu;
         } else {
-            let creature_file = self
+            let graphics_file = self
                 .loaded_graphics
-                .creature_files
-                .get_mut(indices.creature_file_index)
+                .graphics_files
+                .get_mut(indices.graphics_file_index)
                 .ok_or(DFGHError::IndexError)?;
 
             ui.separator();
-            ui.text_edit_singleline(&mut creature_file.name);
+            // ui.text_edit_singleline(&mut graphics_file.name);
             ui.add_space(PADDING);
 
-            if ui.button("New Creature").clicked() {
+            if ui.button("New Graphics").clicked() {
                 self.action = Action::Insert(ContextData::Creature(Creature::new()));
             }
         }
         Ok(())
     }
 
-    fn creature_menu(&mut self, ui: &mut Ui) -> Result<()> {
+    fn graphics_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Creature Menu");
             if ui.button("Delete").clicked() {
@@ -1089,24 +1090,24 @@ impl DFGraphicsHelper {
 
         let indices = &mut self.indices;
 
-        let creatures = &mut self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .ok_or(DFGHError::IndexError)?
-            .creatures;
+        // let graphics = &mut self
+        //     .loaded_graphics
+        //     .graphics_files
+        //     .get_mut(indices.graphics_file_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .creatures;
         
-        if creatures.is_empty() {
-            if ui.small_button("Create Creature").clicked() {
-                self.action = Action::Insert(ContextData::Creature(Creature::new()));
-            }
-        } else {
-            let creature = creatures
-                .get_mut(indices.creature_index)
-                .ok_or(DFGHError::IndexError)?;
+        // if graphics.is_empty() {
+        //     if ui.small_button("Create Graphics").clicked() {
+        //         self.action = Action::Insert(ContextData::Creature(Creature::new()));
+        //     }
+        // } else {
+        //     let creature = graphics
+        //         .get_mut(indices.graphics_index)
+        //         .ok_or(DFGHError::IndexError)?;
 
-            creature.creature_menu(ui);
-        }
+        //     creature.creature_menu(ui);
+        // }
         Ok(())
     }
 
@@ -1114,33 +1115,33 @@ impl DFGraphicsHelper {
         ui.horizontal(|ui| {
             ui.label("Layer Set Menu");
             if ui.button("Delete").clicked() {
-                self.action = Action::Delete(ContextData::LayerSet(LayerSet::Simple(Vec::new())));
+                self.action = Action::Delete(ContextData::LayerSet(LayerSet::new()));
             }
         });
 
         let indices = &mut self.indices;
 
-        let layer_sets = &mut self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .ok_or(DFGHError::IndexError)?
-            .creatures
-            .get_mut(indices.creature_index)
-            .ok_or(DFGHError::IndexError)?
-            .graphics_type;
+        // let layer_sets = &mut self
+        //     .loaded_graphics
+        //     .graphics_files
+        //     .get_mut(indices.graphics_file_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .creatures
+        //     .get_mut(indices.graphics_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .graphics_type;
         
-        if layer_sets.is_empty() {
-            if ui.small_button("Create Layer Set").clicked() {
-                self.action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
-            }
-        } else {
-            let layer_set = layer_sets
-                .get_mut(indices.layer_set_index)
-                .ok_or(DFGHError::IndexError)?;
+        // if layer_sets.is_empty() {
+        //     if ui.small_button("Create Layer Set").clicked() {
+        //         self.action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
+        //     }
+        // } else {
+        //     let layer_set = layer_sets
+        //         .get_mut(indices.layer_set_index)
+        //         .ok_or(DFGHError::IndexError)?;
 
-            layer_set.layer_set_menu(ui);
-        }
+        //     layer_set.layer_set_menu(ui);
+        // }
         Ok(())
     }
 
@@ -1154,31 +1155,31 @@ impl DFGraphicsHelper {
         
         let indices = &mut self.indices;
 
-        let graphics_type = self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .ok_or(DFGHError::IndexError)?
-            .creatures
-            .get_mut(indices.creature_index)
-            .ok_or(DFGHError::IndexError)?
-            .graphics_type
-            .get_mut(indices.layer_set_index)
-            .ok_or(DFGHError::IndexError)?;
+        // let graphics_type = self
+        //     .loaded_graphics
+        //     .graphics_files
+        //     .get_mut(indices.graphics_file_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .creatures
+        //     .get_mut(indices.graphics_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .graphics_type
+        //     .get_mut(indices.layer_set_index)
+        //     .ok_or(DFGHError::IndexError)?;
 
-        if let LayerSet::Layered(_, layer_groups) = graphics_type {
-            if layer_groups.is_empty() {
-                if ui.small_button("Create Layer Group").clicked() {
-                    self.action = Action::Insert(ContextData::LayerGroup(LayerGroup::new()));
-                }
-            } else {
-                let layer_group = layer_groups
-                    .get_mut(indices.layer_group_index)
-                    .ok_or(DFGHError::IndexError)?;
+        // if let LayerSet::Layered(_, layer_groups) = graphics_type {
+        //     if layer_groups.is_empty() {
+        //         if ui.small_button("Create Layer Group").clicked() {
+        //             self.action = Action::Insert(ContextData::LayerGroup(LayerGroup::new()));
+        //         }
+        //     } else {
+        //         let layer_group = layer_groups
+        //             .get_mut(indices.layer_group_index)
+        //             .ok_or(DFGHError::IndexError)?;
 
-                layer_group.layer_group_menu(ui);
-            }
-        }
+        //         layer_group.layer_group_menu(ui);
+        //     }
+        // }
         Ok(())
     }
 
@@ -1189,156 +1190,156 @@ impl DFGraphicsHelper {
         
         let indices = &mut self.indices;
 
-        let layer_groups = self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .ok_or(DFGHError::IndexError)?
-            .creatures
-            .get_mut(indices.creature_index)
-            .ok_or(DFGHError::IndexError)?
-            .graphics_type
-            .get_mut(indices.layer_set_index)
-            .ok_or(DFGHError::IndexError)?;
+        // let layer_groups = self
+        //     .loaded_graphics
+        //     .graphics_files
+        //     .get_mut(indices.graphics_file_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .creatures
+        //     .get_mut(indices.graphics_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .graphics_type
+        //     .get_mut(indices.layer_set_index)
+        //     .ok_or(DFGHError::IndexError)?;
 
-        let tile_pages: Vec<&TilePage> = self
-            .loaded_graphics
-            .tile_page_files
-            .iter()
-            .flat_map(|tp| tp.tile_pages.iter())
-            .collect();
+        // let tile_pages: Vec<&TilePage> = self
+        //     .loaded_graphics
+        //     .tile_page_files
+        //     .iter()
+        //     .flat_map(|tp| tp.tile_pages.iter())
+        //     .collect();
 
-        match layer_groups {
-            LayerSet::Simple(simple_layers) => {
-                if simple_layers.is_empty() {
-                    //if there are no layers defined show create layer button only
-                    ui.label("Simple Layer Menu");
-                    ui.separator();
-                    if ui.small_button("Create Layer").clicked() {
-                        self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
-                    }
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label("Layer Menu");
-                        if ui.button("Delete").clicked() {
-                            self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
-                        }
-                    });
+        // match layer_groups {
+        //     LayerSet::Simple(simple_layers) => {
+        //         if simple_layers.is_empty() {
+        //             //if there are no layers defined show create layer button only
+        //             ui.label("Simple Layer Menu");
+        //             ui.separator();
+        //             if ui.small_button("Create Layer").clicked() {
+        //                 self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
+        //             }
+        //         } else {
+        //             ui.horizontal(|ui| {
+        //                 ui.label("Layer Menu");
+        //                 if ui.button("Delete").clicked() {
+        //                     self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
+        //                 }
+        //             });
 
-                    let simple_layer = simple_layers
-                        .get_mut(indices.layer_index)
-                        .ok_or(DFGHError::IndexError)?;
+        //             let simple_layer = simple_layers
+        //                 .get_mut(indices.layer_index)
+        //                 .ok_or(DFGHError::IndexError)?;
 
-                    if let Some(coords) = cursor_coords {
-                        simple_layer.coords = coords;
-                    }
+        //             if let Some(coords) = cursor_coords {
+        //                 simple_layer.coords = coords;
+        //             }
 
-                    simple_layer.layer_menu(ui, tile_info);
+        //             simple_layer.layer_menu(ui, tile_info);
 
-                    ui.add_space(PADDING);
-                    let mut file_name = String::new();
-                    for tile_page in tile_pages {
-                        if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
-                            file_name = tile_page.file_name.clone();
-                            break;
-                        }
-                    }
-                    let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
-                    self.preview_image(ui, file_name, rect)?;
-                }
-            },
-            LayerSet::Statue(simple_layers) => {
-                if simple_layers.is_empty() {
-                    //if there are no layers defined show create layer button only
-                    ui.label("Statue Layer Menu");
-                    ui.separator();
-                    if ui.small_button("Create Layer").clicked() {
-                        self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
-                    }
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label("Layer Menu");
-                        if ui.button("Delete").clicked() {
-                            self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
-                        }
-                    });
+        //             ui.add_space(PADDING);
+        //             let mut file_name = String::new();
+        //             for tile_page in tile_pages {
+        //                 if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
+        //                     file_name = tile_page.file_name.clone();
+        //                     break;
+        //                 }
+        //             }
+        //             let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
+        //             self.preview_image(ui, file_name, rect)?;
+        //         }
+        //     },
+        //     LayerSet::Statue(simple_layers) => {
+        //         if simple_layers.is_empty() {
+        //             //if there are no layers defined show create layer button only
+        //             ui.label("Statue Layer Menu");
+        //             ui.separator();
+        //             if ui.small_button("Create Layer").clicked() {
+        //                 self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
+        //             }
+        //         } else {
+        //             ui.horizontal(|ui| {
+        //                 ui.label("Layer Menu");
+        //                 if ui.button("Delete").clicked() {
+        //                     self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
+        //                 }
+        //             });
                     
-                    let simple_layer = simple_layers
-                        .get_mut(indices.layer_index)
-                        .ok_or(DFGHError::IndexError)?;
+        //             let simple_layer = simple_layers
+        //                 .get_mut(indices.layer_index)
+        //                 .ok_or(DFGHError::IndexError)?;
 
-                    if let Some(coords) = cursor_coords {
-                        simple_layer.coords = coords;
-                    }
+        //             if let Some(coords) = cursor_coords {
+        //                 simple_layer.coords = coords;
+        //             }
 
-                    simple_layer.statue_layer_menu(ui, tile_info);
+        //             simple_layer.statue_layer_menu(ui, tile_info);
 
-                    ui.add_space(PADDING);
-                    let mut file_name = String::new();
-                    for tile_page in tile_pages {
-                        if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
-                            file_name = tile_page.file_name.clone();
-                            break;
-                        }
-                    }
-                    let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
-                    self.preview_image(ui, file_name, rect)?;
-                }
-            },
-            LayerSet::Layered(_, layer_groups) => {
-                let layers = 
-                    &mut layer_groups
-                    .get_mut(indices.layer_group_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .layers;
+        //             ui.add_space(PADDING);
+        //             let mut file_name = String::new();
+        //             for tile_page in tile_pages {
+        //                 if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
+        //                     file_name = tile_page.file_name.clone();
+        //                     break;
+        //                 }
+        //             }
+        //             let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
+        //             self.preview_image(ui, file_name, rect)?;
+        //         }
+        //     },
+        //     LayerSet::Layered(_, layer_groups) => {
+        //         let layers = 
+        //             &mut layer_groups
+        //             .get_mut(indices.layer_group_index)
+        //             .ok_or(DFGHError::IndexError)?
+        //             .layers;
 
-                if layers.is_empty() {
-                    //if there are no layers defined show create layer button only
-                    ui.label("Layer Menu");
-                    ui.separator();
-                    if ui.small_button("Create Layer").clicked() {
-                        self.action = Action::Insert(ContextData::Layer(Layer::new()));
-                    }
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label("Layer Menu");
-                        if ui.button("Delete").clicked() {
-                            self.action = Action::Delete(ContextData::Layer(Layer::new()));
-                        }
-                    });
+        //         if layers.is_empty() {
+        //             //if there are no layers defined show create layer button only
+        //             ui.label("Layer Menu");
+        //             ui.separator();
+        //             if ui.small_button("Create Layer").clicked() {
+        //                 self.action = Action::Insert(ContextData::Layer(Layer::new()));
+        //             }
+        //         } else {
+        //             ui.horizontal(|ui| {
+        //                 ui.label("Layer Menu");
+        //                 if ui.button("Delete").clicked() {
+        //                     self.action = Action::Delete(ContextData::Layer(Layer::new()));
+        //                 }
+        //             });
 
-                    let layer = layers
-                        .get_mut(indices.layer_index)
-                        .ok_or(DFGHError::IndexError)?;
+        //             let layer = layers
+        //                 .get_mut(indices.layer_index)
+        //                 .ok_or(DFGHError::IndexError)?;
 
-                    if let Some(coords) = cursor_coords {
-                        layer.coords = coords;
-                    }
+        //             if let Some(coords) = cursor_coords {
+        //                 layer.coords = coords;
+        //             }
 
-                    layer.layer_menu(ui, tile_info);
+        //             layer.layer_menu(ui, tile_info);
 
-                    ui.add_space(PADDING);
-                    let mut file_name = String::new();
-                    for tile_page in tile_pages {
-                        if tile_page.name.to_case(Case::UpperSnake).eq(&layer.tile_name.to_case(Case::UpperSnake)) {
-                            file_name = tile_page.file_name.clone();
-                            break;
-                        }
-                    }
-                    let rect = Some([layer.coords, layer.large_coords.unwrap_or_else(|| [0, 0])]);
-                    self.preview_image(ui, file_name, rect)?;
-                }
+        //             ui.add_space(PADDING);
+        //             let mut file_name = String::new();
+        //             for tile_page in tile_pages {
+        //                 if tile_page.name.to_case(Case::UpperSnake).eq(&layer.tile_name.to_case(Case::UpperSnake)) {
+        //                     file_name = tile_page.file_name.clone();
+        //                     break;
+        //                 }
+        //             }
+        //             let rect = Some([layer.coords, layer.large_coords.unwrap_or_else(|| [0, 0])]);
+        //             self.preview_image(ui, file_name, rect)?;
+        //         }
 
-            },
-            LayerSet::Empty => {
-                ui.horizontal(|ui| {
-                    ui.label("Empty Layer Menu");
-                    if ui.button("Delete").clicked() {
-                        self.action = Action::Delete(ContextData::Layer(Layer::new()));
-                    }
-                });
-            },
-        }
+        //     },
+        //     LayerSet::Empty => {
+        //         ui.horizontal(|ui| {
+        //             ui.label("Empty Layer Menu");
+        //             if ui.button("Delete").clicked() {
+        //                 self.action = Action::Delete(ContextData::Layer(Layer::new()));
+        //             }
+        //         });
+        //     },
+        // }
         Ok(())
     }
 
@@ -1354,41 +1355,41 @@ impl DFGraphicsHelper {
         
         let indices = &mut self.indices;
 
-        let graphics_type = self
-            .loaded_graphics
-            .creature_files
-            .get_mut(indices.creature_file_index)
-            .ok_or(DFGHError::IndexError)?
-            .creatures
-            .get_mut(indices.creature_index)
-            .ok_or(DFGHError::IndexError)?
-            .graphics_type
-            .get_mut(indices.layer_set_index)
-            .ok_or(DFGHError::IndexError)?;
+        // let graphics_type = self
+        //     .loaded_graphics
+        //     .graphics_files
+        //     .get_mut(indices.graphics_file_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .creatures
+        //     .get_mut(indices.graphics_index)
+        //     .ok_or(DFGHError::IndexError)?
+        //     .graphics_type
+        //     .get_mut(indices.layer_set_index)
+        //     .ok_or(DFGHError::IndexError)?;
 
-        if let LayerSet::Layered(_, layergroups) = graphics_type {
-            let conditions = &mut layergroups
-                .get_mut(indices.layer_group_index)
-                .ok_or(DFGHError::IndexError)?
-                .layers
-                .get_mut(indices.layer_index)
-                .ok_or(DFGHError::IndexError)?
-                .conditions;
+        // if let LayerSet::Layered(_, layergroups) = graphics_type {
+        //     let conditions = &mut layergroups
+        //         .get_mut(indices.layer_group_index)
+        //         .ok_or(DFGHError::IndexError)?
+        //         .layers
+        //         .get_mut(indices.layer_index)
+        //         .ok_or(DFGHError::IndexError)?
+        //         .conditions;
 
-            if conditions.is_empty() {
-                if ui.small_button("New condition").clicked() {
-                    self.action = Action::Insert(ContextData::Condition(Condition::default()));
-                }
-            } else {
-                let condition = conditions
-                    .get_mut(indices.condition_index)
-                    .ok_or(DFGHError::IndexError)?;
+        //     if conditions.is_empty() {
+        //         if ui.small_button("New condition").clicked() {
+        //             self.action = Action::Insert(ContextData::Condition(Condition::default()));
+        //         }
+        //     } else {
+        //         let condition = conditions
+        //             .get_mut(indices.condition_index)
+        //             .ok_or(DFGHError::IndexError)?;
 
-                ui.separator();
+        //         ui.separator();
     
-                condition.condition_menu(ui, tile_info);
-            }
-        }
+        //         condition.condition_menu(ui, tile_info);
+        //     }
+        // }
         Ok(())
     }
 
@@ -1628,11 +1629,11 @@ impl eframe::App for DFGraphicsHelper {
                 let result;
                 match self.main_window {
                     MainWindow::TilePageFileDefaultMenu =>  result = self.tile_page_file_default_menu(ui),
-                    MainWindow::CreatureDefaultMenu =>      result = self.creature_default_menu(ui),
+                    MainWindow::CreatureDefaultMenu =>      result = self.graphics_default_menu(ui),
                     MainWindow::TilePageFileMenu =>         result = self.tile_page_file_menu(ui),
                     MainWindow::TilePageMenu =>             result = self.tile_page_menu(ui),
-                    MainWindow::CreatureFileMenu =>         result = self.creature_file_menu(ui),
-                    MainWindow::CreatureMenu =>             result = self.creature_menu(ui),
+                    MainWindow::GraphicsFileMenu =>         result = self.graphics_file_menu(ui),
+                    MainWindow::CreatureMenu =>             result = self.graphics_menu(ui),
                     MainWindow::LayerSetMenu =>             result = self.layer_set_menu(ui),
                     MainWindow::LayerGroupMenu =>           result = self.layer_group_menu(ui),
                     MainWindow::LayerMenu =>                result = self.layer_menu(ui),

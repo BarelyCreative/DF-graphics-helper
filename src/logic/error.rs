@@ -27,6 +27,9 @@ pub enum DFGHError {
     #[error("Unknown import error.")]
     ImportUnknownError,
 
+    #[error("File contains incompatible tags.")]
+    ImportMismatchError,
+
     #[error("Expected integer in the marked field.")]
     ImportParseError(#[from] std::num::ParseIntError),
 
@@ -122,6 +125,7 @@ pub fn wrap_import_buffer_error<T>(i_rel_line: usize,  buffer_len: usize, r_erro
         DFGHError::IoError(_) |
         DFGHError::ImageError(_) |
         DFGHError::ImportParseError(_) |
+        DFGHError::ImportMismatchError |
         DFGHError::UnsupportedFileName(_) => {
             // dbg!(format!("w_e {}", i_rel_line));
             // dbg!(i_rel_line);
@@ -165,32 +169,8 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                 if ui.button("      Ok      ").clicked() {
                     match state.exception {
-                        DFGHError::IoError(..) => {
-                            state.exception = DFGHError::None;
-                        },
                         DFGHError::ImageError(..) => {
                             state.undo();
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::ImportError(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::ImportBufferError(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::ImportParseError(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::NoGraphicsDirectory(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::UnsupportedFileName(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::ImportIndexError(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::ImportUnknownError => {
                             state.exception = DFGHError::None;
                         },
                         DFGHError::IndexError => {
@@ -198,7 +178,8 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
                             state.indices = [0, 0, 0, 0, 0, 0, 0, 0 as usize].into();
                             state.exception = DFGHError::None;
                         },
-                        DFGHError::None => {}
+                        DFGHError::None => {},
+                        _ => {state.exception = DFGHError::None;}
                     }
                 }
             });
