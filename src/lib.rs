@@ -7,72 +7,86 @@ use egui::Ui;
 
 pub mod logic;
 use logic::app::DFGraphicsHelper;
-use logic::error::{Result, DFGHError, wrap_import_error, wrap_block_error};
+use logic::error::{Result, DFGHError, wrap_import_buffer_error, wrap_import_file_error};
 
 pub const PADDING: f32 = 8.0;
-// i_b_line: usize, r_elem: RangeInclusive<usize>, raw_buffer: Vec<String>, e: DFGHError
-macro_rules! block_err_wrap {
-    ($func:expr, $i_b_line:ident, $raw_buffer:ident, $r_elem:expr) => {
+
+// $func:expr, $rel_line:ident, $r_error:expr
+macro_rules! buffer_err_wrap {
+    ($func:expr, $rel_line:ident, $buffer_len:ident, $r_error:expr) => {
         match $func {
             Ok(inner) => inner,
-            //i_b_line: usize, r_elem: RangeInclusive<usize>, raw_buffer: Vec<String>, e: DFGHError
-            Err(e) => return wrap_block_error($i_b_line, $r_elem, $raw_buffer, DFGHError::from(e)),
+            Err(e) => return wrap_import_buffer_error($rel_line, $buffer_len, $r_error, DFGHError::from(e)),
         }
     };
 }
 
+//$rel_line:ident, $actual:ident, $expected:expr, $type:ty
 macro_rules! index_err {
-    ($i_b_line:ident, $len:ident, $expected:expr, $raw_buffer:ident, $type:ty) => {
-        let e = DFGHError::ImportIndexError($expected, $len);
+    ($rel_line:ident, $buffer_len:ident, $actual:ident, $expected:expr, $type:ty) => {
+        let e = DFGHError::ImportIndexError($expected, $actual);
 
-        if $len < $expected {
-            return Err::<$type, DFGHError>(DFGHError::ImportBlockError($i_b_line, $i_b_line, 0..=$len, $raw_buffer, e.to_string()))
+        if $actual < $expected {
+            return Err::<$type, DFGHError>(DFGHError::ImportBufferError($rel_line, $buffer_len, 0..=$actual, e.to_string()))
         } else {
-            return Err::<$type, DFGHError>(DFGHError::ImportBlockError($i_b_line, $i_b_line, $expected..=$len, $raw_buffer, e.to_string()))
+            return Err::<$type, DFGHError>(DFGHError::ImportBufferError($rel_line, $buffer_len, $expected..=$actual, e.to_string()))
         }
     };
 }
 
-macro_rules! ls_push {
-    ($creature:ident, $graphics_type:ident, $ls_buffer:ident, $i_b_line:ident, $raw_buffer:ident) => {
-        if let LayerSet::Layered(state, _) = $graphics_type {
-            if !$ls_buffer.is_empty() {
-                $creature.graphics_type.push(
-                    block_err_wrap!(
-                        Self::import_layer_set(state, $ls_buffer.clone(), $raw_buffer.clone()),
-                        $i_b_line, $raw_buffer, 0..=0
-                    )
-                );
-                $ls_buffer.clear();
-            }
-        }
-    }
+// macro_rules! ls_push {
+//     ($creature:ident, $graphics_type:ident, $ls_buffer:ident, $i_b_line:ident, $raw_buffer:ident) => {
+//         if let LayerSet::Layered(state, _) = $graphics_type {
+//             if !$ls_buffer.is_empty() {
+//                 $creature.graphics_type.push(
+//                     buffer_err_wrap!(
+//                         Self::import_layer_set(state, $ls_buffer.clone(), $raw_buffer.clone()),
+//                         $i_b_line, $raw_buffer, 0..=0
+//                     )
+//                 );
+//                 $ls_buffer.clear();
+//             }
+//         }
+//     }
+// }
+
+// macro_rules! lg_push {
+//     ($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident) => {
+//         if !$lg_buffer.is_empty() {
+//             $layer_groups.push(
+//                 buffer_err_wrap!(
+//                     Self::import_layer_group($lg_buffer.clone(), $raw_buffer.clone()),
+//                     $i_b_line, $raw_buffer, 0..=0
+//                 )
+//             );
+//             $lg_buffer.clear();
+//         }
+//     }
+// }
+
+pub trait RAW {
+    fn new() -> Self;
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> where Self: Sized;
+
+    fn display(&self) -> String;
 }
 
-macro_rules! lg_push {
-    ($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident) => {
-        if !$lg_buffer.is_empty() {
-            $layer_groups.push(
-                block_err_wrap!(
-                    Self::import_layer_group($lg_buffer.clone(), $raw_buffer.clone()),
-                    $i_b_line, $raw_buffer, 0..=0
-                )
-            );
-            $lg_buffer.clear();
-        }
-    }
+pub trait Menu {
+    fn menu(&mut self, ui: &mut Ui);
 }
+
 
 #[derive(Clone, Debug, Default)]
 pub struct Graphics {
-    pub tile_pages: Vec<TilePage>,
-    pub creature_files: Vec<CreatureFile>,
+    pub tile_page_files: Vec<TilePageFile>,
+    pub creature_files: Vec<CreatureFile>,//todo
 }
 impl Graphics {
     /// Generate a blank generic Graphics struct
     pub fn new() -> Graphics {
         Graphics {
-            tile_pages: vec![TilePage::new()],
+            tile_page_files: vec![TilePageFile::new()],
             creature_files: vec![CreatureFile::new()],
         }
     }
@@ -96,16 +110,22 @@ impl Graphics {
         // let mut split_line: Vec<&str> = 
         
         let line_vec: Vec<String>;
+        //split at first '[' for the start of a line that DF will attempt to read. Throw away any leading characters.
         if let Some((_, open_brac_line)) = raw_line.split_once('[') {
+            //if the line also has a closing bracket, proceed with vectorization. Throw away trailing characters.
             if let Some((valid_line, _)) = open_brac_line.split_once(']') {
+                //split line at ':'s and gather the parameters into a vector of strings.
                 line_vec = valid_line.split(':').map(|s| s.to_string()).collect();
+            //if the line has no closing bracket, treat it as a blank line. //todo throw error
             } else {
                 line_vec = Vec::new();
             }
+        //if the line has no opening '[', treat it as a blank line
         } else {
             line_vec = Vec::new();
         }
 
+        //return the vector of parameters in a line with unbracketed lines treated as empty parameter vectors
         line_vec
     }
 
@@ -121,7 +141,7 @@ impl Graphics {
     /// Graphics::import(&mut folder);
     /// ```
     pub fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf)> {
-        let mut tile_pages: Vec<TilePage> = Vec::new();
+        let mut tile_page_files: Vec<TilePageFile> = Vec::new();
         let mut creature_files: Vec<CreatureFile> = Vec::new();
 
         //Check if the path includes or is inside a graphics directory and adjust path to show full mod folder.
@@ -139,471 +159,73 @@ impl Graphics {
         let paths = fs::read_dir(&folder.join("graphics"))?;
 
         //read each tile page or creature graphics text file and import.
-        for path in paths {
-            let path = path?;
-            if let Ok(entry_name) = path.file_name().into_string() {
-                if entry_name.ends_with(".txt") {
-                    if entry_name.starts_with("tile_page_") {
-                        //import tile page file
-                        tile_pages.push(Self::import_tile_page(&path.path())?);
-    
-                    } else if entry_name.starts_with("graphics_creatures_") {
-                        //import creature file
-                        creature_files.push(Self::import_creature_file(&path.path())?);
+        for path_result in paths {
+            let path = path_result?;
+            let mut tile_page_file = false;
+            let mut graphics_file = false;
+
+            if path.path().is_file() {
+                if path.file_name().into_string().unwrap_or(String::new()).ends_with(".txt") {
+                    let f = fs::File::open(path.path())?;
+
+                    let raw_lines = io::BufReader::new(f)
+                        .lines()
+                        .map(|l| l.expect("All lines in a text file should be valid"))
+                        .collect::<Vec<String>>();
+
+                    let lines = raw_lines.clone().iter()
+                        .map(|l| Self::read_brackets(l))
+                        .collect::<Vec<Vec<String>>>();
+
+                    //identify file type
+                    for raw_line in raw_lines.clone().iter() {
+                        let line_vec = Self::read_brackets(&raw_line);
+                        let len = line_vec.len();
+
+                        if len >=2 {
+                            match line_vec[0].as_str() {
+                                "OBJECT" => {
+                                    match line_vec[1].as_str() {
+                                        "TILE_PAGE" => {
+                                            tile_page_file = true;
+                                            break
+                                        },
+                                        "GRAPHICS" => {
+                                            graphics_file = true;
+                                        },
+                                        _ => return Err(DFGHError::ImportUnknownError)//todo more specific error
+                                    }
+                                },
+                                "CREATURE_GRAPHICS"
+                                | "CREATURE_CASTE_GRAPHICS"
+                                | "STATUE_CREATURE_GRAPHICS"
+                                | "STATUE_CREATURE_CASTE_GRAPHICS" => {
+                                    
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                
+                    if tile_page_file {
+                        tile_page_files.push(TilePageFile::read(lines, raw_lines, Some(&path.path()))?)
+                    } else if graphics_file {
+
                     }
                 }
-            } else {
-                return Err(DFGHError::UnsupportedFileName(path.path()))
             }
         }
 
         Ok(
             (
                 Graphics {
-                    tile_pages,
+                    tile_page_files,
                     creature_files,
                     ..Default::default()
                 },
                 folder.clone()
             )
         )
-    }
-
-    fn import_tile_page(path: &path::PathBuf) -> Result<TilePage> {
-        let mut tiles = Vec::new();
-        let mut buffer = Vec::with_capacity(10);
-        let mut raw_buffer = Vec::with_capacity(10);
-        let mut buffer_start = 0;
-
-        let f = fs::File::open(path)?;
-
-        let lines = io::BufReader::new(f).lines()
-            .map(|l| l.expect("should always be a valid line."));
-
-        //first line must match file name and is tile page name.
-        let name = path
-            .file_name().get_or_insert(&OsStr::new("no_name"))
-            .to_str().get_or_insert("no_name")
-            .replace("tile_page_", "")
-            .replace(".txt", "").trim().to_string();
-        
-        //read line-by-line to find starts of all tile definitions.
-        //create vectors of all lines between tile headers and import each vector.
-        for (i_line, raw_line) in lines.enumerate() {
-            let line_vec = Self::read_brackets(&raw_line);
-
-            //start filling the buffer at tile start, then process and clear it at next tile start.
-            if line_vec.get(0).is_some() {
-                if line_vec[0].eq("TILE_PAGE") {
-                    if buffer.len() > 0 {
-                        //if the buffer is populated process/clear it and store.
-                        // wrap_import_error<T>(e: DFGHError, buffer_start: usize, path: &path::PathBuf) -> Result<T> {
-                        match Self::import_tile(buffer.clone(), raw_buffer.clone(), path) {
-                            Ok(tile) => tiles.push(tile),
-                            Err(e) => return wrap_import_error(e, buffer_start, path),
-                        }
-                        raw_buffer.clear();
-                    }
-                    buffer_start = i_line;
-                    buffer.push(line_vec);
-                    raw_buffer.push(raw_line);
-                } else if line_vec[0].eq("OBJECT") {
-                    //do nothing
-                } else {
-                    buffer.push(line_vec);
-                    raw_buffer.push(raw_line);
-                }
-            }
-        }
-
-        Ok(TilePage {name, tiles})
-    }
-
-    ///Takes a chunk of processed lines and generates a tile from them.
-    fn import_tile(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: &path::PathBuf) -> Result<Tile> {
-        let mut tile = Tile::new();
-
-        for (i_b_line, line_vec) in buffer.iter().enumerate() {
-            let len = line_vec.len();
-            match line_vec[0].as_str() {
-                "TILE_PAGE" => {
-                    if len >= 2 {
-                        tile.name = line_vec[1].clone();
-                    } else {
-                        index_err!(i_b_line, len, 2, raw_buffer, Tile);
-                    }
-                },
-                "FILE" => {
-                    if len >= 2 {
-                        tile.filename = line_vec[1].clone()
-                            .replace(".png", "")
-                            .replace("images", "")
-                            .split_off(1);
-                    } else {
-                        index_err!(i_b_line, len, 2, raw_buffer, Tile);
-                    }
-                },
-                //($func:expr, $i_b_line:ident, $raw_buffer:ident, $r_elem:expr)
-                "TILE_DIM" => {
-                    if len >= 3 {
-                        tile.tile_size = 
-                            [block_err_wrap!(line_vec[1].parse(), i_b_line, raw_buffer, 1..=1),
-                            block_err_wrap!(line_vec[2].parse(), i_b_line, raw_buffer, 2..=2)];
-                    } else {
-                        index_err!(i_b_line, len, 3, raw_buffer, Tile);
-                    }
-                },
-                "PAGE_DIM_PIXELS" => {
-                    // if the image file name is already read attempt to correct the image size based on it.
-                    if !tile.filename.is_empty() {
-                        let mod_path = path.to_path_buf();
-                        let image_path = mod_path.join("graphics").join("images").join(&tile.filename);
-                        if image_path.is_file() && image_path.extension() == Some(OsStr::new("png")) {
-                            let image_dimensions = block_err_wrap!(image::image_dimensions(image_path), i_b_line, raw_buffer, 0..=len);
-                            tile.image_size = [image_dimensions.0, image_dimensions.1];
-                        }
-                        continue;
-                    }
-
-                    //if image file is not read yet, attempt to parse tag.
-                    if len >= 3 {
-                        tile.image_size = 
-                            [block_err_wrap!(line_vec[1].parse(), i_b_line, raw_buffer, 1..=1),
-                            block_err_wrap!(line_vec[2].parse(), i_b_line, raw_buffer, 2..=2)];
-                    } else {
-                        index_err!(i_b_line, len, 3, raw_buffer, Tile);
-                    }
-                },
-                _ => {
-                    return Err::<Tile, DFGHError>(DFGHError::ImportBlockError(i_b_line, i_b_line, 0..=len, raw_buffer, DFGHError::ImportUnknownError.to_string()))
-                },
-            }
-        }
-
-        Ok(tile)
-    }
-
-    fn import_creature_file(path: &path::PathBuf) -> Result<CreatureFile> {
-        let mut creatures = Vec::new();
-        let mut buffer = Vec::with_capacity(10);
-        let mut raw_buffer = Vec::with_capacity(10);
-        let mut buffer_start = 0;
-
-        let f = fs::File::open(path)?;
-
-        let lines = io::BufReader::new(f).lines()
-            .map(|l| l.expect("should always be a valid line."));
-
-        //first line must match file name and is tile page name.
-        let name = path
-            .file_name().get_or_insert(&OsStr::new("no_name"))
-            .to_str().get_or_insert("no_name")
-            .replace("graphics_creatures_", "")
-            .replace(".txt", "").trim().to_string();
-    
-        //read line-by-line to find starts of all tile definitions.
-        //create vectors of all lines between tile headers and import each vector.
-        for (i_line, raw_line) in lines.enumerate() {
-            let line_vec = Self::read_brackets(&raw_line);
-
-            //start filling the buffer at tile start, then process and clear it at next tile start.
-            match line_vec.get(0).unwrap_or(&"".to_string()).as_str() {
-                "CREATURE_GRAPHICS"
-                | "CREATURE_CASTE_GRAPHICS"
-                | "STATUE_CREATURE_GRAPHICS"
-                | "STATUE_CREATURE_CASTE_GRAPHICS" => {
-                    if buffer.len() > 0 {
-                        //if the buffer is populated process/clear it and store.
-                        match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
-                            Ok(creature) => creatures.push(creature),
-                            Err(e) => return wrap_import_error(e, buffer_start, path),
-                        }
-                        buffer.clear();
-                        raw_buffer.clear();
-                    }
-                    buffer_start = i_line;
-                    buffer.push(line_vec);
-                    raw_buffer.push(raw_line);
-                },
-                "OBJECT"
-                | "" => {
-                    //do nothing
-                },
-                _ => {
-                    buffer.push(line_vec);
-                    raw_buffer.push(raw_line);
-                }
-            }
-        }
-
-        if buffer.len() > 0 {
-            //if the buffer is populated process/clear it and store.
-            match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
-                Ok(creature) => creatures.push(creature),
-                Err(e) => return wrap_import_error(e, buffer_start, path),
-            }
-        }
-
-        Ok(CreatureFile{
-            name,
-            creatures,
-        })
-    }
-
-    fn import_creature(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Creature> {
-        let mut creature = Creature::new();
-        let mut graphics_type = LayerSet::Empty;
-        let mut caste = None;
-        let mut ls_buffer = Vec::new();
-
-        for (i_b_line, line_vec) in buffer.iter().enumerate() {
-            let len = line_vec.len();
-            match line_vec[0].as_str() {
-                "CREATURE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-                    if len >= 2 {
-                        creature.name = line_vec[1].clone();
-                        graphics_type = LayerSet::Simple(Vec::new());
-                    } else {
-                        index_err!(i_b_line, len, 2, raw_buffer, Creature);
-                    }
-                },
-                "CREATURE_CASTE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-                    if len >= 3 {
-                        creature.name = line_vec[1].clone();
-                        caste = Some(State::from(line_vec[2].clone()));
-                        graphics_type = LayerSet::Simple(Vec::new());
-                    } else {
-                        index_err!(i_b_line, len, 3, raw_buffer, Creature);
-                    }
-                },
-                "STATUE_CREATURE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-                    if len >= 2 {
-                        creature.name = line_vec[1].clone();
-                        graphics_type = LayerSet::Statue(Vec::new());
-                    } else {
-                        index_err!(i_b_line, len, 2, raw_buffer, Creature);
-                    }
-                },
-                "STATUE_CREATURE_CASTE_GRAPHICS" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-                    if len >= 3 {
-                        creature.name = line_vec[1].clone();
-                        caste = Some(State::from(line_vec[2].clone()));
-                        graphics_type = LayerSet::Statue(Vec::new());
-                    } else {
-                        index_err!(i_b_line, len, 3, raw_buffer, Creature);
-                    }
-                },
-                "LAYER_SET" => {
-                    ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-                    if len >= 2 {
-                        graphics_type = LayerSet::Layered(State::from(line_vec[1].clone()), Vec::new());
-                    } else {
-                        index_err!(i_b_line, len, 2, raw_buffer, Creature);
-                    }
-                },
-                _ => {
-                    match graphics_type {
-                        LayerSet::Empty => {},//do nothing, haven't entered creature somehow
-                        LayerSet::Simple(_) => {
-                            if len >= 4 {
-                                let mut reduced_line = line_vec.clone();
-                                reduced_line.retain(|l| l.ne("AS_IS"));
-                                let reduced_len = reduced_line.len();
-
-                                if reduced_len == 4 || reduced_len == 5 {
-                                    creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
-                                        state: State::from(line_vec[0].clone()),
-                                        tile: reduced_line[1].clone(),
-                                        coords:
-                                            [block_err_wrap!(reduced_line[2].parse(), i_b_line, raw_buffer, 2..=2),
-                                            block_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3)],
-                                        large_coords: None,
-                                        sub_state: if reduced_line.get(4).is_some() {
-                                            Some(State::from(reduced_line[4].clone()))
-                                        } else {None},
-                                    }]));
-                                } else if reduced_len == 7 || reduced_len == 8 {
-                                    let (x,y) = 
-                                        (block_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3),
-                                        block_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4));
-                                    let (x_l,y_l) = 
-                                        (block_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5),
-                                        block_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6));
-                                    creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
-                                        state: State::from(line_vec[0].clone()),
-                                        tile: reduced_line[1].clone(),
-                                        coords: [x, y],
-                                        large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-                                        sub_state: if reduced_line.get(7).is_some() {
-                                            Some(State::from(reduced_line[7].clone()))
-                                        } else {None},
-                                    }]));
-                                } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
-                                    index_err!(i_b_line, len, 7, raw_buffer, Creature);
-                                } else {
-                                    index_err!(i_b_line, len, 4, raw_buffer, Creature);
-                                }
-                            } else {
-                                index_err!(i_b_line, len, 4, raw_buffer, Creature);
-                            }
-                        },
-                        LayerSet::Statue(_) => {
-                            if len >= 6 {
-                                let (x,y) = 
-                                    (block_err_wrap!(line_vec[2].parse::<u32>(), i_b_line, raw_buffer, 2..=2),
-                                    block_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3));
-                                let (x_l,y_l) = 
-                                    (block_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
-                                    block_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
-                                creature.graphics_type.push(LayerSet::Statue(vec![SimpleLayer{
-                                    state: State::from(line_vec[0].clone()),
-                                    tile: line_vec[1].clone(),
-                                    coords: [x, y],
-                                    large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-                                    sub_state: caste,
-                                }]));
-                            } else {
-                                index_err!(i_b_line, len, 6, raw_buffer, Creature);
-                            }
-                            break;
-                        },
-                        LayerSet::Layered(_, _) => {
-                            ls_buffer.push(line_vec.clone());
-                        },
-                    }
-                },
-            }
-        }
-
-        let i_b_line = buffer.len() - 1;
-        ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
-
-        Ok(creature)
-    }
-
-    fn import_layer_set(state: State, ls_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerSet> {
-        let mut layer_groups = Vec::new();
-        let mut lg_buffer = Vec::new();
-
-        for (i_b_line, line_vec) in ls_buffer.iter().enumerate() {
-            match line_vec[0].as_str() {
-                "LAYER_SET" => {},//do nothing
-                "LAYER_GROUP" => {//($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident)
-                    lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
-                    lg_buffer.push(line_vec.clone());
-                },
-                "END_LAYER_GROUP" => {
-                    lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
-                    lg_buffer.push(line_vec.clone());
-                },
-                _ => {
-                    lg_buffer.push(line_vec.clone());
-                }
-            }
-        }
-
-        let i_b_line = ls_buffer.len() - 1;
-        lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
-
-        Self::rename_layer_groups(state.clone(), &mut layer_groups);
-        
-        Ok(LayerSet::Layered(state, layer_groups))
-    }
-
-    fn import_layer_group(lg_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerGroup> {
-        let name = String::new();
-        let mut layers = Vec::new();
-        let mut l_buffer = Vec::new();
-
-        for (i_b_line, line_vec) in lg_buffer.iter().enumerate() {
-            match line_vec[0].as_str() {
-                "LAYER_GROUP" | "END_LAYER_GROUP" => {},
-                "LAYER" => {
-                    if !l_buffer.is_empty() {
-                        layers.push(
-                            block_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
-                        );
-                        l_buffer.clear();
-                    }
-                    l_buffer.push(line_vec.clone());
-                },
-                _ => {
-                    l_buffer.push(line_vec.clone());
-                },
-            }
-        }
-        
-        let i_b_line = lg_buffer.len() - 1;
-        if !l_buffer.is_empty() {
-            layers.push(
-                block_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
-            );
-            l_buffer.clear();
-        }
-
-        Ok(LayerGroup {name, layers})
-    }
-
-    fn import_layer(l_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Layer> {
-        let mut layer = Layer::new();
-        let mut conditions = Vec::new();
-        let mut i_start = 0;
-
-        for (i_b_line, line_vec) in l_buffer.iter().enumerate() {
-            let len = line_vec.len();
-            match line_vec[0].as_str() {
-                "LAYER" => {
-                    if len >= 5 {
-                        let mut reduced_line = line_vec.clone();
-                        reduced_line.retain(|l| l.ne("AS_IS"));
-                        let reduced_len = reduced_line.len();
-
-                        if reduced_len == 5 {
-                            layer = Layer {
-                                name: reduced_line[1].clone(),
-                                tile: reduced_line[2].clone(),
-                                coords:
-                                    [block_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3),
-                                    block_err_wrap!(reduced_line[4].parse(), i_b_line, raw_buffer, 4..=4)],
-                                large_coords: None,
-                                conditions: conditions.clone(),
-                            };
-                        } else if reduced_len == 8 {
-                            let (x,y) = 
-                                (block_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
-                                block_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
-                            let (x_l,y_l) = 
-                                (block_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6),
-                                block_err_wrap!(line_vec[7].parse::<u32>(), i_b_line, raw_buffer, 7..=7));
-                            layer = Layer {
-                                name: reduced_line[1].clone(),
-                                tile: reduced_line[2].clone(),
-                                coords: [x, y],
-                                large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-                                conditions: conditions.clone(),
-                            };
-                        } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
-                            index_err!(i_b_line, len, 8, raw_buffer, Layer);
-                        } else {
-                            index_err!(i_b_line, len, 5, raw_buffer, Layer);
-                        }
-                    } else {
-                        index_err!(i_b_line, len, 5, raw_buffer, Layer);
-                    }
-                },
-                _ => {
-                    conditions.push(block_err_wrap!(Condition::from(line_vec.clone()), i_b_line, raw_buffer, 0..=0));//todo fix index
-                },
-            }
-        }
-
-        layer.conditions = conditions;
-
-        Ok(layer)
     }
 
     fn rename_layer_groups(state: State, layer_groups: &mut Vec<LayerGroup>) {
@@ -631,20 +253,21 @@ impl Graphics {
         }
     }
 
-    pub fn display(&self, path: &path::PathBuf) -> Result<()> {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .create(path.join("graphics").join("images"))?;
+    pub fn export(&self, path: &path::PathBuf) -> Result<()> {
+        todo!()
+        // fs::DirBuilder::new()
+        //     .recursive(true)
+        //     .create(path.join("graphics").join("images"))?;
 
-        for tile_page in self.tile_pages.iter() {
-            tile_page.display(&path)?;
-        }
+        // for tile_page in self.tile_pages.iter() {
+        //     tile_page.display(&path)?;
+        // }
 
-        for creature_file in self.creature_files.iter() {
-            creature_file.display(&path)?;
-        }
+        // for creature_file in self.creature_files.iter() {
+        //     creature_file.display(&path)?;
+        // }
 
-        Ok(())
+        // Ok(())
     }
 }
 
@@ -838,7 +461,7 @@ impl LayerSet {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct Creature {
     pub name: String,                 //file name of creature_graphics_file_name.txt
     pub graphics_type: Vec<LayerSet>, //which type of graphics (layered, simple, caste, fb)
@@ -923,7 +546,7 @@ impl Creature {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SimpleLayer {
     pub state: State,
-    pub tile: String,
+    pub tile_name: String,
     pub coords: [u32; 2],
     pub large_coords: Option<[u32; 2]>,
     pub sub_state: Option<State>,
@@ -932,7 +555,7 @@ impl SimpleLayer {
     fn empty() -> SimpleLayer {
         SimpleLayer {
             state: State::default(),
-            tile: String::new(),
+            tile_name: String::new(),
             coords: [0, 0],
             large_coords: None,
             sub_state: None,
@@ -942,7 +565,7 @@ impl SimpleLayer {
     pub fn new() -> SimpleLayer {
         SimpleLayer {
             state: State::Default,
-            tile: String::new(),
+            tile_name: String::new(),
             coords: [0, 0],
             large_coords: None,
             sub_state: None,
@@ -953,7 +576,7 @@ impl SimpleLayer {
         let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
         let sub_state = &mut self.sub_state;
-        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile);
+        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
         
         egui::ComboBox::from_label("State")
             .selected_text(state.name())
@@ -986,17 +609,17 @@ impl SimpleLayer {
         }
 
         ui.add_space(PADDING);
-        egui::ComboBox::from_label("Tile")
-            .selected_text(&self.tile)
+        egui::ComboBox::from_label("TilePage")
+            .selected_text(&self.tile_name)
             .show_ui(ui, |ui| {
             for (t, _) in &tile_info {
-                ui.selectable_value(&mut self.tile, t.clone(), t);
+                ui.selectable_value(&mut self.tile_name, t.clone(), t);
             }
-            ui.selectable_value(&mut self.tile, String::new(), "Custom");
+            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
         });
-        if !tile_names.contains(&self.tile) {
+        if !tile_names.contains(&self.tile_name) {
             ui.label("Custom tile name:");
-            ui.text_edit_singleline(&mut self.tile);
+            ui.text_edit_singleline(&mut self.tile_name);
         }
 
         ui.add_space(PADDING);
@@ -1006,15 +629,15 @@ impl SimpleLayer {
         if large {
             let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
             ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                .unwrap_or_default()).prefix("Tile X: "));
+                .unwrap_or_default()).prefix("TilePage X: "));
             ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                .unwrap_or_default()).prefix("Tile Y: "));
+                .unwrap_or_default()).prefix("TilePage Y: "));
 
             ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
             ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
         } else {
-            ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("Tile X: "));
-            ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("Tile Y: "));
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
 
             if self.large_coords.is_some() {
                 self.large_coords.take();
@@ -1031,7 +654,7 @@ impl SimpleLayer {
     pub fn statue_layer_menu(&mut self, ui: &mut Ui, tile_info: Vec<(String, [u32;2])>) {
         let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
-        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile);
+        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
         
         egui::ComboBox::from_label("State")
             .selected_text(state.name())
@@ -1049,26 +672,26 @@ impl SimpleLayer {
         ui.label("Note: only DEFAULT is known to work v50.05");
 
         ui.add_space(PADDING);
-        egui::ComboBox::from_label("Tile")
-            .selected_text(&self.tile)
+        egui::ComboBox::from_label("TilePage")
+            .selected_text(&self.tile_name)
             .show_ui(ui, |ui| {
             for t in &tile_names {
-                ui.selectable_value(&mut self.tile, t.clone(), t);
+                ui.selectable_value(&mut self.tile_name, t.clone(), t);
             }
-            ui.selectable_value(&mut self.tile, String::new(), "Custom");
+            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
         });
-        if !tile_names.contains(&self.tile) {
+        if !tile_names.contains(&self.tile_name) {
             ui.label("Custom tile name:");
-            ui.text_edit_singleline(&mut self.tile);
+            ui.text_edit_singleline(&mut self.tile_name);
         }
 
         ui.add_space(PADDING);
         let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
 
         ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-            .unwrap_or_default()).prefix("Tile X: "));
+            .unwrap_or_default()).prefix("TilePage X: "));
         ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-            .unwrap_or_default()).prefix("Tile Y: "));
+            .unwrap_or_default()).prefix("TilePage Y: "));
 
         ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
         ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
@@ -1086,7 +709,7 @@ impl SimpleLayer {
                 format!(
                     "\t\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS:{}]\n",
                     self.state.name(),
-                    self.tile.with_boundaries(&[Boundary::Space])
+                    self.tile_name.with_boundaries(&[Boundary::Space])
                         .to_case(Case::UpperSnake)
                         .to_string(),
                     self.coords[0],
@@ -1099,7 +722,7 @@ impl SimpleLayer {
                 format!(
                     "\t[{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
                     self.state.name(),
-                    self.tile.with_boundaries(&[Boundary::Space])
+                    self.tile_name.with_boundaries(&[Boundary::Space])
                         .to_case(Case::UpperSnake)
                         .to_string(),
                     self.coords[0],
@@ -1113,7 +736,7 @@ impl SimpleLayer {
                 format!(
                     "\t\t[{}:{}:{}:{}:AS_IS:{}]\n",
                     self.state.name(),
-                    self.tile.with_boundaries(&[Boundary::Space])
+                    self.tile_name.with_boundaries(&[Boundary::Space])
                         .to_case(Case::UpperSnake)
                         .to_string(),
                     self.coords[0],
@@ -1124,7 +747,7 @@ impl SimpleLayer {
                 format!(
                     "\t[{}:{}:{}:{}:AS_IS]\n",
                     self.state.name(),
-                    self.tile.with_boundaries(&[Boundary::Space])
+                    self.tile_name.with_boundaries(&[Boundary::Space])
                         .to_case(Case::UpperSnake)
                         .to_string(),
                     self.coords[0],
@@ -1139,7 +762,7 @@ impl SimpleLayer {
             format!(
                 "\t[{}:{}:{}:{}:{}:{}]\n",
                 self.state.name(),
-                self.tile.with_boundaries(&[Boundary::Space])
+                self.tile_name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
                 self.coords[0],
@@ -1155,7 +778,7 @@ impl SimpleLayer {
 pub struct Layer {
     pub name: String,                     //LAYER_NAME for patterning
     pub conditions: Vec<Condition>,       //Set of condition(s) that layer displays in
-    pub tile: String,                     //TILE_NAME of image
+    pub tile_name: String,                     //TILE_NAME of image
     pub coords: [u32; 2],               //x,y coordinates of layer on image in tiles
     pub large_coords: Option<[u32; 2]>, //(optional) x2,y2 coordinates of bottom right corner of layer in tiles
 }
@@ -1164,7 +787,7 @@ impl Layer {
         Layer {
             name: "(new)".to_string(),
             conditions: vec![Condition::default()],
-            tile: String::new(),
+            tile_name: String::new(),
             coords: [0, 0],
             large_coords: None,
         }
@@ -1175,7 +798,7 @@ impl Layer {
         let layer = self.clone();
         let [x1, y1] = &mut self.coords;
         let conditions = &mut self.conditions;
-        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile);
+        let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
 
         ui.separator();
 
@@ -1184,20 +807,20 @@ impl Layer {
             ui[0].text_edit_singleline(&mut self.name);
             ui[0].add_space(PADDING);
             
-            egui::ComboBox::from_label("Tile:")
-            .selected_text(&self.tile)
+            egui::ComboBox::from_label("TilePage:")
+            .selected_text(&self.tile_name)
             .show_ui(&mut ui[0], |ui| {
-                ui.selectable_value(&mut self.tile, String::from("(select)"), "(select)");
+                ui.selectable_value(&mut self.tile_name, String::from("(select)"), "(select)");
                 for tile_name in tile_names {
                     ui.selectable_value(
-                        &mut self.tile,
+                        &mut self.tile_name,
                         tile_name.to_string(),
                         tile_name,
                     );
                 }
-                ui.selectable_value(&mut self.tile, String::new(), "New Tile");
+                ui.selectable_value(&mut self.tile_name, String::new(), "New TilePage");
             });
-            ui[0].text_edit_singleline(&mut self.tile);
+            ui[0].text_edit_singleline(&mut self.tile_name);
 
             ui[0].add_space(PADDING);
             let mut large = self.large_coords.is_some();
@@ -1206,15 +829,15 @@ impl Layer {
             if large {
                 let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
                 ui[0].add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                    .unwrap_or_default()).prefix("Tile X: "));
+                    .unwrap_or_default()).prefix("TilePage X: "));
                 ui[0].add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                    .unwrap_or_default()).prefix("Tile Y: "));
+                    .unwrap_or_default()).prefix("TilePage Y: "));
 
                 ui[0].add(egui::Slider::new(x2, 0..=2).prefix("X + "));
                 ui[0].add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
             } else {
-                ui[0].add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("Tile X: "));
-                ui[0].add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("Tile Y: "));
+                ui[0].add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
+                ui[0].add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
 
                 if self.large_coords.is_some() {
                     self.large_coords.take();
@@ -1273,7 +896,7 @@ impl Layer {
                 self.name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
-                self.tile.with_boundaries(&[Boundary::Space])
+                self.tile_name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
                 self.coords[0],
@@ -1287,7 +910,7 @@ impl Layer {
                 self.name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
-                self.tile.with_boundaries(&[Boundary::Space])
+                self.tile_name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
                 self.coords[0],
@@ -2517,7 +2140,7 @@ impl Condition {
                         .prefix("Modifier threshold: "),
                 );
 
-                egui::ComboBox::from_label("Tile for swapped layer: ")
+                egui::ComboBox::from_label("TilePage for swapped layer: ")
                     .selected_text(tile.clone())
                     .show_ui(ui, |ui| {
                     ui.selectable_value(tile, String::from(""), "(select)");
@@ -2533,15 +2156,15 @@ impl Condition {
                 if large {
                     let [x2, y2] = large_coords.get_or_insert([0, 0]);
                     ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                        .unwrap_or_default()).prefix("Tile X: "));
+                        .unwrap_or_default()).prefix("TilePage X: "));
                     ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                        .unwrap_or_default()).prefix("Tile Y: "));
+                        .unwrap_or_default()).prefix("TilePage Y: "));
 
                     ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
                     ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
                 } else {
-                    ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("Tile X: "));
-                    ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("Tile Y: "));
+                    ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
+                    ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
 
                     if large_coords.is_some() {
                         large_coords.take();
@@ -2796,77 +2419,366 @@ impl Condition {
     }
 }
 
-#[derive(Clone, Default, Debug)]
-pub struct TilePage {
-    pub name: String,     //file name of tile_set_file_name.txt
-    pub tiles: Vec<Tile>, //set of tiles defined in this file
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum GraphicsFile {
+    #[default]
+    DefaultFile,
+    CreatureFile(String, Vec<Creature>),
+    StatueCreatureFile(String, Vec<Statue>),
+    PlantFile(String, Vec<Plant>),
+    TileGraphicsFile(String, Vec<TileGraphics>),
+    PaletteFile(String, Vec<Palette>),
+    ASCIIFile(String, Vec<ASCIIGraphics>),
 }
-impl TilePage {
-    pub fn new() -> TilePage {
-        TilePage {
-            name: String::from("(new)"),
-            tiles: vec![Tile::new()],
-        }
+impl RAW for GraphicsFile {
+    fn new() -> Self {
+        Self::default()
     }
 
-    fn display(&self, path: &path::PathBuf) -> Result<()> {
-        let tile_page_file = fs::File::create(
-            path
-            .join("graphics")
-            .join(format!("tile_page_{}.txt",
-            self.name.clone()
-            .with_boundaries(&[Boundary::Space])
-            .to_case(Case::Snake)))
-        )?;
+    fn read(_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        let mut buffer = Vec::with_capacity(100);
+        let mut raw_buffer = Vec::with_capacity(100);
+        let buffer_len = buffer.len();
+        let mut file_type = Self::default();
 
-        let mut tile_page_writer = io::LineWriter::new(tile_page_file);
+        let file_path = path.unwrap_or(&path::PathBuf::new()).to_path_buf();
+        let f = fs::File::open(&file_path)?;
+        let lines = io::BufReader::new(f).lines()
+            .map(|l| l.expect("should always be a valid line."));//todo error def
+
+        //first line must match file name.
+        let name = file_path
+            .file_name().get_or_insert(&OsStr::new("no_name"))
+            .to_str().get_or_insert("no_name")
+            .replace(".txt", "").trim().to_string();
         
-        tile_page_writer.write_all(format!(
-            "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-            self.name
-            .with_boundaries(&[Boundary::Space])
-            .to_case(Case::Snake)
-            ).as_bytes()
-        )?;
+        //read line-by-line to find start of graphics object and identify type.
+        //create vector (buffer) of all lines between relevant headers and import each buffer.
+        for (i_line, raw_line) in lines.enumerate() {
+            let line_vec = Graphics::read_brackets(&raw_line);
+            buffer.push(line_vec.clone());
+            raw_buffer.push(raw_line.clone());
 
-        for tile in self.tiles.iter() {
-            tile_page_writer.write_all(tile.display()
-                .as_bytes())?;
+            match line_vec[0].as_str() {
+                "OBJECT" => {
+                    match line_vec[1].as_str() {
+                        "TILE_PAGE" => {
+                            todo!()
+                        },
+                        "GRAPHICS" => {
+
+                        },
+                        _ => {
+                            return Err(DFGHError::ImportBufferError(i_line, buffer_len, 0..=line_vec.len(), DFGHError::ImportUnknownError.to_string()));//todo more specific import error
+                        }
+                    }
+                },
+                "" => {},
+                _ => {}
+            }
+
+
+
+            // //start filling the buffer at first heading, then process and clear it at next heading.
+            // if line_vec.get(0).is_some() {
+            //     if line_vec[0].eq("TILE_PAGE") {
+            //         if buffer.len() > 0 {
+            //             //if the buffer is populated process/clear it and store.
+            //             // wrap_import_error<T>(e: DFGHError, buffer_start: usize, file_path: &file_path::PathBuf) -> Result<T> {
+            //             match Self::import_tile(buffer.clone(), raw_buffer.clone(), file_path) {
+            //                 Ok(tile) => tiles.push(tile),
+            //                 Err(e) => return wrap_import_error(e, buffer_start, file_path),
+            //             }
+            //             raw_buffer.clear();
+            //         }
+            //         buffer_start = i_line;
+            //         buffer.push(line_vec);
+            //         raw_buffer.push(raw_line);
+            //     } else if line_vec[0].eq("OBJECT") {
+            //         //do nothing
+            //     } else {
+            //         buffer.push(line_vec);
+            //         raw_buffer.push(raw_line);
+            //     }
+            // }
         }
-        
-        tile_page_writer.flush()?;
 
-        Ok(())
+        // Ok(TilePageFile {name, tiles})
+        Ok(todo!())
+    }
+
+    fn display(&self) -> String {
+        todo!()
+        // let tile_page_file = fs::File::create(
+        //     path
+        //     .join("graphics")
+        //     .join(format!("tile_page_{}.txt",
+        //     self.name.clone()
+        //     .with_boundaries(&[Boundary::Space])
+        //     .to_case(Case::Snake)))
+        // )?;
+
+        // let mut tile_page_writer = io::LineWriter::new(tile_page_file);
+        
+        // tile_page_writer.write_all(format!(
+        //     "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
+        //     self.name
+        //     .with_boundaries(&[Boundary::Space])
+        //     .to_case(Case::Snake)
+        //     ).as_bytes()
+        // )?;
+
+        // for tile in self.tiles.iter() {
+        //     tile_page_writer.write_all(tile.display()
+        //         .as_bytes())?;
+        // }
+        
+        // tile_page_writer.flush()?;
+
+        // Ok(String)
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Tile {
-    pub name: String,           //all-caps NAME of tile
-    pub filename: String,       //file path of image.png
-    pub image_size: [u32; 2], //size of image in pixels
-    pub tile_size: [u32; 2],  //size of tile in pixels
+pub struct Statue {
+    
 }
-impl Tile {
-    pub fn new() -> Tile {
-        Tile {
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Plant {
+    
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TileGraphics {
+    
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Palette {
+    
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ASCIIGraphics {
+    
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TilePageFile {
+    pub name: String,     //file name of tile_set_file_name.txt
+    pub tile_pages: Vec<TilePage>, //set of tiles defined in this file
+}
+impl RAW for TilePageFile {
+    fn new() -> Self {
+        TilePageFile {
+            name: String::from("(new)"),
+            tile_pages: vec![TilePage::new()],
+        }
+    }
+
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        let mut block_buffer: Vec<Vec<String>> = Vec::with_capacity(100);
+        let mut tile_pages = Vec::new();
+
+        let blank_path = path::PathBuf::new();
+        let empty = Vec::new();
+        let file_path = path.unwrap_or(&blank_path);
+
+        //tile page file name must match file name.
+        let name = file_path
+            .file_name().get_or_insert(&OsStr::new("no_name"))
+            .to_str().get_or_insert("no_name")
+            .replace(".txt", "").trim().to_string();
+        
+        //create vector (buffer) of all lines between relevant headers and import each buffer.
+        for (rel_line, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
+            if len >=1 {
+                match line_vec[0].as_str() {
+                    "TILE_PAGE" => {
+                        if block_buffer.len() > 0 {
+                            match TilePage::read(block_buffer.clone(), empty.clone(), path) {
+                                Ok(tile_page) => {
+                                    if tile_page.ne(&TilePage::new()) {
+                                        tile_pages.push(tile_page.clone());
+                                    }
+                                },
+                                Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
+                            }
+                            block_buffer.clear();
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            block_buffer.push(line_vec.clone());
+        }
+        let last_line = buffer.len();
+        if block_buffer.len() > 0 {
+            match TilePage::read(block_buffer.clone(), empty.clone(), path) {
+                Ok(tile_page) => {
+                    tile_pages.push(tile_page.clone());
+                },
+                Err(e) => return wrap_import_file_error(raw_buffer, e, last_line, file_path)
+            }
+            block_buffer.clear();
+        }
+        Ok(TilePageFile {name, tile_pages})
+    }
+
+    fn display(&self) -> String {
+        let mut output = format!(
+            "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
+            self.name
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake)
+        );
+    
+        for tile_page in self.tile_pages.iter() {
+            output.push_str(&tile_page.display());
+        }
+
+        output
+
+
+        // let tile_page_file = fs::File::create(
+        //     path
+        //     .join("graphics")
+        //     .join(format!("tile_page_{}.txt",
+        //     self.name.clone()
+        //     .with_boundaries(&[Boundary::Space])
+        //     .to_case(Case::Snake)))
+        // )?;
+
+        // let mut tile_page_writer = io::LineWriter::new(tile_page_file);
+        
+        // tile_page_writer.write_all(format!(
+        //     "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
+        //     self.name
+        //     .with_boundaries(&[Boundary::Space])
+        //     .to_case(Case::Snake)
+        //     ).as_bytes()
+        // )?;
+
+        // for tile in self.tiles.iter() {
+        //     tile_page_writer.write_all(tile.display()
+        //         .as_bytes())?;
+        // }
+        
+        // tile_page_writer.flush()?;
+
+        // Ok(String)
+    }
+}
+impl Menu for TilePageFile {
+    fn menu(&mut self, ui: &mut Ui) {
+        todo!()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TilePage {
+    pub name: String,
+    pub file_name: String,
+    pub image_size: [u32; 2],
+    pub tile_size: [u32; 2],
+}
+impl RAW for TilePage {
+    fn new() -> Self {
+        TilePage {
             name: "(new)".to_string(),
-            filename: String::new(),
+            file_name: String::new(),
             image_size: [0, 0],
             tile_size: [32, 32],
         }
     }
 
-    pub fn tile_menu(&mut self, ui: &mut Ui) {
+    ///Takes a vector of line vectors and generates a tile from them.
+    fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+        let file_path = path.unwrap_or(&path::PathBuf::new()).to_path_buf();
+        let mut tile_page = TilePage::new();
+        let buffer_len = buffer.len();
+
+        for (i_line, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
+            if len >= 2 {
+                match line_vec[0].as_str() {
+                    "TILE_PAGE" => {
+                        tile_page.name = line_vec[1].clone();
+                    },
+                    "FILE" => {
+                        tile_page.file_name = line_vec[1].clone()
+                            .replace(".png", "")
+                            .replace("images", "")
+                            .split_off(1);
+                    },
+                    "TILE_DIM" => {
+                        if len >= 3 {
+                            tile_page.tile_size =
+                                [buffer_err_wrap!(line_vec[1].parse(), i_line, buffer_len, 1..=1),
+                                buffer_err_wrap!(line_vec[2].parse(), i_line, buffer_len, 2..=2)];
+                        } else {
+                            index_err!(i_line, buffer_len, len, 3, TilePage);
+                        }
+                    },
+                    "PAGE_DIM_PIXELS" => {
+                        // if the image file name is already read attempt to correct the image size based on it.
+                        if !tile_page.file_name.is_empty() {
+                            let image_path = file_path
+                                .parent().expect("This file should have a parent graphics directory if we are reading from it.")
+                                .join("images")
+                                .join(&tile_page.file_name)
+                                .with_extension("png");
+                            
+                            if let Ok(image_dimensions) = image::image_dimensions(image_path) {
+                                tile_page.image_size = [image_dimensions.0, image_dimensions.1];
+                                continue; //skip parsing if reading image works
+                            }
+                        }
+
+                        if len >= 3 {
+                            tile_page.image_size =
+                                [buffer_err_wrap!(line_vec[1].parse(), i_line, buffer_len, 1..=1),
+                                buffer_err_wrap!(line_vec[2].parse(), i_line, buffer_len, 2..=2)];
+                        } else {
+                            index_err!(i_line, buffer_len, len, 3, TilePage);
+                        }
+                    },
+                    "OBJECT"
+                    | "" => {}//do nothing for expected useless lines
+                    _ => {
+                        return Err::<TilePage, DFGHError>(DFGHError::ImportBufferError(i_line, buffer_len, 0..=(len-1), DFGHError::ImportUnknownError.to_string()))
+                    },
+                }
+            }
+        }
+        Ok(tile_page)
+    }
+
+    fn display(&self) -> String {
+        format!(
+            "[TILE_PAGE:{}]\n\t[FILE:images/{}.png]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
+            self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
+            self.file_name.with_boundaries(&[Boundary::Space]).to_case(Case::Snake),
+            self.tile_size[0],
+            self.tile_size[1],
+            self.image_size[0],
+            self.image_size[1]
+        )
+    }
+}
+impl Menu for TilePage {//todo edit menu
+    fn menu(&mut self, ui: &mut Ui) {
         ui.separator();
-        ui.label("Tile token");
+        ui.label("TilePage token");
         ui.text_edit_singleline(&mut self.name);
         ui.add_space(PADDING);
 
         ui.label("Image file path");
         ui.horizontal(|ui| {
             ui.label("/graphics/images/");
-            ui.text_edit_singleline(&mut self.filename);
+            ui.text_edit_singleline(&mut self.file_name);
             ui.label(".png");
         });
         ui.add_space(PADDING);
@@ -2878,7 +2790,7 @@ impl Tile {
         });
         ui.add_space(PADDING);
 
-        ui.label("Tile size (pixels)");
+        ui.label("TilePage size (pixels)");
         ui.horizontal(|ui| {
             ui.add(egui::Slider::new(&mut self.tile_size[0], 0..=64).prefix("Width: "));
             ui.add(egui::Slider::new(&mut self.tile_size[1], 0..=96).prefix("Height: "));
@@ -2890,16 +2802,380 @@ impl Tile {
             ui.add(egui::Label::new(self.display()).wrap(false));
         });
     }
-
-    fn display(&self) -> String {
-        format!(
-            "[TILE_PAGE:{}]\n\t[FILE:images/{}.png]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
-            self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-            self.filename.with_boundaries(&[Boundary::Space]).to_case(Case::Snake),
-            self.tile_size[0],
-            self.tile_size[1],
-            self.image_size[0],
-            self.image_size[1]
-        )
-    }
 }
+
+
+
+
+    // fn import_tile_page(path: &path::PathBuf) -> Result<TilePageFile> {
+    //     let mut tiles = Vec::new();
+    //     let mut buffer = Vec::with_capacity(10);
+    //     let mut raw_buffer = Vec::with_capacity(10);
+    //     let mut buffer_start = 0;
+
+    //     let f = fs::File::open(path)?;
+
+    //     let lines = io::BufReader::new(f).lines()
+    //         .map(|l| l.expect("should always be a valid line."));
+
+    //     //first line must match file name and is tile page name.
+    //     let name = path
+    //         .file_name().get_or_insert(&OsStr::new("no_name"))
+    //         .to_str().get_or_insert("no_name")
+    //         .replace("tile_page_", "")
+    //         .replace(".txt", "").trim().to_string();
+        
+    //     //read line-by-line to find starts of all tile definitions.
+    //     //create vectors of all lines between tile headers and import each vector.
+    //     for (i_line, raw_line) in lines.enumerate() {
+    //         let line_vec = Self::read_brackets(&raw_line);
+
+    //         //start filling the buffer at tile start, then process and clear it at next tile start.
+    //         if line_vec.get(0).is_some() {
+    //             if line_vec[0].eq("TILE_PAGE") {
+    //                 if buffer.len() > 0 {
+    //                     //if the buffer is populated process/clear it and store.
+    //                     // wrap_import_error<T>(e: DFGHError, buffer_start: usize, path: &path::PathBuf) -> Result<T> {
+    //                     match Self::import_tile(buffer.clone(), raw_buffer.clone(), path) {
+    //                         Ok(tile) => tiles.push(tile),
+    //                         Err(e) => return wrap_import_error(e, buffer_start, path),
+    //                     }
+    //                     raw_buffer.clear();
+    //                 }
+    //                 buffer_start = i_line;
+    //                 buffer.push(line_vec);
+    //                 raw_buffer.push(raw_line);
+    //             } else if line_vec[0].eq("OBJECT") {
+    //                 //do nothing
+    //             } else {
+    //                 buffer.push(line_vec);
+    //                 raw_buffer.push(raw_line);
+    //             }
+    //         }
+    //     }
+
+    //     Ok(TilePageFile {name, tiles})
+    // }
+
+    // fn import_creature_file(path: &path::PathBuf) -> Result<CreatureFile> {
+    //     let mut creatures = Vec::new();
+    //     let mut buffer = Vec::with_capacity(10);
+    //     let mut raw_buffer = Vec::with_capacity(10);
+    //     let mut buffer_start = 0;
+
+    //     let f = fs::File::open(path)?;
+
+    //     let lines = io::BufReader::new(f).lines()
+    //         .map(|l| l.expect("should always be a valid line."));
+
+    //     //first line must match file name and is tile page name.
+    //     let name = path
+    //         .file_name().get_or_insert(&OsStr::new("no_name"))
+    //         .to_str().get_or_insert("no_name")
+    //         .replace("graphics_creatures_", "")
+    //         .replace(".txt", "").trim().to_string();
+    
+    //     //read line-by-line to find starts of all tile definitions.
+    //     //create vectors of all lines between tile headers and import each vector.
+    //     for (i_line, raw_line) in lines.enumerate() {
+    //         let line_vec = Self::read_brackets(&raw_line);
+
+    //         //start filling the buffer at tile start, then process and clear it at next tile start.
+    //         match line_vec.get(0).unwrap_or(&"".to_string()).as_str() {
+    //             "CREATURE_GRAPHICS"
+    //             | "CREATURE_CASTE_GRAPHICS"
+    //             | "STATUE_CREATURE_GRAPHICS"
+    //             | "STATUE_CREATURE_CASTE_GRAPHICS" => {
+    //                 if buffer.len() > 0 {
+    //                     //if the buffer is populated process/clear it and store.
+    //                     match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
+    //                         Ok(creature) => creatures.push(creature),
+    //                         Err(e) => return wrap_import_error(e, buffer_start, path),
+    //                     }
+    //                     buffer.clear();
+    //                     raw_buffer.clear();
+    //                 }
+    //                 buffer_start = i_line;
+    //                 buffer.push(line_vec);
+    //                 raw_buffer.push(raw_line);
+    //             },
+    //             "OBJECT"
+    //             | "" => {
+    //                 //do nothing
+    //             },
+    //             _ => {
+    //                 buffer.push(line_vec);
+    //                 raw_buffer.push(raw_line);
+    //             }
+    //         }
+    //     }
+
+    //     if buffer.len() > 0 {
+    //         //if the buffer is populated process/clear it and store.
+    //         match Self::import_creature(buffer.clone(), raw_buffer.clone()) {
+    //             Ok(creature) => creatures.push(creature),
+    //             Err(e) => return wrap_import_error(e, buffer_start, path),
+    //         }
+    //     }
+
+    //     Ok(CreatureFile{
+    //         name,
+    //         creatures,
+    //     })
+    // }
+
+    // fn import_creature(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Creature> {
+    //     let mut creature = Creature::new();
+    //     let mut graphics_type = LayerSet::Empty;
+    //     let mut caste = None;
+    //     let mut ls_buffer = Vec::new();
+
+    //     for (i_b_line, line_vec) in buffer.iter().enumerate() {
+    //         let len = line_vec.len();
+    //         match line_vec[0].as_str() {
+    //             "CREATURE_GRAPHICS" => {
+    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+    //                 if len >= 2 {
+    //                     creature.name = line_vec[1].clone();
+    //                     graphics_type = LayerSet::Simple(Vec::new());
+    //                 } else {
+    //                     index_err!(i_b_line, len, 2, raw_buffer, Creature);
+    //                 }
+    //             },
+    //             "CREATURE_CASTE_GRAPHICS" => {
+    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+    //                 if len >= 3 {
+    //                     creature.name = line_vec[1].clone();
+    //                     caste = Some(State::from(line_vec[2].clone()));
+    //                     graphics_type = LayerSet::Simple(Vec::new());
+    //                 } else {
+    //                     index_err!(i_b_line, len, 3, raw_buffer, Creature);
+    //                 }
+    //             },
+    //             "STATUE_CREATURE_GRAPHICS" => {
+    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+    //                 if len >= 2 {
+    //                     creature.name = line_vec[1].clone();
+    //                     graphics_type = LayerSet::Statue(Vec::new());
+    //                 } else {
+    //                     index_err!(i_b_line, len, 2, raw_buffer, Creature);
+    //                 }
+    //             },
+    //             "STATUE_CREATURE_CASTE_GRAPHICS" => {
+    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+    //                 if len >= 3 {
+    //                     creature.name = line_vec[1].clone();
+    //                     caste = Some(State::from(line_vec[2].clone()));
+    //                     graphics_type = LayerSet::Statue(Vec::new());
+    //                 } else {
+    //                     index_err!(i_b_line, len, 3, raw_buffer, Creature);
+    //                 }
+    //             },
+    //             "LAYER_SET" => {
+    //                 ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+    //                 if len >= 2 {
+    //                     graphics_type = LayerSet::Layered(State::from(line_vec[1].clone()), Vec::new());
+    //                 } else {
+    //                     index_err!(i_b_line, len, 2, raw_buffer, Creature);
+    //                 }
+    //             },
+    //             _ => {
+    //                 match graphics_type {
+    //                     LayerSet::Empty => {},//do nothing, haven't entered creature somehow
+    //                     LayerSet::Simple(_) => {
+    //                         if len >= 4 {
+    //                             let mut reduced_line = line_vec.clone();
+    //                             reduced_line.retain(|l| l.ne("AS_IS"));
+    //                             let reduced_len = reduced_line.len();
+
+    //                             if reduced_len == 4 || reduced_len == 5 {
+    //                                 creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
+    //                                     state: State::from(line_vec[0].clone()),
+    //                                     tile: reduced_line[1].clone(),
+    //                                     coords:
+    //                                         [buffer_err_wrap!(reduced_line[2].parse(), i_b_line, raw_buffer, 2..=2),
+    //                                         buffer_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3)],
+    //                                     large_coords: None,
+    //                                     sub_state: if reduced_line.get(4).is_some() {
+    //                                         Some(State::from(reduced_line[4].clone()))
+    //                                     } else {None},
+    //                                 }]));
+    //                             } else if reduced_len == 7 || reduced_len == 8 {
+    //                                 let (x,y) = 
+    //                                     (buffer_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3),
+    //                                     buffer_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4));
+    //                                 let (x_l,y_l) = 
+    //                                     (buffer_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5),
+    //                                     buffer_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6));
+    //                                 creature.graphics_type.push(LayerSet::Simple(vec![SimpleLayer{
+    //                                     state: State::from(line_vec[0].clone()),
+    //                                     tile: reduced_line[1].clone(),
+    //                                     coords: [x, y],
+    //                                     large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
+    //                                     sub_state: if reduced_line.get(7).is_some() {
+    //                                         Some(State::from(reduced_line[7].clone()))
+    //                                     } else {None},
+    //                                 }]));
+    //                             } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
+    //                                 index_err!(i_b_line, len, 7, raw_buffer, Creature);
+    //                             } else {
+    //                                 index_err!(i_b_line, len, 4, raw_buffer, Creature);
+    //                             }
+    //                         } else {
+    //                             index_err!(i_b_line, len, 4, raw_buffer, Creature);
+    //                         }
+    //                     },
+    //                     LayerSet::Statue(_) => {
+    //                         if len >= 6 {
+    //                             let (x,y) = 
+    //                                 (buffer_err_wrap!(line_vec[2].parse::<u32>(), i_b_line, raw_buffer, 2..=2),
+    //                                 buffer_err_wrap!(line_vec[3].parse::<u32>(), i_b_line, raw_buffer, 3..=3));
+    //                             let (x_l,y_l) = 
+    //                                 (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
+    //                                 buffer_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
+    //                             creature.graphics_type.push(LayerSet::Statue(vec![SimpleLayer{
+    //                                 state: State::from(line_vec[0].clone()),
+    //                                 tile: line_vec[1].clone(),
+    //                                 coords: [x, y],
+    //                                 large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
+    //                                 sub_state: caste,
+    //                             }]));
+    //                         } else {
+    //                             index_err!(i_b_line, len, 6, raw_buffer, Creature);
+    //                         }
+    //                         break;
+    //                     },
+    //                     LayerSet::Layered(_, _) => {
+    //                         ls_buffer.push(line_vec.clone());
+    //                     },
+    //                 }
+    //             },
+    //         }
+    //     }
+
+    //     let i_b_line = buffer.len() - 1;
+    //     ls_push!(creature, graphics_type, ls_buffer, i_b_line, raw_buffer);
+
+    //     Ok(creature)
+    // }
+
+    // fn import_layer_set(state: State, ls_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerSet> {
+    //     let mut layer_groups = Vec::new();
+    //     let mut lg_buffer = Vec::new();
+
+    //     for (i_b_line, line_vec) in ls_buffer.iter().enumerate() {
+    //         match line_vec[0].as_str() {
+    //             "LAYER_SET" => {},//do nothing
+    //             "LAYER_GROUP" => {//($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident)
+    //                 lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
+    //                 lg_buffer.push(line_vec.clone());
+    //             },
+    //             "END_LAYER_GROUP" => {
+    //                 lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
+    //                 lg_buffer.push(line_vec.clone());
+    //             },
+    //             _ => {
+    //                 lg_buffer.push(line_vec.clone());
+    //             }
+    //         }
+    //     }
+
+    //     let i_b_line = ls_buffer.len() - 1;
+    //     lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
+
+    //     Self::rename_layer_groups(state.clone(), &mut layer_groups);
+        
+    //     Ok(LayerSet::Layered(state, layer_groups))
+    // }
+
+    // fn import_layer_group(lg_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerGroup> {
+    //     let name = String::new();
+    //     let mut layers = Vec::new();
+    //     let mut l_buffer = Vec::new();
+
+    //     for (i_b_line, line_vec) in lg_buffer.iter().enumerate() {
+    //         match line_vec[0].as_str() {
+    //             "LAYER_GROUP" | "END_LAYER_GROUP" => {},
+    //             "LAYER" => {
+    //                 if !l_buffer.is_empty() {
+    //                     layers.push(
+    //                         buffer_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
+    //                     );
+    //                     l_buffer.clear();
+    //                 }
+    //                 l_buffer.push(line_vec.clone());
+    //             },
+    //             _ => {
+    //                 l_buffer.push(line_vec.clone());
+    //             },
+    //         }
+    //     }
+        
+    //     let i_b_line = lg_buffer.len() - 1;
+    //     if !l_buffer.is_empty() {
+    //         layers.push(
+    //             buffer_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
+    //         );
+    //         l_buffer.clear();
+    //     }
+
+    //     Ok(LayerGroup {name, layers})
+    // }
+
+    // fn import_layer(l_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<Layer> {
+    //     let mut layer = Layer::new();
+    //     let mut conditions = Vec::new();
+    //     let mut i_start = 0;
+
+    //     for (i_b_line, line_vec) in l_buffer.iter().enumerate() {
+    //         let len = line_vec.len();
+    //         match line_vec[0].as_str() {
+    //             "LAYER" => {
+    //                 if len >= 5 {
+    //                     let mut reduced_line = line_vec.clone();
+    //                     reduced_line.retain(|l| l.ne("AS_IS"));
+    //                     let reduced_len = reduced_line.len();
+
+    //                     if reduced_len == 5 {
+    //                         layer = Layer {
+    //                             name: reduced_line[1].clone(),
+    //                             tile: reduced_line[2].clone(),
+    //                             coords:
+    //                                 [buffer_err_wrap!(reduced_line[3].parse(), i_b_line, raw_buffer, 3..=3),
+    //                                 buffer_err_wrap!(reduced_line[4].parse(), i_b_line, raw_buffer, 4..=4)],
+    //                             large_coords: None,
+    //                             conditions: conditions.clone(),
+    //                         };
+    //                     } else if reduced_len == 8 {
+    //                         let (x,y) = 
+    //                             (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_b_line, raw_buffer, 4..=4),
+    //                             buffer_err_wrap!(line_vec[5].parse::<u32>(), i_b_line, raw_buffer, 5..=5));
+    //                         let (x_l,y_l) = 
+    //                             (buffer_err_wrap!(line_vec[6].parse::<u32>(), i_b_line, raw_buffer, 6..=6),
+    //                             buffer_err_wrap!(line_vec[7].parse::<u32>(), i_b_line, raw_buffer, 7..=7));
+    //                         layer = Layer {
+    //                             name: reduced_line[1].clone(),
+    //                             tile: reduced_line[2].clone(),
+    //                             coords: [x, y],
+    //                             large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
+    //                             conditions: conditions.clone(),
+    //                         };
+    //                     } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
+    //                         index_err!(i_b_line, len, 8, raw_buffer, Layer);
+    //                     } else {
+    //                         index_err!(i_b_line, len, 5, raw_buffer, Layer);
+    //                     }
+    //                 } else {
+    //                     index_err!(i_b_line, len, 5, raw_buffer, Layer);
+    //                 }
+    //             },
+    //             _ => {
+    //                 conditions.push(buffer_err_wrap!(Condition::from(line_vec.clone()), i_b_line, raw_buffer, 0..=0));//todo fix index
+    //             },
+    //         }
+    //     }
+
+    //     layer.conditions = conditions;
+
+    //     Ok(layer)
+    // }

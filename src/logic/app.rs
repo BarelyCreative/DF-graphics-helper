@@ -7,7 +7,7 @@ use std::path;
 
 use crate::PADDING;
 use super::error;
-use crate::{Graphics, TilePage, Tile, CreatureFile, Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State};
+use crate::{RAW, Menu, Graphics, TilePageFile, TilePage, CreatureFile, Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State};
 use error::{DFGHError, Result, error_window};
 
 
@@ -15,9 +15,9 @@ use error::{DFGHError, Result, error_window};
 pub enum MainWindow {
     #[default]
     DefaultMenu,
-    TilePageDefaultMenu,
+    TilePageFileDefaultMenu,
+    TilePageFileMenu,
     TilePageMenu,
-    TileMenu,
     CreatureDefaultMenu,
     CreatureFileMenu,
     CreatureMenu,
@@ -32,8 +32,8 @@ pub enum MainWindow {
 enum ContextData {
     #[default]
     None,
+    TilePageFile(TilePageFile),
     TilePage(TilePage),
-    Tile(Tile),
     CreatureFile(CreatureFile),
     Creature(Creature),
     LayerSet(LayerSet),
@@ -42,14 +42,14 @@ enum ContextData {
     SimpleLayer(SimpleLayer),
     Condition(Condition),
 }
+impl From<TilePageFile> for ContextData {
+    fn from(value: TilePageFile) -> Self {
+        ContextData::TilePageFile(value)
+    }
+}
 impl From<TilePage> for ContextData {
     fn from(value: TilePage) -> Self {
         ContextData::TilePage(value)
-    }
-}
-impl From<Tile> for ContextData {
-    fn from(value: Tile) -> Self {
-        ContextData::Tile(value)
     }
 }
 impl From<CreatureFile> for ContextData {
@@ -91,9 +91,9 @@ impl From<MainWindow> for ContextData {
     fn from(main_window: MainWindow) -> Self {
         match main_window {
             MainWindow::DefaultMenu => ContextData::CreatureFile(CreatureFile::new()),
-            MainWindow::TilePageDefaultMenu => ContextData::TilePage(TilePage::new()),
+            MainWindow::TilePageFileDefaultMenu => ContextData::TilePageFile(TilePageFile::new()),
+            MainWindow::TilePageFileMenu => ContextData::TilePageFile(TilePageFile::new()),
             MainWindow::TilePageMenu => ContextData::TilePage(TilePage::new()),
-            MainWindow::TileMenu => ContextData::Tile(Tile::new()),
             MainWindow::CreatureDefaultMenu => ContextData::Creature(Creature::new()),
             MainWindow::CreatureFileMenu => ContextData::CreatureFile(CreatureFile::new()),
             MainWindow::CreatureMenu => ContextData::Creature(Creature::new()),
@@ -124,8 +124,8 @@ enum Action {
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GraphicsIndices {
+    tile_page_file_index: usize,
     tile_page_index: usize,
-    tile_index: usize,
     creature_file_index: usize,
     creature_index: usize,
     layer_set_index: usize,
@@ -136,8 +136,8 @@ pub struct GraphicsIndices {
 impl GraphicsIndices {
     fn new() -> GraphicsIndices {
         Self {
+            tile_page_file_index: 0,
             tile_page_index: 0,
-            tile_index: 0,
             creature_file_index: 0,
             creature_index: 0,
             layer_set_index: 0,
@@ -150,8 +150,8 @@ impl GraphicsIndices {
 impl From<[usize; 8]> for GraphicsIndices {
     fn from(index_array: [usize; 8]) -> Self {
         GraphicsIndices {
-            tile_page_index:        index_array[0],
-            tile_index:             index_array[1],
+            tile_page_file_index:   index_array[0],
+            tile_page_index:        index_array[1],
             creature_file_index:    index_array[2],
             creature_index:         index_array[3],
             layer_set_index:        index_array[4],
@@ -226,13 +226,13 @@ impl DFGraphicsHelper {
             if let Some(path) = rfd::FileDialog::new()
                 .set_title("Choose Mod Folder")
                 .pick_folder() {
-                let export_result = self.loaded_graphics.display(&path);
+                let export_result = self.loaded_graphics.export(&path);
                 if export_result.is_err() {
                     self.exception = export_result.unwrap_err();
                 };
             }
         } else {
-            let export_result = self.loaded_graphics.display(&self.path);
+            let export_result = self.loaded_graphics.export(&self.path);
             if export_result.is_err() {
                 self.exception = export_result.unwrap_err();
             };
@@ -284,14 +284,14 @@ impl DFGraphicsHelper {
             let mut inner_action = Action::None;
             ui.menu_button("Insert..", |ui| {
                 match selected {
-                    ContextData::TilePage(_) | ContextData::Tile(_) => {
-                        if ui.button("Tile Page").clicked() {
+                    ContextData::TilePageFile(_) | ContextData::TilePage(_) => {
+                        if ui.button("Tile Page File").clicked() {
+                            ui.close_menu();
+                            let data = ContextData::from(TilePageFile::new());
+                            inner_action = Action::Insert(data);
+                        } else if ui.button("Tile Page").clicked() {
                             ui.close_menu();
                             let data = ContextData::from(TilePage::new());
-                            inner_action = Action::Insert(data);
-                        } else if ui.button("Tile").clicked() {
-                            ui.close_menu();
-                            let data = ContextData::from(Tile::new());
                             inner_action = Action::Insert(data);
                         }
                     },
@@ -377,21 +377,21 @@ impl DFGraphicsHelper {
         let indices = &mut self.indices;
 
         match data {
-            ContextData::TilePage(tile_page) => {
-                let tps = &mut graphics.tile_pages;
-                if indices.tile_page_index < tps.len() {
-                    tps.insert(indices.tile_page_index, tile_page.clone());//checked
-                    self.main_window = MainWindow::TilePageMenu;
+            ContextData::TilePageFile(tile_page_file) => {
+                let tps = &mut graphics.tile_page_files;
+                if indices.tile_page_file_index < tps.len() {
+                    tps.insert(indices.tile_page_file_index, tile_page_file.clone());//checked
+                    self.main_window = MainWindow::TilePageFileMenu;
                 }
             },
-            ContextData::Tile(tile) => {
-                let ts = &mut graphics.tile_pages
-                    .get_mut(indices.tile_page_index)
+            ContextData::TilePage(tile_page) => {
+                let ts = &mut graphics.tile_page_files
+                    .get_mut(indices.tile_page_file_index)
                     .ok_or(DFGHError::IndexError)?
-                    .tiles;
-                if indices.tile_index < ts.len() {
-                    ts.insert(indices.tile_index, tile.clone());//checked
-                    self.main_window = MainWindow::TileMenu;
+                    .tile_pages;
+                if indices.tile_page_index < ts.len() {
+                    ts.insert(indices.tile_page_index, tile_page.clone());//checked
+                    self.main_window = MainWindow::TilePageMenu;
                 }
             },
             ContextData::CreatureFile(creature_file) => {
@@ -514,28 +514,28 @@ impl DFGraphicsHelper {
         let indices = &mut self.indices;
 
         match selected {
-            ContextData::TilePage(_) => {
-                let tps = &mut graphics.tile_pages;
-                if indices.tile_page_index < tps.len() {
-                    tps.remove(indices.tile_page_index);//checked
-                    if indices.tile_page_index >=1 {
-                        indices.tile_page_index -= 1;
+            ContextData::TilePageFile(_) => {
+                let tps = &mut graphics.tile_page_files;
+                if indices.tile_page_file_index < tps.len() {
+                    tps.remove(indices.tile_page_file_index);//checked
+                    if indices.tile_page_file_index >=1 {
+                        indices.tile_page_file_index -= 1;
                     } else {
-                        self.main_window = MainWindow::TilePageDefaultMenu;
+                        self.main_window = MainWindow::TilePageFileDefaultMenu;
                     }
                 }
             },
-            ContextData::Tile(_) => {
-                let ts = &mut graphics.tile_pages
-                    .get_mut(indices.tile_page_index)
+            ContextData::TilePage(_) => {
+                let ts = &mut graphics.tile_page_files
+                    .get_mut(indices.tile_page_file_index)
                     .ok_or(DFGHError::IndexError)?
-                    .tiles;
-                if indices.tile_index < ts.len() {
-                    ts.remove(indices.tile_index);//checked
-                    if indices.tile_index >=1 {
-                        indices.tile_index -= 1;
+                    .tile_pages;
+                if indices.tile_page_index < ts.len() {
+                    ts.remove(indices.tile_page_index);//checked
+                    if indices.tile_page_index >=1 {
+                        indices.tile_page_index -= 1;
                     } else {
-                        self.main_window = MainWindow::TilePageMenu;
+                        self.main_window = MainWindow::TilePageFileMenu;
                     }
                 }
             },
@@ -684,14 +684,14 @@ impl DFGraphicsHelper {
         let graphics = &mut self.loaded_graphics;
 
         if ui
-            .add(egui::Label::new("Tile Pages").sense(Sense::click()))
+            .add(egui::Label::new("Tile Page Files").sense(Sense::click()))
             .clicked()
         {
-            self.main_window = MainWindow::TilePageDefaultMenu;
+            self.main_window = MainWindow::TilePageFileDefaultMenu;
         };
-        for (i_tile_page, tile_page) in graphics.tile_pages.iter_mut().enumerate() {
+        for (i_tile_page_file, tile_page_file) in graphics.tile_page_files.iter_mut().enumerate() {
             let id_t = ui.make_persistent_id(
-                format!("tile_page{}", i_tile_page)
+                format!("tile_page_file{}", i_tile_page_file)
             );
             egui::collapsing_header::CollapsingState::load_with_default_open(
                 ctx,
@@ -699,31 +699,31 @@ impl DFGraphicsHelper {
                 true,
             )
             .show_header(ui, |ui| {
-                let tilepage_response = ui.add(egui::Label::new(
-                    format!("Tile Page: {}", &tile_page.name))
+                let tile_page_file_response = ui.add(egui::Label::new(
+                    format!("{}", &tile_page_file.name))
                     .sense(Sense::click()));
-                if tilepage_response.clicked() {
-                    self.indices = [i_tile_page, 0, 0, 0, 0, 0, 0, 0].into();
-                    self.main_window = MainWindow::TilePageMenu;
+                if tile_page_file_response.clicked() {
+                    self.indices = [i_tile_page_file, 0, 0, 0, 0, 0, 0, 0].into();
+                    self.main_window = MainWindow::TilePageFileMenu;
                 }
-                tilepage_response.context_menu(|ui| {
-                    self.indices = [i_tile_page, 0, 0, 0, 0, 0, 0, 0].into();
-                    self.action = Self::context(ui, ContextData::from(tile_page.clone()));
+                tile_page_file_response.context_menu(|ui| {
+                    self.indices = [i_tile_page_file, 0, 0, 0, 0, 0, 0, 0].into();
+                    self.action = Self::context(ui, ContextData::from(tile_page_file.clone()));
                 });
             })
             .body(|ui| {
-                for (i_tile, tile) in tile_page.tiles.iter_mut().enumerate() {
-                    let tile_response = ui.add(egui::Label::new(
-                        format!("{}", &tile.name))
+                for (i_tile_page, tile_page) in tile_page_file.tile_pages.iter_mut().enumerate() {
+                    let tile_page_response = ui.add(egui::Label::new(
+                        format!("{}", &tile_page.name))
                         .wrap(false)
                         .sense(Sense::click()));
-                    if tile_response.clicked() {
-                        self.indices = [i_tile_page, i_tile, 0, 0, 0, 0, 0, 0].into();
-                        self.main_window = MainWindow::TileMenu;
+                    if tile_page_response.clicked() {
+                        self.indices = [i_tile_page_file, i_tile_page, 0, 0, 0, 0, 0, 0].into();
+                        self.main_window = MainWindow::TilePageMenu;
                     }
-                    tile_response.context_menu(|ui| {
-                        self.indices = [i_tile_page, i_tile, 0, 0, 0, 0, 0, 0].into();
-                        self.action = Self::context(ui, ContextData::from(tile.clone()));
+                    tile_page_response.context_menu(|ui| {
+                        self.indices = [i_tile_page_file, i_tile_page, 0, 0, 0, 0, 0, 0].into();
+                        self.action = Self::context(ui, ContextData::from(tile_page.clone()));
                     });
                 }
             });
@@ -748,7 +748,7 @@ impl DFGraphicsHelper {
             )
             .show_header(ui, |ui| {
                 let creature_file_response = ui.add(egui::Label::new(
-                    format!("File: {}", &creature_file.name))
+                    format!("{}", &creature_file.name))
                     .sense(Sense::click()));
                 if creature_file_response.clicked() {
                     self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
@@ -964,12 +964,42 @@ impl DFGraphicsHelper {
         Ok(())
     }
 
-    fn tile_page_default_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        ui.label("Tile Page Menu");
+    fn tile_page_file_default_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.label("Tile Page File Menu");
         ui.separator();
 
-        if ui.small_button("New Tile Page").clicked() {
-            self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
+        if ui.small_button("New Tile Page File").clicked() {
+            self.action = Action::Insert(ContextData::TilePageFile(TilePageFile::new()));
+        }
+        Ok(())
+    }
+
+    fn tile_page_file_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Tile Page File Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::TilePageFile(TilePageFile::new()));
+            }
+        });
+
+        let indices = &mut self.indices;
+
+        if self.loaded_graphics.tile_page_files.is_empty() {
+            self.action = Action::Insert(ContextData::TilePageFile(TilePageFile::new()));
+        } else {
+            let tile_file = self
+                .loaded_graphics
+                .tile_page_files
+                .get_mut(indices.tile_page_file_index)
+                .ok_or(DFGHError::IndexError)?;
+
+            ui.separator();
+            ui.text_edit_singleline(&mut tile_file.name);
+            ui.add_space(PADDING);
+
+            if ui.button("New Tile Page").clicked() {
+                self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
+            }
         }
         Ok(())
     }
@@ -981,57 +1011,27 @@ impl DFGraphicsHelper {
                 self.action = Action::Delete(ContextData::TilePage(TilePage::new()));
             }
         });
-
-        let indices = &mut self.indices;
-
-        if self.loaded_graphics.tile_pages.is_empty() {
-            self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
-        } else {
-            let tile_page = self
-                .loaded_graphics
-                .tile_pages
-                .get_mut(indices.tile_page_index)
-                .ok_or(DFGHError::IndexError)?;
-
-            ui.separator();
-            ui.text_edit_singleline(&mut tile_page.name);
-            ui.add_space(PADDING);
-
-            if ui.button("New Tile").clicked() {
-                self.action = Action::Insert(ContextData::Tile(Tile::new()));
-            }
-        }
-        Ok(())
-    }
-
-    fn tile_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        ui.horizontal(|ui| {
-            ui.label("Tile Menu");
-            if ui.button("Delete").clicked() {
-                self.action = Action::Delete(ContextData::Tile(Tile::new()));
-            }
-        });
         
         let indices = &mut self.indices;
 
-        let tiles = &mut self
+        let tile_pages = &mut self
             .loaded_graphics
-            .tile_pages
-            .get_mut(indices.tile_page_index)
+            .tile_page_files
+            .get_mut(indices.tile_page_file_index)
             .ok_or(DFGHError::IndexError)?
-            .tiles;
+            .tile_pages;
 
-        if tiles.is_empty() {
-            if ui.small_button("Create Tile").clicked() {
-                self.action = Action::Insert(ContextData::Tile(Tile::new()));
+        if tile_pages.is_empty() {
+            if ui.small_button("Create Tile Page").clicked() {
+                self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
             }
         } else {
-            let tile = tiles
-                .get_mut(indices.tile_index)
+            let tile_page = tile_pages
+                .get_mut(indices.tile_page_index)
                 .ok_or(DFGHError::IndexError)?;
-            let file_name = tile.filename.clone();
+            let file_name = tile_page.file_name.clone();
 
-            tile.tile_menu(ui);
+            tile_page.menu(ui);
 
             ui.add_space(PADDING);
             self.preview_image(ui, file_name, None)?;
@@ -1201,11 +1201,11 @@ impl DFGraphicsHelper {
             .get_mut(indices.layer_set_index)
             .ok_or(DFGHError::IndexError)?;
 
-        let tiles: Vec<&Tile> = self
+        let tile_pages: Vec<&TilePage> = self
             .loaded_graphics
-            .tile_pages
+            .tile_page_files
             .iter()
-            .flat_map(|tp| tp.tiles.iter())
+            .flat_map(|tp| tp.tile_pages.iter())
             .collect();
 
         match layer_groups {
@@ -1237,9 +1237,9 @@ impl DFGraphicsHelper {
 
                     ui.add_space(PADDING);
                     let mut file_name = String::new();
-                    for tile in tiles {
-                        if tile.name.to_case(Case::UpperSnake).eq(&simple_layer.tile.to_case(Case::UpperSnake)) {
-                            file_name = tile.filename.clone();
+                    for tile_page in tile_pages {
+                        if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
+                            file_name = tile_page.file_name.clone();
                             break;
                         }
                     }
@@ -1275,9 +1275,9 @@ impl DFGraphicsHelper {
 
                     ui.add_space(PADDING);
                     let mut file_name = String::new();
-                    for tile in tiles {
-                        if tile.name.to_case(Case::UpperSnake).eq(&simple_layer.tile.to_case(Case::UpperSnake)) {
-                            file_name = tile.filename.clone();
+                    for tile_page in tile_pages {
+                        if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
+                            file_name = tile_page.file_name.clone();
                             break;
                         }
                     }
@@ -1319,9 +1319,9 @@ impl DFGraphicsHelper {
 
                     ui.add_space(PADDING);
                     let mut file_name = String::new();
-                    for tile in tiles {
-                        if tile.name.to_case(Case::UpperSnake).eq(&layer.tile.to_case(Case::UpperSnake)) {
-                            file_name = tile.filename.clone();
+                    for tile_page in tile_pages {
+                        if tile_page.name.to_case(Case::UpperSnake).eq(&layer.tile_name.to_case(Case::UpperSnake)) {
+                            file_name = tile_page.file_name.clone();
                             break;
                         }
                     }
@@ -1525,11 +1525,11 @@ impl DFGraphicsHelper {
                 let image = dyn_image.as_bytes();
                 let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
 
-                self.loaded_graphics.tile_pages
-                    .get_mut(self.indices.tile_page_index)
+                self.loaded_graphics.tile_page_files
+                    .get_mut(self.indices.tile_page_file_index)
                     .ok_or(DFGHError::IndexError)?
-                    .tiles
-                    .get_mut(self.indices.tile_index)
+                    .tile_pages
+                    .get_mut(self.indices.tile_page_index)
                     .ok_or(DFGHError::IndexError)?
                     .image_size = [dyn_image.width(), dyn_image.height()];
                 
@@ -1547,10 +1547,10 @@ impl DFGraphicsHelper {
     fn tile_info(&self) -> Vec<(String, [u32; 2])> {
         let mut tile_info: Vec<(String, [u32; 2])> = self
             .loaded_graphics
-            .tile_pages
+            .tile_page_files
             .iter()
-            .flat_map(|tile_page| {
-                tile_page.tiles.iter().map(|t| {
+            .flat_map(|tile_page_file| {
+                tile_page_file.tile_pages.iter().map(|t| {
                     (t.name.clone(),
                     [t.image_size[0].checked_div(t.tile_size[0])
                     .unwrap_or_default()
@@ -1627,18 +1627,18 @@ impl eframe::App for DFGraphicsHelper {
                 .show(ui, |ui| {
                 let result;
                 match self.main_window {
-                    MainWindow::TilePageDefaultMenu =>  result = self.tile_page_default_menu(ui),
-                    MainWindow::CreatureDefaultMenu =>  result = self.creature_default_menu(ui),
-                    MainWindow::TilePageMenu =>         result = self.tile_page_menu(ui),
-                    MainWindow::TileMenu =>             result = self.tile_menu(ui),
-                    MainWindow::CreatureFileMenu =>     result = self.creature_file_menu(ui),
-                    MainWindow::CreatureMenu =>         result = self.creature_menu(ui),
-                    MainWindow::LayerSetMenu =>         result = self.layer_set_menu(ui),
-                    MainWindow::LayerGroupMenu =>       result = self.layer_group_menu(ui),
-                    MainWindow::LayerMenu =>            result = self.layer_menu(ui),
-                    MainWindow::ConditionMenu =>        result = self.condition_menu(ui),
-                    MainWindow::ReferenceMenu =>        result = self.default_menu(ui),
-                    MainWindow::DefaultMenu =>          result = self.default_menu(ui),
+                    MainWindow::TilePageFileDefaultMenu =>  result = self.tile_page_file_default_menu(ui),
+                    MainWindow::CreatureDefaultMenu =>      result = self.creature_default_menu(ui),
+                    MainWindow::TilePageFileMenu =>         result = self.tile_page_file_menu(ui),
+                    MainWindow::TilePageMenu =>             result = self.tile_page_menu(ui),
+                    MainWindow::CreatureFileMenu =>         result = self.creature_file_menu(ui),
+                    MainWindow::CreatureMenu =>             result = self.creature_menu(ui),
+                    MainWindow::LayerSetMenu =>             result = self.layer_set_menu(ui),
+                    MainWindow::LayerGroupMenu =>           result = self.layer_group_menu(ui),
+                    MainWindow::LayerMenu =>                result = self.layer_menu(ui),
+                    MainWindow::ConditionMenu =>            result = self.condition_menu(ui),
+                    MainWindow::ReferenceMenu =>            result = self.default_menu(ui),
+                    MainWindow::DefaultMenu =>              result = self.default_menu(ui),
                 }
                 if result.is_err() {
                     self.exception = result.unwrap_err();
