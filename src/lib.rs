@@ -228,46 +228,20 @@ impl Graphics {
         )
     }
 
-    fn rename_layer_groups(state: State, layer_groups: &mut Vec<LayerGroup>) {
-        for lg in layer_groups.iter_mut() {
-            if lg.name.eq("") {
-                let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
-                layer_names.sort();
-                layer_names.dedup();
-
-                match layer_names.len() {
-                    0 => lg.name = state.name().to_case(Case::Title),
-                    1 => lg.name = layer_names[0].clone(),
-                    _ => {
-                        let mut words: Vec<&str> = layer_names[0].split("_").collect();
-                        words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
-
-                        if words.is_empty() {
-                            lg.name = state.name().to_case(Case::Title);
-                        } else {
-                            lg.name = words.join("_");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     pub fn export(&self, path: &path::PathBuf) -> Result<()> {
-        todo!()
-        // fs::DirBuilder::new()
-        //     .recursive(true)
-        //     .create(path.join("graphics").join("images"))?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(path.join("graphics").join("images"))?;
 
-        // for tile_page in self.tile_pages.iter() {
-        //     tile_page.display(&path)?;
-        // }
+        for tile_page_file in self.tile_page_files.iter() {
+            tile_page_file.export(&path)?;
+        }
 
         // for creature_file in self.creature_files.iter() {
         //     creature_file.display(&path)?;
         // }
 
-        // Ok(())
+        Ok(())
     }
 }
 
@@ -426,6 +400,31 @@ impl LayerSet {
                 });
             }
             _ => {},
+        }
+    }
+
+    fn rename_layer_groups(state: State, layer_groups: &mut Vec<LayerGroup>) {
+        for lg in layer_groups.iter_mut() {
+            if lg.name.eq("") {
+                let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
+                layer_names.sort();
+                layer_names.dedup();
+
+                match layer_names.len() {
+                    0 => lg.name = state.name().to_case(Case::Title),
+                    1 => lg.name = layer_names[0].clone(),
+                    _ => {
+                        let mut words: Vec<&str> = layer_names[0].split("_").collect();
+                        words.retain(|&elem| layer_names.iter().all(|n| n.contains(&elem)));
+
+                        if words.is_empty() {
+                            lg.name = state.name().to_case(Case::Title);
+                        } else {
+                            lg.name = words.join("_");
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2509,33 +2508,6 @@ impl RAW for GraphicsFile {
 
     fn display(&self) -> String {
         todo!()
-        // let tile_page_file = fs::File::create(
-        //     path
-        //     .join("graphics")
-        //     .join(format!("tile_page_{}.txt",
-        //     self.name.clone()
-        //     .with_boundaries(&[Boundary::Space])
-        //     .to_case(Case::Snake)))
-        // )?;
-
-        // let mut tile_page_writer = io::LineWriter::new(tile_page_file);
-        
-        // tile_page_writer.write_all(format!(
-        //     "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-        //     self.name
-        //     .with_boundaries(&[Boundary::Space])
-        //     .to_case(Case::Snake)
-        //     ).as_bytes()
-        // )?;
-
-        // for tile in self.tiles.iter() {
-        //     tile_page_writer.write_all(tile.display()
-        //         .as_bytes())?;
-        // }
-        
-        // tile_page_writer.flush()?;
-
-        // Ok(String)
     }
 }
 
@@ -2676,6 +2648,41 @@ impl Menu for TilePageFile {
         todo!()
     }
 }
+impl TilePageFile {
+    fn export(&self, path: &path::PathBuf) -> Result<()> {
+        let mut tpf_name = format!("{}.txt", self.name.clone())
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake);
+
+        if !tpf_name.starts_with("tile_page_") {
+            tpf_name = format!("tile_page_{}", tpf_name);
+        }
+        
+        let tile_page_file = fs::File::create(
+            path
+            .join("graphics")
+            .join(tpf_name))?;
+        
+        let mut tile_page_writer = io::LineWriter::new(tile_page_file);
+        
+        tile_page_writer.write_all(format!(
+            "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
+            self.name
+            .with_boundaries(&[Boundary::Space])
+            .to_case(Case::Snake)
+            ).as_bytes()
+        )?;
+
+        for tile_page in self.tile_pages.iter() {
+            tile_page_writer.write_all(tile_page.display()
+                .as_bytes())?;
+        }
+        
+        tile_page_writer.flush()?;
+
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TilePage {
@@ -2804,58 +2811,6 @@ impl Menu for TilePage {//todo edit menu
     }
 }
 
-
-
-
-    // fn import_tile_page(path: &path::PathBuf) -> Result<TilePageFile> {
-    //     let mut tiles = Vec::new();
-    //     let mut buffer = Vec::with_capacity(10);
-    //     let mut raw_buffer = Vec::with_capacity(10);
-    //     let mut buffer_start = 0;
-
-    //     let f = fs::File::open(path)?;
-
-    //     let lines = io::BufReader::new(f).lines()
-    //         .map(|l| l.expect("should always be a valid line."));
-
-    //     //first line must match file name and is tile page name.
-    //     let name = path
-    //         .file_name().get_or_insert(&OsStr::new("no_name"))
-    //         .to_str().get_or_insert("no_name")
-    //         .replace("tile_page_", "")
-    //         .replace(".txt", "").trim().to_string();
-        
-    //     //read line-by-line to find starts of all tile definitions.
-    //     //create vectors of all lines between tile headers and import each vector.
-    //     for (i_line, raw_line) in lines.enumerate() {
-    //         let line_vec = Self::read_brackets(&raw_line);
-
-    //         //start filling the buffer at tile start, then process and clear it at next tile start.
-    //         if line_vec.get(0).is_some() {
-    //             if line_vec[0].eq("TILE_PAGE") {
-    //                 if buffer.len() > 0 {
-    //                     //if the buffer is populated process/clear it and store.
-    //                     // wrap_import_error<T>(e: DFGHError, buffer_start: usize, path: &path::PathBuf) -> Result<T> {
-    //                     match Self::import_tile(buffer.clone(), raw_buffer.clone(), path) {
-    //                         Ok(tile) => tiles.push(tile),
-    //                         Err(e) => return wrap_import_error(e, buffer_start, path),
-    //                     }
-    //                     raw_buffer.clear();
-    //                 }
-    //                 buffer_start = i_line;
-    //                 buffer.push(line_vec);
-    //                 raw_buffer.push(raw_line);
-    //             } else if line_vec[0].eq("OBJECT") {
-    //                 //do nothing
-    //             } else {
-    //                 buffer.push(line_vec);
-    //                 raw_buffer.push(raw_line);
-    //             }
-    //         }
-    //     }
-
-    //     Ok(TilePageFile {name, tiles})
-    // }
 
     // fn import_creature_file(path: &path::PathBuf) -> Result<CreatureFile> {
     //     let mut creatures = Vec::new();
