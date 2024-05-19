@@ -1,4 +1,4 @@
-use std::path;
+use std::{ops::RangeBounds, path};
 use std::ops::RangeInclusive;
 
 use egui::Context;
@@ -52,7 +52,7 @@ pub enum DFGHError {
 //todo make fn truncate before and after relevant line
 fn highlight_error(raw_buffer: Vec<String>, i_line: usize, r_error: RangeInclusive<usize>) -> String {
     let mut highlighted = String::new();
-    let display_range = 9;
+    let display_range = 8;
 
     if i_line > display_range {
         highlighted.push_str("...")
@@ -70,27 +70,31 @@ fn highlight_error(raw_buffer: Vec<String>, i_line: usize, r_error: RangeInclusi
                 .map(|(i, _)| i)
                 .collect::<Vec<usize>>();
 
-            let highlight: String = raw_line.chars().enumerate()
-                .map(|(i_m, c)| 
-                if i_m < breaks[*r_error.start()] {
-                    if c == '\t' {
-                        '\t'
-                    } else {
-                        ' '
-                    }
-                } else if i_m <= breaks[*r_error.end() + 1] {
-                    '^'
+            let mut highlight = String::new();
+            if breaks.len() >= 2 {
+                let (start, end);
+                let breaks_end = breaks.len().saturating_sub(1);
+                if r_error.start() > &breaks_end {
+                    (start, end) = (0, breaks_end);
+                } else if r_error.end() > &breaks_end {
+                    (start, end) = (*r_error.start(), breaks_end);
                 } else {
-                    ' '
+                    (start, end) = (*r_error.start(), *r_error.end());
                 }
-                )
-                .collect::<String>();
-
+                for (i_highlight, char) in raw_line.chars().enumerate() {
+                    if (breaks[start]..=breaks[end]).contains(&i_highlight) {
+                        highlight.push_str("^");
+                    } else if char == '\t' {
+                        highlight.push_str("\t");
+                    } else {
+                        highlight.push_str(" ");
+                    }
+                }
+            }
             highlighted.push('\n');
             highlighted.push_str(&raw_line);
             highlighted.push('\n');
             highlighted.push_str(&highlight);
-
         }
     }
 
@@ -105,8 +109,10 @@ pub fn wrap_import_file_error<T>(raw_buffer: Vec<String>, e: DFGHError, i_line: 
     match e {
         DFGHError::ImportBufferError(i_rel_line, buffer_len, r_error, error_string) => {
             let line_number = (i_line + i_rel_line).saturating_sub(buffer_len);
-            // dbg!(format!("w_I {}", line_number));
-            // dbg!(i_line);
+            dbg!(format!("w_I {}", line_number));
+            dbg!(i_rel_line);
+            dbg!(buffer_len);
+            dbg!(i_line);
             Err(
                 DFGHError::ImportError(
                     line_number + 1,
@@ -127,18 +133,22 @@ pub fn wrap_import_buffer_error<T>(i_rel_line: usize,  buffer_len: usize, r_erro
         DFGHError::ImportParseError(_) |
         DFGHError::ImportMismatchError |
         DFGHError::UnsupportedFileName(_) => {
-            // dbg!(format!("w_e {}", i_rel_line));
-            // dbg!(i_rel_line);
-            // dbg!(buffer_len);
+            dbg!(format!("w_e {}", i_rel_line));
+            dbg!(i_rel_line);
+            dbg!(buffer_len);
             Err(
                 DFGHError::ImportBufferError(i_rel_line, buffer_len, r_error, e.to_string())
             )
         },
         DFGHError::ImportBufferError(i_rel, b_len, r_e, e_string) => {
             let line_number = (i_rel_line + i_rel + 1).saturating_sub(b_len);
-            // dbg!(format!("w_B {}", line_number));
+            dbg!(format!("w_B {}", line_number));
+            dbg!(i_rel);
+            dbg!(b_len);
+            dbg!(i_rel_line);
+            dbg!(buffer_len);
             Err(
-                DFGHError::ImportBufferError(line_number, b_len, r_e, e_string)
+                DFGHError::ImportBufferError(line_number, buffer_len, r_e, e_string)
             )
         },
         _ => Err(DFGHError::ImportUnknownError),
@@ -157,7 +167,11 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
             .show(ui, |ui| {
                 ui.label("Error:");
                 ui.separator();
-                ui.label(egui::RichText::new(state.exception.to_string()).monospace());
+                ui.add(egui::Label::new(egui::RichText::new(
+                    state.exception.to_string())
+                    .monospace())
+                    .wrap(false)
+                );
             }
         );
 
