@@ -3431,8 +3431,6 @@ impl Shared {
     pub fn update(&mut self, tp_files: &Vec<TilePageFile>, _g_files: &Vec<GraphicsFile>, folder: &path::PathBuf) {
         for tp_file in tp_files.iter() {
             for tp in tp_file.tile_pages.iter() {
-                dbg!(tp.name.clone());
-                dbg!(tp.file_name.clone());
                 self.tile_page_info.entry(tp.name.clone())
                     .or_insert_with(|| {Self::tile_page_info(tp, folder)}
                 );
@@ -3443,7 +3441,6 @@ impl Shared {
     fn tile_page_info(tp: &TilePage, folder: &path::PathBuf) -> TilePageInfo {
         let image_path = folder.join("graphics").join("images")
             .join(tp.file_name.clone()).with_extension("png");
-        dbg!(image_path.clone());
         let image = image::open(&image_path).ok();
         let image_size: [usize; 2];
 

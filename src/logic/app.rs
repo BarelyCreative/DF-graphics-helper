@@ -11,7 +11,6 @@ use crate::{RAW, Menu, Graphics, TilePageFile, TilePage, GraphicsFile,
     Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition};//, State, Caste};
 use error::{DFGHError, Result, error_window};
 
-
 #[derive(Debug, Default, Clone, Copy)]
 pub enum MainWindow {
     #[default]
@@ -108,6 +107,16 @@ impl From<MainWindow> for ContextData {
 }
 
 #[derive(Debug, Default, Clone)]
+enum PreviewZoom {
+    #[default]
+    None,
+    All,
+    Selected,
+    HorizontalFit,
+    VerticalFit,
+}
+
+#[derive(Debug, Default, Clone)]
 enum Action {
     #[default]
     None,
@@ -122,6 +131,7 @@ enum Action {
     Import,
     Export,
     Update,
+    Zoom(PreviewZoom),
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -171,6 +181,7 @@ pub struct DFGraphicsHelper {
     path: std::path::PathBuf,
     preview: bool,
     preview_name: String,
+    preview_bounds: Option<egui_plot::PlotBounds>,
     selected_region: Option<[[u32; 2]; 2]>,
     texture: Option<TextureHandle>,
     cursor_coords: Option<[u32; 2]>,
@@ -189,6 +200,7 @@ impl DFGraphicsHelper {
             path: path::PathBuf::new(),
             preview: false,
             preview_name: String::new(),
+            preview_bounds: None,
             selected_region: None,
             texture: None,
             cursor_coords: None,
@@ -689,6 +701,37 @@ impl DFGraphicsHelper {
         self.preview = false;
         self.preview_name = "".to_string();
         self.loaded_graphics.update_shared(&self.path)
+    }
+
+    fn zoom(&mut self, zoom: PreviewZoom) {
+        let mut min: [f64; 2] = [-2.0, -66.0];
+        let mut max: [f64; 2] = [98.0, 2.0];
+
+        if let Some(texture) = &self.texture {
+            let size = [texture.size_vec2().x as f64, texture.size_vec2().y as f64];
+
+            match zoom {
+                PreviewZoom::All => {
+                    min = [-0.02*size[0], -1.02*size[1]];
+                    max = [1.02*size[0], 0.02*size[1]];
+                },
+                PreviewZoom::Selected => {
+                    
+                },
+                PreviewZoom::HorizontalFit => {
+                    min = [-0.02*size[0], -1.02*size[0]];
+                    max = [1.02*size[0], 0.02*size[0]];
+                },
+                PreviewZoom::VerticalFit => {
+                    min = [-0.02*size[1], -1.02*size[1]];
+                    max = [1.02*size[1], 0.02*size[1]];
+                },
+                PreviewZoom::None => {},
+            }
+            self.preview_bounds = Some(egui_plot::PlotBounds::from_min_max(min, max));
+        }
+        
+        self.action = Action::None;
     }
 
     fn main_tree(&mut self, ui: &mut Ui, ctx: &Context) {
@@ -1436,18 +1479,22 @@ impl DFGraphicsHelper {
                 ui.menu_button("Zoom", |ui| {
                     if ui.button("All").clicked() {
                         //show all
+                        self.action = Action::Zoom(PreviewZoom::All);
                         ui.close_menu();
                     }
                     if ui.button("Selected").clicked() {
-                        //crop to rectangle
+                        //crop to selected rectangle
+                        self.action = Action::Zoom(PreviewZoom::Selected);
                         ui.close_menu();
                     }
                     if ui.button("Fit Horizontal").clicked() {
                         //show all horizontal
+                        self.action = Action::Zoom(PreviewZoom::HorizontalFit);
                         ui.close_menu();
                     }
                     if ui.button("Fit Vertical").clicked() {
                         //show all vertical
+                        self.action = Action::Zoom(PreviewZoom::VerticalFit);
                         ui.close_menu();
                     }
                 });
@@ -1554,13 +1601,22 @@ impl DFGraphicsHelper {
                             self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
                         }
                     }
+                    match &self.preview_bounds {
+                        Some(bounds) => {
+                            plot_ui.set_plot_bounds(*bounds);
+                            self.preview_bounds = None;
+                        }
+                        _ => {}
+                    }
                 });
             } else {
                 //unload texture if it doesn't match what should be loaded.
+                self.action = Action::Zoom(PreviewZoom::All);
                 self.texture = None;
             }
         } else {
             //load texture based on name if not loaded
+            self.action = Action::Zoom(PreviewZoom::All);
             let entry_option = self.loaded_graphics.shared.tile_page_info
                 .get_mut(&self.preview_name);
 
@@ -1753,6 +1809,9 @@ impl eframe::App for DFGraphicsHelper {
                 Action::Update => {
                     self.update();
                 },
+                Action::Zoom(zoom) => {
+                    self.zoom(zoom.clone());
+                }
                 Action::None => {},
             }
             self.action = Action::None;
