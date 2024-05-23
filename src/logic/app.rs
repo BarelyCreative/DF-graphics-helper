@@ -1,6 +1,6 @@
-use egui::{Context, Sense, Ui, Key, Modifiers, KeyboardShortcut, Stroke, TextureHandle};
+use egui::{Context, Key, KeyboardShortcut, Modifiers, Sense, Stroke, TextureHandle, TextureOptions, Ui};
 use egui_plot::{GridInput, GridMark, Plot, PlotImage, PlotPoint, Polygon};
-use convert_case::{Case, Casing};
+// use convert_case::{Case, Casing};
 use rfd;
 use std::path::PathBuf;
 use std::path;
@@ -8,7 +8,7 @@ use std::path;
 use crate::PADDING;
 use super::error;
 use crate::{RAW, Menu, Graphics, TilePageFile, TilePage, GraphicsFile, 
-    Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition, State, Caste};
+    Creature, LayerSet, LayerGroup, Layer, SimpleLayer, Condition};//, State, Caste};
 use error::{DFGHError, Result, error_window};
 
 
@@ -121,6 +121,7 @@ enum Action {
     Delete(ContextData),
     Import,
     Export,
+    Update,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -128,11 +129,11 @@ pub struct GraphicsIndices {
     tile_page_file_index: usize,
     tile_page_index: usize,
     graphics_file_index: usize,
-    graphics_index: usize,
-    layer_set_index: usize,
-    layer_group_index: usize,
-    layer_index: usize,
-    condition_index: usize,
+    // graphics_index: usize,
+    // layer_set_index: usize,
+    // layer_group_index: usize,
+    // layer_index: usize,
+    // condition_index: usize,
 }
 impl GraphicsIndices {
     fn new() -> GraphicsIndices {
@@ -140,11 +141,11 @@ impl GraphicsIndices {
             tile_page_file_index: 0,
             tile_page_index: 0,
             graphics_file_index: 0,
-            graphics_index: 0,
-            layer_set_index: 0,
-            layer_group_index: 0,
-            layer_index: 0,
-            condition_index: 0,
+            // graphics_index: 0,
+            // layer_set_index: 0,
+            // layer_group_index: 0,
+            // layer_index: 0,
+            // condition_index: 0,
         }
     }
 }
@@ -154,11 +155,11 @@ impl From<[usize; 8]> for GraphicsIndices {
             tile_page_file_index:   index_array[0],
             tile_page_index:        index_array[1],
             graphics_file_index:    index_array[2],
-            graphics_index:         index_array[3],
-            layer_set_index:        index_array[4],
-            layer_group_index:      index_array[5],
-            layer_index:            index_array[6],
-            condition_index:        index_array[7]
+            // graphics_index:         index_array[3],
+            // layer_set_index:        index_array[4],
+            // layer_group_index:      index_array[5],
+            // layer_index:            index_array[6],
+            // condition_index:        index_array[7]
         }
     }
 }
@@ -168,9 +169,10 @@ pub struct DFGraphicsHelper {
     loaded_graphics: Graphics,
     pub indices: GraphicsIndices,
     path: std::path::PathBuf,
-    texture_file_name: String,
+    preview: bool,
+    preview_name: String,
+    selected_region: Option<[[u32; 2]; 2]>,
     texture: Option<TextureHandle>,
-    preview_image: bool,
     cursor_coords: Option<[u32; 2]>,
     action: Action,
     copied: ContextData,
@@ -185,9 +187,10 @@ impl DFGraphicsHelper {
             loaded_graphics: Graphics::new(),
             indices: GraphicsIndices::new(),
             path: path::PathBuf::new(),
-            texture_file_name: String::new(),
+            preview: false,
+            preview_name: String::new(),
+            selected_region: None,
             texture: None,
-            preview_image: true,
             cursor_coords: None,
             action: Action::default(),
             copied: ContextData::default(),
@@ -402,7 +405,7 @@ impl DFGraphicsHelper {
                     self.main_window = MainWindow::GraphicsFileMenu;
                 }
             },
-            ContextData::Creature(creature) => {
+            ContextData::Creature(_creature) => {
                 // let cs = &mut graphics.graphics_files
                 //     .get_mut(indices.graphics_file_index)
                 //     .ok_or(DFGHError::IndexError)?
@@ -412,7 +415,7 @@ impl DFGraphicsHelper {
                 //     self.main_window = MainWindow::CreatureMenu;
                 // }
             },
-            ContextData::LayerSet(layer_set) => {
+            ContextData::LayerSet(_layer_set) => {
                 // let lss = &mut graphics.graphics_files
                 //     .get_mut(indices.graphics_file_index)
                 //     .ok_or(DFGHError::IndexError)?
@@ -425,7 +428,7 @@ impl DFGraphicsHelper {
                 //     self.main_window = MainWindow::LayerSetMenu;
                 // }
             },
-            ContextData::LayerGroup(layer_group) => {
+            ContextData::LayerGroup(_layer_group) => {
                 // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
                 //     .get_mut(indices.graphics_file_index)
                 //     .ok_or(DFGHError::IndexError)?
@@ -441,7 +444,7 @@ impl DFGraphicsHelper {
                 //     }
                 // }
             },
-            ContextData::SimpleLayer(simple_layer) => {
+            ContextData::SimpleLayer(_simple_layer) => {
                 // if let LayerSet::Simple(simple_layers) |
                 //     LayerSet::Statue(simple_layers) = 
                 //     graphics.graphics_files
@@ -459,7 +462,7 @@ impl DFGraphicsHelper {
                 //     }
                 // }
             },
-            ContextData::Layer(layer) => {
+            ContextData::Layer(_layer) => {
                 // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
                 //     .get_mut(indices.graphics_file_index)
                 //     .ok_or(DFGHError::IndexError)?
@@ -479,7 +482,7 @@ impl DFGraphicsHelper {
                 //     }
                 // }
             },
-            ContextData::Condition(condition) => {
+            ContextData::Condition(_condition) => {
                 // if let LayerSet::Layered(_, layer_groups) = graphics.graphics_files
                 //     .get_mut(indices.graphics_file_index)
                 //     .ok_or(DFGHError::IndexError)?
@@ -681,11 +684,19 @@ impl DFGraphicsHelper {
         Ok(())
     }
 
+    fn update(&mut self) {
+        self.texture = None;
+        self.preview = false;
+        self.preview_name = "".to_string();
+        self.loaded_graphics.update_shared(&self.path)
+    }
+
     fn main_tree(&mut self, ui: &mut Ui, ctx: &Context) {
         let graphics = &mut self.loaded_graphics;
 
-        if ui
-            .add(egui::Label::new("Tile Page Files").sense(Sense::click()))
+        if ui.add(egui::Label::new("Tile Page Files")
+            .wrap(false)
+            .sense(Sense::click()))
             .clicked()
         {
             self.main_window = MainWindow::TilePageFileDefaultMenu;
@@ -731,8 +742,9 @@ impl DFGraphicsHelper {
         }
 
         ui.separator();
-        if ui
-            .add(egui::Label::new("Creature Graphics").sense(Sense::click()))
+        if ui.add(egui::Label::new("Creature Graphics")
+            .wrap(false)
+            .sense(Sense::click()))
             .clicked()
         {
             self.main_window = MainWindow::CreatureDefaultMenu;
@@ -943,14 +955,6 @@ impl DFGraphicsHelper {
         //         }
         //     });
         // }
-
-        ui.separator();
-        if ui
-            .add(egui::Label::new("References").sense(Sense::click()))
-            .clicked()
-        {
-            self.main_window = MainWindow::ReferenceMenu;
-        };
     }
 
     fn default_menu(&mut self, ui: &mut Ui) -> Result<()> {
@@ -962,6 +966,10 @@ impl DFGraphicsHelper {
             "DF Graphics Helper on GitHub",
             "https://github.com/BarelyCreative/DF-graphics-helper/tree/main",
         );
+
+        self.preview = false;
+        self.preview_name = String::new();
+
         Ok(())
     }
 
@@ -972,6 +980,10 @@ impl DFGraphicsHelper {
         if ui.small_button("New Tile Page File").clicked() {
             self.action = Action::Insert(ContextData::TilePageFile(TilePageFile::new()));
         }
+
+        self.preview = false;
+        self.preview_name = String::new();
+
         Ok(())
     }
 
@@ -1002,6 +1014,10 @@ impl DFGraphicsHelper {
                 self.action = Action::Insert(ContextData::TilePage(TilePage::new()));
             }
         }
+
+        self.preview = false;
+        self.preview_name = String::new();
+        
         Ok(())
     }
 
@@ -1030,12 +1046,13 @@ impl DFGraphicsHelper {
             let tile_page = tile_pages
                 .get_mut(indices.tile_page_index)
                 .ok_or(DFGHError::IndexError)?;
-            let file_name = tile_page.file_name.clone();
 
-            tile_page.menu(ui);
+            let shared = &mut self.loaded_graphics.shared;
 
-            ui.add_space(PADDING);
-            self.preview_image(ui, file_name, None)?;
+            tile_page.menu(ui, shared);
+
+            self.preview = true;
+            self.preview_name = tile_page.name.clone();
         }
         Ok(())
     }
@@ -1047,6 +1064,10 @@ impl DFGraphicsHelper {
         if ui.small_button("New Graphics File").clicked() {
             self.action = Action::Insert(ContextData::GraphicsFile(GraphicsFile::new()));
         }
+
+        self.preview = false;
+        self.preview_name = String::new();
+
         Ok(())
     }
 
@@ -1058,16 +1079,16 @@ impl DFGraphicsHelper {
             }
         });
         
-        let indices = &mut self.indices;
+        // let indices = &mut self.indices;
 
         if self.loaded_graphics.graphics_files.is_empty() {
             self.main_window = MainWindow::CreatureDefaultMenu;
         } else {
-            let graphics_file = self
-                .loaded_graphics
-                .graphics_files
-                .get_mut(indices.graphics_file_index)
-                .ok_or(DFGHError::IndexError)?;
+            // let graphics_file = self
+            //     .loaded_graphics
+            //     .graphics_files
+            //     .get_mut(indices.graphics_file_index)
+            //     .ok_or(DFGHError::IndexError)?;
 
             ui.separator();
             // ui.text_edit_singleline(&mut graphics_file.name);
@@ -1077,6 +1098,10 @@ impl DFGraphicsHelper {
                 self.action = Action::Insert(ContextData::Creature(Creature::new()));
             }
         }
+
+        self.preview = false;
+        self.preview_name = String::new();
+        
         Ok(())
     }
 
@@ -1088,7 +1113,7 @@ impl DFGraphicsHelper {
             }
         });
 
-        let indices = &mut self.indices;
+        // let indices = &mut self.indices;
 
         // let graphics = &mut self
         //     .loaded_graphics
@@ -1108,6 +1133,10 @@ impl DFGraphicsHelper {
 
         //     creature.creature_menu(ui);
         // }
+        
+        self.preview = false;
+        self.preview_name = String::new();
+        
         Ok(())
     }
 
@@ -1119,7 +1148,7 @@ impl DFGraphicsHelper {
             }
         });
 
-        let indices = &mut self.indices;
+        // let indices = &mut self.indices;
 
         // let layer_sets = &mut self
         //     .loaded_graphics
@@ -1153,7 +1182,7 @@ impl DFGraphicsHelper {
             }
         });
         
-        let indices = &mut self.indices;
+        // let indices = &mut self.indices;
 
         // let graphics_type = self
         //     .loaded_graphics
@@ -1184,11 +1213,12 @@ impl DFGraphicsHelper {
     }
 
     fn layer_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        let tile_info = self.tile_info();
+        ui.label("layer menu");
+        // let tile_info = self.tile_info();
 
-        let cursor_coords = self.cursor_coords;
+        // let cursor_coords = self.cursor_coords;
         
-        let indices = &mut self.indices;
+        // let indices = &mut self.indices;
 
         // let layer_groups = self
         //     .loaded_graphics
@@ -1351,9 +1381,9 @@ impl DFGraphicsHelper {
             }
         });
 
-        let tile_info = self.tile_info();
+        // let tile_info = self.tile_info();
         
-        let indices = &mut self.indices;
+        // let indices = &mut self.indices;
 
         // let graphics_type = self
         //     .loaded_graphics
@@ -1390,204 +1420,184 @@ impl DFGraphicsHelper {
         //         condition.condition_menu(ui, tile_info);
         //     }
         // }
+
+        self.preview = false;
+        self.preview_name = String::new();
+        
         Ok(())
     }
 
-    fn preview_image(&mut self, ui: &mut Ui, file_name: String, rectangle: Option<[[u32; 2]; 2]>) -> Result<()> {
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.preview_image, "View Image"); //determine if preview image is desired
-            if ui.button("Refresh").clicked() {
-                //clear image if stale
-                self.texture = None;
-            }
-        });
+    fn preview_image(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.label("Preview");
+        ui.separator();
 
-        if self.preview_image && self.texture.is_some() {
-            //display texture once loaded
-            let texture: &TextureHandle = self.texture.as_ref().expect("reference to texture should not be empty");//checked
-            let size = texture.size_vec2();
-
-            
-
-            let image =
-                PlotImage::new(texture, PlotPoint::new(size[0] / 2.0, size[1] / -2.0), size);
-
-            let x_fmt = 
-            |grid_mk: GridMark, _max_char: usize, _range: &core::ops::RangeInclusive<f64> | {
-                let x = grid_mk.value;
-                if x < 0.0 {
-                    // No labels outside value bounds
-                    String::new()
-                } else {
-                    // Tiles
-                    format!("{}", (x as f64 / 32.0).floor())
-                }
-            };
-            let y_fmt = 
-            |grid_mk: GridMark, _max_char: usize, _range: &core::ops::RangeInclusive<f64> | {
-                let y = grid_mk.value;
-                if y > 0.0 {
-                    // No labels outside value bounds
-                    String::new()
-                } else {
-                    // Tiles
-                    format!("{}", (y as f64 / -32.0).floor())
-                }
-            };
-            let label_fmt = |_s: &str, val: &PlotPoint| {
-                format!(
-                    "{}, {}",
-                    (val.x / 32.0).floor(),
-                    (val.y / -32.0).floor()
-                )
-            };
-            let grid_fmt = |input: GridInput| -> Vec<GridMark> {
-                let mut marks = vec![];
-
-                let (min, max) = input.bounds;
-                let min = min.floor() as i32;
-                let max = max.ceil() as i32;
-        
-                for i in min..=max {
-                    let step_size = if i % 3200 == 0 {
-                        // 100 tile
-                        3200.0
-                    } else if i % 320 == 0 {
-                        // 10 tile
-                        320.0
-                    } else if i % 32 == 0 {
-                        // 1 tile
-                        32.0
-                    } else {
-                        // skip grids below 1 tile
-                        continue;
-                    };
-        
-                    marks.push(GridMark {
-                        value: i as f64,
-                        step_size,
-                    });
-                }
-        
-                marks
-            };
-
-            let plot = Plot::new("image_preview")
-                .auto_bounds([true, true].into())
-                .data_aspect(1.0)
-                .show_background(true)
-                .allow_boxed_zoom(false)
-                .clamp_grid(true)
-                .min_size(egui::vec2(100.0, 400.0))
-                .set_margin_fraction(egui::vec2(0.005, 0.005))
-                .x_axis_formatter(x_fmt) //todo
-                .y_axis_formatter(y_fmt) //todo
-                .x_grid_spacer(grid_fmt)
-                .y_grid_spacer(grid_fmt)
-                .label_formatter(label_fmt);
-            plot.show(ui, |plot_ui| {
-                plot_ui.image(image.name("Image"));
-                if let Some(rect) = rectangle {
-                    let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
-                    let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
-                    let points = vec![
-                        [x1 * 32.0, y1 * -32.0],
-                        [x2 * 32.0 + 32.0, y1 * -32.0],
-                        [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
-                        [x1 * 32.0, y2 * -32.0 - 32.0],
-                    ];
-
-                    let rectangle = Polygon::new(points)
-                        .stroke(Stroke::new(2.0, egui::Color32::LIGHT_BLUE))
-                        .fill_color(egui::Color32::TRANSPARENT);
-                    plot_ui.polygon(rectangle);
-                }
-                self.cursor_coords.take();
-                if plot_ui.response().secondary_clicked() {
-                    if let Some(pointer) = plot_ui.pointer_coordinate() {
-                        self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.horizontal(|ui: &mut Ui| {//Menu bar
+                ui.menu_button("Zoom", |ui| {
+                    if ui.button("All").clicked() {
+                        //show all
+                        ui.close_menu();
                     }
+                    if ui.button("Selected").clicked() {
+                        //crop to rectangle
+                        ui.close_menu();
+                    }
+                    if ui.button("Fit Horizontal").clicked() {
+                        //show all horizontal
+                        ui.close_menu();
+                    }
+                    if ui.button("Fit Vertical").clicked() {
+                        //show all vertical
+                        ui.close_menu();
+                    }
+                });
+                if ui.button("Reload").clicked() {
+                    self.loaded_graphics.shared.tile_page_info.remove_entry(&self.preview_name);
+                    self.action = Action::Update;
                 }
             });
+            ui.label("Right click to set coordinates.");
 
-            if self.texture_file_name.ne(&file_name) {
-                self.texture = None;
+            match self.draw_image(ui) {
+                Ok(_) => {},
+                Err(e) => {self.exception = DFGHError::from(e)}
             }
-        } else if self.preview_image && self.texture.is_none() {
-            //load texture from path
-            let image_path = self.path
-                .join("graphics")
-                .join("images")
-                .join(format!("{}.png", &file_name));
-
-            if image_path.exists() {
-                let dyn_image = image::open(image_path)?;
-                let size = [dyn_image.width() as _, dyn_image.height() as _];
-                let image = dyn_image.as_bytes();
-                let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
-
-                self.loaded_graphics.tile_page_files
-                    .get_mut(self.indices.tile_page_file_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .tile_pages
-                    .get_mut(self.indices.tile_page_index)
-                    .ok_or(DFGHError::IndexError)?
-                    .image_size = [dyn_image.width(), dyn_image.height()];
-                
-                self.texture.get_or_insert_with(|| {
-                    ui.ctx()
-                        .load_texture("default_image", rgba, Default::default())
-                });
-                self.texture_file_name = file_name;
-            }
-        }
+        });
         
+
         Ok(())
     }
 
-    fn tile_info(&self) -> Vec<(String, [u32; 2])> {
-        let mut tile_info: Vec<(String, [u32; 2])> = self
-            .loaded_graphics
-            .tile_page_files
-            .iter()
-            .flat_map(|tile_page_file| {
-                tile_page_file.tile_pages.iter().map(|t| {
-                    (t.name.clone(),
-                    [t.image_size[0].checked_div(t.tile_size[0])
-                    .unwrap_or_default()
-                    .checked_sub(1)
-                    .unwrap_or_default(),
-                    t.image_size[1].checked_div(t.tile_size[1])
-                    .unwrap_or_default()
-                    .checked_sub(1)
-                    .unwrap_or_default()])
-                })
-            })
-            .collect();
+    fn draw_image(&mut self, ui: &mut Ui) -> Result<()> {
+        //shared formatter functions
+        let label_fmt = |_s: &str, val: &PlotPoint| {
+            format!(
+                "{}, {}",
+                (val.x / 32.0).floor(),
+                (val.y / -32.0).floor()
+            )
+        };
+        let grid_fmt = |input: GridInput| -> Vec<GridMark> {
+            let mut marks = vec![];
 
-        tile_info.sort();
-        tile_info.dedup();
-        
-        tile_info
-    }
+            let (min, max) = input.bounds;
+            let min = min.floor() as i32;
+            let max = max.ceil() as i32;
+    
+            for i in min..=max {
+                let step_size = if i % 3200 == 0 {
+                    // 100 tile
+                    3200.0
+                } else if i % 320 == 0 {
+                    // 10 tile
+                    320.0
+                } else if i % 32 == 0 {
+                    // 1 tile
+                    32.0
+                } else {
+                    // skip grids below 1 tile
+                    continue;
+                };
+    
+                marks.push(GridMark {
+                    value: i as f64,
+                    step_size,
+                });
+            }
+    
+            marks
+        };
 
-    pub fn tile_read(tile_info: &Vec<(String, [u32; 2])>, name: &String) -> (Vec<String>, [u32; 2]) {
-        let tile_names: Vec<String> = tile_info.iter().map(|ti| ti.0.clone()).collect();
-        let max_coords: [u32; 2];
-        if let Some(idx_name) = tile_names.iter().position(|n| n == name) {
-            max_coords = tile_info[idx_name].1;
+        if let Some(texture) = self.texture.as_ref() {
+            if self.preview_name == texture.name() {
+                let size = texture.size_vec2();
+
+                let image = PlotImage::new(
+                    texture,
+                    PlotPoint::new(size[0] / 2.0, size[1] / -2.0),
+                    size
+                );
+            
+                let plot = Plot::new("image_preview")
+                    .auto_bounds([true, true].into())
+                    .data_aspect(1.0)
+                    .show_background(false)
+                    .allow_boxed_zoom(false)
+                    .clamp_grid(true)
+                    .min_size(egui::vec2(100.0, 100.0))
+                    .set_margin_fraction(egui::vec2(0.005, 0.005))
+                    .show_axes([false, false])
+                    .x_grid_spacer(grid_fmt)
+                    .y_grid_spacer(grid_fmt)
+                    .label_formatter(label_fmt);
+
+                plot.show(ui, |plot_ui| {
+                    plot_ui.image(image.name("Image"));
+                    if let Some(rect) = self.selected_region {
+                        let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
+                        let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
+                        let points = vec![
+                            [x1 * 32.0, y1 * -32.0],
+                            [x2 * 32.0 + 32.0, y1 * -32.0],
+                            [x2 * 32.0 + 32.0, y2 * -32.0 - 32.0],
+                            [x1 * 32.0, y2 * -32.0 - 32.0],
+                        ];
+
+                        let rectangle = Polygon::new(points)
+                            .stroke(Stroke::new(2.0, egui::Color32::LIGHT_BLUE))
+                            .fill_color(egui::Color32::TRANSPARENT);
+                        plot_ui.polygon(rectangle);
+                    }
+                    self.cursor_coords.take();
+                    if plot_ui.response().secondary_clicked() {
+                        if let Some(pointer) = plot_ui.pointer_coordinate() {
+                            self.cursor_coords = Some([(pointer.x/32.0).floor() as u32, (pointer.y/-32.0).floor() as u32]);
+                        }
+                    }
+                });
+            } else {
+                //unload texture if it doesn't match what should be loaded.
+                self.texture = None;
+            }
         } else {
-            max_coords = [100, 100];
+            //load texture based on name if not loaded
+            let entry_option = self.loaded_graphics.shared.tile_page_info
+                .get_mut(&self.preview_name);
+
+            if let Some(entry) = entry_option {
+                let image_path = entry.image_path.clone();
+
+                if entry.texture.is_some() {
+                    self.texture = entry.texture.clone();
+                } else if image_path.exists() {
+                    let dyn_image = image::open(image_path)?;
+                    let size = [dyn_image.width() as _, dyn_image.height() as _];
+                    let image = dyn_image.as_bytes();
+                    let rgba = egui::ColorImage::from_rgba_unmultiplied(size, image);
+                    let options = TextureOptions::NEAREST;
+                    let new_texture = ui.ctx().load_texture(self.preview_name.clone(), rgba, options);
+    
+                    entry.texture = Some(new_texture);
+                    self.texture = entry.texture.clone();
+                } else {
+                    self.exception = DFGHError::ImageLoadError(entry.image_path.clone());
+                }
+            }
         }
 
-        (tile_names, max_coords)
+        Ok(())
     }
 }
 
 impl eframe::App for DFGraphicsHelper {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        //Error Window
+        if !matches!(self.exception, DFGHError::None) {
+            error_window(self, ctx);
+        }
+
+        //Draw File menu tab and internal items
         egui::TopBottomPanel::top("top control panel").show(ctx, |ui| {
-            //Draw File menu tab and internal items
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("New").clicked() {
@@ -1609,20 +1619,39 @@ impl eframe::App for DFGraphicsHelper {
                         ui.close_menu();
                     }
                 });
+                if ui.button("Update").clicked() {
+                    self.action = Action::Update;
+                }
             });
         });
 
-        egui::SidePanel::new(egui::panel::Side::Left, "tree")
+        //Draw Main tree Panel
+        {egui::SidePanel::left("main_tree")
             .default_width(300.0)
             .resizable(true)
             .show(ctx, |ui| {
-                //Draw tree-style selection menu on left side
-                egui::ScrollArea::both().show(ui, |ui| {
-                    self.main_tree(ui, ctx)
-                });
+            //Draw tree-style selection menu on left side
+            egui::ScrollArea::both().show(ui, |ui| {
+                self.main_tree(ui, ctx)
             });
+        });}
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        //Draw Preview Panel
+        if self.preview {
+            egui::SidePanel::right("preview panel")
+                .default_width(600.0)
+                .width_range(80.0..=1000.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                match self.preview_image(ui) {
+                    Ok(_) => {},
+                    Err(e) => {self.exception = DFGHError::from(e)}
+                }
+            });
+        }
+
+        //Draw Main Panel
+        egui::CentralPanel::default().show(ctx,|ui| {
             //Draw main window by matching self.main_window
             egui::ScrollArea::horizontal()
                 .show(ui, |ui| {
@@ -1647,6 +1676,7 @@ impl eframe::App for DFGraphicsHelper {
             });
         });
 
+        //Hotkey Handler
         if !ctx.wants_keyboard_input() {
             let undo = &KeyboardShortcut {
                 modifiers: Modifiers::COMMAND,
@@ -1685,7 +1715,8 @@ impl eframe::App for DFGraphicsHelper {
             }
         }
 
-        {//Action handler
+        //Action handler
+        {
             let mut result = Ok(());
             match &self.action { //respond to the context menus
                 Action::Delete(selected) => {
@@ -1719,15 +1750,15 @@ impl eframe::App for DFGraphicsHelper {
                 Action::Export => {
                     self.export();
                 },
+                Action::Update => {
+                    self.update();
+                },
                 Action::None => {},
             }
+            self.action = Action::None;
             if result.is_err() {
                 self.exception = result.unwrap_err();
             }
-        }
-
-        if !matches!(self.exception, DFGHError::None) {
-            error_window(self, ctx);
         }
     }
 }

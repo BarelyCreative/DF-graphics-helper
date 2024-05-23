@@ -1,4 +1,4 @@
-use std::{ops::RangeBounds, path};
+use std::path;
 use std::ops::RangeInclusive;
 
 use egui::Context;
@@ -23,6 +23,9 @@ pub enum DFGHError {
 
     #[error("Failed to process an image.")]
     ImageError(#[from] image::ImageError),
+
+    #[error("Unable to locate an image at the current path:\n\t{0}")]
+    ImageLoadError(path::PathBuf),
 
     #[error("Unknown import error.")]
     ImportUnknownError,
@@ -159,14 +162,12 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
     egui::Window::new("Error Window")
         .collapsible(false)
         .constrain(true)
-        .title_bar(false)
+        .title_bar(true)
         .default_size([600.0, 300.0])
         .show(ctx, |ui| {
 
         egui::ScrollArea::both()
             .show(ui, |ui| {
-                ui.label("Error:");
-                ui.separator();
                 ui.add(egui::Label::new(egui::RichText::new(
                     state.exception.to_string())
                     .monospace())

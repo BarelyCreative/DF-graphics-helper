@@ -1,5 +1,7 @@
 use std::ffi::OsStr;
+use std::fmt::Debug;
 use std::path;
+use std::collections::HashMap;
 use std::io::prelude::*;
 use std::{fs, io};
 use convert_case::{Boundary, Case, Casing};
@@ -65,6 +67,12 @@ macro_rules! graphics_file_export {
     };
 }
 
+// macro_rules! coordinates {
+//     () => {
+        
+//     }
+// }
+
 pub trait RAW {
     fn new() -> Self;
 
@@ -73,13 +81,14 @@ pub trait RAW {
     fn display(&self) -> String;
 }
 pub trait Menu {
-    fn menu(&mut self, ui: &mut Ui);
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared);
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Graphics {
     pub tile_page_files: Vec<TilePageFile>,
     pub graphics_files: Vec<GraphicsFile>,
+    pub shared: Shared,
 }
 impl Graphics {
     /// Generate a blank generic Graphics struct
@@ -87,6 +96,7 @@ impl Graphics {
         Graphics {
             tile_page_files: vec![TilePageFile::new()],
             graphics_files: vec![GraphicsFile::default()],
+            shared: Shared::new(),
         }
     }
 
@@ -142,6 +152,7 @@ impl Graphics {
     pub fn import(folder: &mut path::PathBuf) -> Result<(Graphics, path::PathBuf)> {
         let mut tile_page_files = Vec::new();
         let mut graphics_files = Vec::new();
+        let mut shared = Shared::new();
 
         //Check if the path includes or is inside a graphics directory and adjust path to show full mod folder.
         if folder.ends_with("graphics") {
@@ -210,10 +221,16 @@ impl Graphics {
             }
         }
 
+        shared.update(&tile_page_files, &graphics_files, &folder);
+
         Ok((
-            Graphics { tile_page_files, graphics_files },
+            Graphics { tile_page_files, graphics_files, shared },
             folder.clone()
         ))
+    }
+
+    pub fn update_shared(&mut self, folder: &path::PathBuf) {
+        self.shared.update(&self.tile_page_files, &self.graphics_files, folder);
     }
 
     pub fn export(&self, path: &path::PathBuf) -> Result<()> {
@@ -337,11 +354,11 @@ impl RAW for TilePageFile {
         // Ok(String)
     }
 }
-impl Menu for TilePageFile {
-    fn menu(&mut self, ui: &mut Ui) {
-        todo!()
-    }
-}
+// impl Menu for TilePageFile {
+//     fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+//         todo!()
+//     }
+// }
 impl TilePageFile {
     fn export(&self, path: &path::PathBuf) -> Result<()> {
         let mut tpf_name = format!("{}.txt", self.name.clone())
@@ -382,8 +399,8 @@ impl TilePageFile {
 pub struct TilePage {
     pub name: String,
     pub file_name: String,
-    pub image_size: [u32; 2],
-    pub tile_size: [u32; 2],
+    pub image_size: [usize; 2],
+    pub tile_size: [usize; 2],
 }
 impl RAW for TilePage {
     fn new() -> Self {
@@ -433,7 +450,7 @@ impl RAW for TilePage {
                                 .with_extension("png");
                             
                             if let Ok(image_dimensions) = image::image_dimensions(image_path) {
-                                tile_page.image_size = [image_dimensions.0, image_dimensions.1];
+                                tile_page.image_size = [image_dimensions.0 as _, image_dimensions.1 as _];
                                 continue; //skip parsing if reading image works
                             }
                         }
@@ -470,7 +487,7 @@ impl RAW for TilePage {
     }
 }
 impl Menu for TilePage {//todo edit menu
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         ui.separator();
         ui.label("TilePage token");
         ui.text_edit_singleline(&mut self.name);
@@ -914,7 +931,7 @@ impl RAW for Creature {
     }
 }
 impl Menu for Creature {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         ui.separator();
         ui.text_edit_singleline(&mut self.name);
 
@@ -1061,10 +1078,10 @@ impl RAW for SimpleLayer {
     }
 }
 impl Menu for SimpleLayer {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         //, tile_info: Vec<(String, [u32;2])>
 
-        let [x1, y1] = &mut self.coords;
+        // let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
         let sub_state = &mut self.sub_state;
         // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
@@ -1184,6 +1201,7 @@ impl RAW for LayerSet {
                                 },
                                 Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
                             }
+                            block_buffer.clear();
                         }
                     },
                     _ => {}
@@ -1208,7 +1226,8 @@ impl RAW for LayerSet {
     }
 
     fn display(&self) -> String {
-        let mut out = String::new();
+        todo!();
+        // let mut out = String::new();
 
         // match self {
         //     LayerSet::Simple(simple_layers) => {
@@ -1234,11 +1253,11 @@ impl RAW for LayerSet {
         //     },
         //     LayerSet::Empty => {}
         // }
-        out
+        // out
     }
 }
 impl Menu for LayerSet {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         ui.separator();
 
         // match self {
@@ -1317,45 +1336,44 @@ impl RAW for LayerGroup {
     
     fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
         let mut layer_group = LayerGroup::new();
-        // let mut block_buffer = Vec::with_capacity(100);
+        let mut block_buffer = Vec::with_capacity(100);
         let buffer_len = buffer.len();
 
-        Ok(LayerGroup::new())
-
-        // for (i_line, line_vec) in buffer.iter().enumerate() {
-        //     let len = line_vec.len();
+        for (i_line, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
             
-        //     if len >= 1 {
-        //         match line_vec[0].as_str() {
-        //             "LAYER" => {
-        //                 if block_buffer.len() > 0 {
-        //                     match Layer::read(block_buffer.clone(), Vec::new(), path) {
-        //                         Ok(layer) => {
-        //                             if layer.ne(&Layer::new()) {
-        //                                 layer_group.layers.push(layer.clone());
-        //                             }
-        //                         },
-        //                         Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
-        //                     }
-        //                 }
-        //             },
-        //             _ => {}
-        //         }
-        //     }
-        //     block_buffer.push(line_vec.clone());
-        // }
-        // let last_line = buffer.len();
-        // if block_buffer.len() > 0 {
-        //     match Layer::read(block_buffer.clone(), Vec::new(), path) {
-        //         Ok(layer) => {
-        //             if layer.ne(&Layer::new()) {
-        //                 layer_group.layers.push(layer.clone());
-        //             }
-        //         },
-        //         Err(e) => return wrap_import_buffer_error(last_line, buffer_len, 0..=0, e)
-        //     }
-        // }
-        // Ok(layer_group)
+            if len >= 1 {
+                match line_vec[0].as_str() {
+                    "LAYER" => {
+                        if block_buffer.len() > 0 {
+                            match Layer::read(block_buffer.clone(), Vec::new(), path) {
+                                Ok(layer) => {
+                                    if layer.ne(&Layer::new()) {
+                                        layer_group.layers.push(layer.clone());
+                                    }
+                                },
+                                Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
+                            }
+                            block_buffer.clear()
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            block_buffer.push(line_vec.clone());
+        }
+        let last_line = buffer.len();
+        if block_buffer.len() > 0 {
+            match Layer::read(block_buffer.clone(), Vec::new(), path) {
+                Ok(layer) => {
+                    if layer.ne(&Layer::new()) {
+                        layer_group.layers.push(layer.clone());
+                    }
+                },
+                Err(e) => return wrap_import_buffer_error(last_line, buffer_len, 0..=0, e)
+            }
+        }
+        Ok(layer_group)
     }
 
     fn display(&self) -> String {
@@ -1377,7 +1395,7 @@ impl RAW for LayerGroup {
     }
 }
 impl Menu for LayerGroup {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         ui.separator();
         ui.label("Layer group name:");
         ui.text_edit_singleline(&mut self.name);
@@ -1416,70 +1434,67 @@ impl RAW for Layer {
 
     fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
         let mut layer = Layer::new();
-        // let mut block_buffer = Vec::with_capacity(100);
         let buffer_len = buffer.len();
-        Ok(Layer::new())
 
-        // for (i_line, line_vec) in buffer.iter().enumerate() {
-        //     let len = line_vec.len();
+        for (i_line, line_vec) in buffer.iter().enumerate() {
+            let len = line_vec.len();
             
-        //     if len >= 1 {
-        //         match line_vec[0].as_str() {
-        //             "LAYER" => {
-        //                 if len >= 5 {
-        //                     let mut reduced_line = line_vec.clone();
-        //                     reduced_line.retain(|l| l.ne("AS_IS"));
-        //                     let reduced_len = reduced_line.len();
+            if len >= 1 {
+                match line_vec[0].as_str() {
+                    "LAYER" => {
+                        if len >= 5 {
+                            let mut reduced_line = line_vec.clone();
+                            reduced_line.retain(|l| l.ne("AS_IS"));
+                            let reduced_len = reduced_line.len();
 
-        //                     if reduced_len == 5 {
-        //                         layer = Layer {
-        //                             name: reduced_line[1].clone(),
-        //                             tile_name: reduced_line[2].clone(),
-        //                             coords:
-        //                                 [buffer_err_wrap!(reduced_line[3].parse(), i_line, buffer_len, 3..=3),
-        //                                 buffer_err_wrap!(reduced_line[4].parse(), i_line, buffer_len, 4..=4)],
-        //                             large_coords: None,
-        //                             conditions: Vec::new(),
-        //                         };
-        //                     } else if reduced_len == 8 {
-        //                         let (x,y) = 
-        //                             (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_line, buffer_len, 4..=4),
-        //                             buffer_err_wrap!(line_vec[5].parse::<u32>(), i_line, buffer_len, 5..=5));
-        //                         let (x_l,y_l) = 
-        //                             (buffer_err_wrap!(line_vec[6].parse::<u32>(), i_line, buffer_len, 6..=6),
-        //                             buffer_err_wrap!(line_vec[7].parse::<u32>(), i_line, buffer_len, 7..=7));
-        //                         layer = Layer {
-        //                             name: reduced_line[1].clone(),
-        //                             tile_name: reduced_line[2].clone(),
-        //                             coords: [x, y],
-        //                             large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-        //                             conditions: Vec::new(),
-        //                         };
-        //                     } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
-        //                         index_err!(i_line, buffer_len, len, 8, Layer);
-        //                     } else {
-        //                         index_err!(i_line, buffer_len, len, 5, Layer);
-        //                     }
-        //                 } else {
-        //                     index_err!(i_line, buffer_len, len, 5, Layer);
-        //                 }
-        //             },
-        //             _ => {
+                            if reduced_len == 5 {
+                                layer = Layer {
+                                    name: reduced_line[1].clone(),
+                                    tile_name: reduced_line[2].clone(),
+                                    coords:
+                                        [buffer_err_wrap!(reduced_line[3].parse(), i_line, buffer_len, 3..=3),
+                                        buffer_err_wrap!(reduced_line[4].parse(), i_line, buffer_len, 4..=4)],
+                                    large_coords: None,
+                                    conditions: Vec::new(),
+                                };
+                            } else if reduced_len == 8 {
+                                let (x,y) = 
+                                    (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_line, buffer_len, 4..=4),
+                                    buffer_err_wrap!(line_vec[5].parse::<u32>(), i_line, buffer_len, 5..=5));
+                                let (x_l,y_l) = 
+                                    (buffer_err_wrap!(line_vec[6].parse::<u32>(), i_line, buffer_len, 6..=6),
+                                    buffer_err_wrap!(line_vec[7].parse::<u32>(), i_line, buffer_len, 7..=7));
+                                layer = Layer {
+                                    name: reduced_line[1].clone(),
+                                    tile_name: reduced_line[2].clone(),
+                                    coords: [x, y],
+                                    large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
+                                    conditions: Vec::new(),
+                                };
+                            } else if reduced_line.contains(&"LARGE_IMAGE".to_string()) {
+                                index_err!(i_line, buffer_len, len, 8, Layer);
+                            } else {
+                                index_err!(i_line, buffer_len, len, 5, Layer);
+                            }
+                        } else {
+                            index_err!(i_line, buffer_len, len, 5, Layer);
+                        }
+                    },
+                    _ => {
 
-        //                 match Condition::read(vec![line_vec.clone()], Vec::new(), path) {
-        //                     Ok(condition) => {
-        //                         if condition.ne(&Condition::new()) {
-        //                             layer.conditions.push(condition)
-        //                         }
-        //                     },
-        //                     Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
-        //                 }
-        //             }
-        //         }
-        //     }
-        //     block_buffer.push(line_vec.clone());
-        // }
-        // Ok(layer)
+                        match Condition::read(vec![line_vec.clone()], Vec::new(), path) {
+                            Ok(condition) => {
+                                if condition.ne(&Condition::new()) {
+                                    layer.conditions.push(condition)
+                                }
+                            },
+                            Err(e) => return wrap_import_buffer_error(i_line, buffer_len, 0..=0, e)
+                        }
+                    }
+                }
+            }
+        }
+        Ok(layer)
     }
 
     fn display(&self) -> String {
@@ -1521,10 +1536,10 @@ impl RAW for Layer {
     }
 }
 impl Menu for Layer {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
         //, tile_info: Vec<(String, [u32; 2])>
         let layer = self.clone();
-        let [x1, y1] = &mut self.coords;
+        // let [x1, y1] = &mut self.coords;
         let conditions = &mut self.conditions;
         // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
 
@@ -1597,7 +1612,7 @@ impl Menu for Layer {
                 for (i_cond, condition) in conditions.iter_mut().enumerate() {
                     ui.push_id(i_cond, |ui| {
                         ui.group(|ui| {
-                            condition.menu(ui);//, tile_info.clone());
+                            condition.menu(ui, shared);//, tile_info.clone());
                             ui.add_space(PADDING);
                             if ui.button("Remove Condition").clicked() {
                                 delete = Some(i_cond);
@@ -1649,9 +1664,9 @@ impl RAW for Condition {
         Self::default()
     }
 
-    fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
-        let mut line_vec = buffer[0].clone();
-        let len = line_vec.len();
+    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
+        // let mut line_vec = buffer[0].clone();
+        // let len = line_vec.len();
         Ok(Condition::new())
         // if len > 0 {
         //     match line_vec[0].as_str() {
@@ -2088,7 +2103,7 @@ impl RAW for Condition {
     }
 }
 impl Menu for Condition {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         //, tile_info: Vec<(String, [u32; 2])>
         egui::ComboBox::from_label("Condition type")
             .selected_text(&self.name())
@@ -2580,7 +2595,7 @@ impl Menu for Condition {
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
                 ui.label("No additional input needed.");
             }
-            Condition::TissueSwap(app_mod, amount, tile, [x1,y1], large_coords) => {
+            Condition::TissueSwap(app_mod, amount, tile, [_x1, _y1], large_coords) => {
                 // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &tile);
                 egui::ComboBox::from_label(
                     "Appearance Modifier (only IF_MIN_CURLY supported (v50.05)):",
@@ -2763,17 +2778,17 @@ pub enum Caste {
     Custom(String),
 }
 impl Caste {
-    fn name(&self) -> String {
-        match self {
-            Caste::Female => "FEMALE".to_string(),
-            Caste::Male => "MALE".to_string(),
-            Caste::Custom(caste) => {
-                caste.with_boundaries(&[Boundary::Space])
-                    .to_case(Case::UpperSnake)
-                    .to_string()
-            },
-        }
-    }
+    // fn name(&self) -> String {
+    //     match self {
+    //         Caste::Female => "FEMALE".to_string(),
+    //         Caste::Male => "MALE".to_string(),
+    //         Caste::Custom(caste) => {
+    //             caste.with_boundaries(&[Boundary::Space])
+    //                 .to_case(Case::UpperSnake)
+    //                 .to_string()
+    //         },
+    //     }
+    // }
 
     fn from(string: String) -> Caste {
         match string.as_str() {
@@ -2816,18 +2831,18 @@ impl Metal {
         }
     }
 
-    fn from(string: String) -> Metal {
-        match string.as_str() {
-            "COPPER" => Metal::Copper,
-            "SILVER" => Metal::Silver,
-            "BRONZE" => Metal::Bronze,
-            "BLACK_BRONZE" => Metal::BlackBronze,
-            "IRON" => Metal::Iron,
-            "STEEL" => Metal::Steel,
-            "ADAMANTINE" => Metal::Adamantine,
-            metal => Metal::Custom(metal.to_string()),
-        }
-    }
+    // fn from(string: String) -> Metal {
+    //     match string.as_str() {
+    //         "COPPER" => Metal::Copper,
+    //         "SILVER" => Metal::Silver,
+    //         "BRONZE" => Metal::Bronze,
+    //         "BLACK_BRONZE" => Metal::BlackBronze,
+    //         "IRON" => Metal::Iron,
+    //         "STEEL" => Metal::Steel,
+    //         "ADAMANTINE" => Metal::Adamantine,
+    //         metal => Metal::Custom(metal.to_string()),
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2932,56 +2947,56 @@ impl MaterialFlag {
         }
     }
 
-    fn from(string: String) -> MaterialFlag {
-        match string.as_str() {
-            "IS_DIVINE_MATERIAL" => MaterialFlag::DivineMaterial,
-            "IS_CRAFTED_ARTIFACT" => MaterialFlag::Artifact,
-            "NOT_ARTIFACT" => MaterialFlag::NotArtifact,
-            "ANY_LEATHER_MATERIAL" => MaterialFlag::Leather,
-            "ANY_BONE_MATERIAL" => MaterialFlag::Bone,
-            "ANY_SHELL_MATERIAL" => MaterialFlag::Shell,
-            "ANY_WOOD_MATERIAL" => MaterialFlag::Wood,
-            "WOVEN_ITEM" => MaterialFlag::Woven,
-            "ANY_SILK_MATERIAL" => MaterialFlag::Silk,
-            "ANY_YARN_MATERIAL" => MaterialFlag::Yarn,
-            "ANY_PLANT_MATERIAL" => MaterialFlag::Plant,
-            "NOT_IMPROVED" => MaterialFlag::NotImproved,
-            "EMPTY" => MaterialFlag::Empty,
-            "ANY_STRAND_TISSUE" => MaterialFlag::StrandTissue,
-            "ANY_STONE_MATERIAL" => MaterialFlag::Stone,
-            "ANY_GEM_MATERIAL" => MaterialFlag::Gem,
-            "ANY_TOOTH_MATERIAL" => MaterialFlag::Tooth,
-            "ANY_HORN_MATERIAL" => MaterialFlag::Horn,
-            "ANY_PEARL_MATERIAL" => MaterialFlag::Pearl,
-            "ANY_SOAP_MATERIAL" => MaterialFlag::Soap,
-            "HARD_ITEM_MATERIAL" => MaterialFlag::HardMat,
-            "METAL_ITEM_MATERIAL" => MaterialFlag::Metal,
-            "GLASS_MATERIAL" => MaterialFlag::Glass,
-            "IS_SAND_MATERIAL" => MaterialFlag::Sand,
-            "CONTAINS_LYE" => MaterialFlag::Lye,
-            "POTASHABLE" => MaterialFlag::Potashable,
-            "FOOD_STORAGE_CONTAINER" => MaterialFlag::FoodStorage,
-            "NOT_CONTAIN_BARREL_ITEM" => MaterialFlag::EmptyBarrel,
-            "NOT_PRESSED" => MaterialFlag::NotPressed,
-            "FIRE_BUILD_SAFE" => MaterialFlag::FireSafe,
-            "MAGMA_BUILD_SAFE" => MaterialFlag::MagmaSafe,
-            "BUILDMAT" => MaterialFlag::BuildMat,
-            "WORTHLESS_STONE_ONLY" => MaterialFlag::WorthlessStone,
-            "USE_BODY_COMPONENT" => MaterialFlag::BodyComp,
-            "CAN_USE_LOCATION_RESERVED" => MaterialFlag::CanUseLocation,
-            "NO_EDGE_ALLOWED" => MaterialFlag::NoEdge,
-            "HAS_EDGE" => MaterialFlag::Edge,
-            "NOT_ENGRAVED" => MaterialFlag::NotEngraved,
-            "HAS_WRITING_IMPROVEMENT" => MaterialFlag::WritingImprovment,
-            "DOES_NOT_ABSORB" => MaterialFlag::NotAbsorb,
-            "UNROTTEN" => MaterialFlag::Unrotten,
-            "NOT_WEB" => MaterialFlag::NotWeb,
-            "WEB_ONLY" => MaterialFlag::Web,
-            "CAN_USE_ARTIFACT" => MaterialFlag::CanArtifact,
-            "ON_GROUND" => MaterialFlag::OnGround,
-            _ => MaterialFlag::None,
-        }
-    }
+    // fn from(string: String) -> MaterialFlag {
+    //     match string.as_str() {
+    //         "IS_DIVINE_MATERIAL" => MaterialFlag::DivineMaterial,
+    //         "IS_CRAFTED_ARTIFACT" => MaterialFlag::Artifact,
+    //         "NOT_ARTIFACT" => MaterialFlag::NotArtifact,
+    //         "ANY_LEATHER_MATERIAL" => MaterialFlag::Leather,
+    //         "ANY_BONE_MATERIAL" => MaterialFlag::Bone,
+    //         "ANY_SHELL_MATERIAL" => MaterialFlag::Shell,
+    //         "ANY_WOOD_MATERIAL" => MaterialFlag::Wood,
+    //         "WOVEN_ITEM" => MaterialFlag::Woven,
+    //         "ANY_SILK_MATERIAL" => MaterialFlag::Silk,
+    //         "ANY_YARN_MATERIAL" => MaterialFlag::Yarn,
+    //         "ANY_PLANT_MATERIAL" => MaterialFlag::Plant,
+    //         "NOT_IMPROVED" => MaterialFlag::NotImproved,
+    //         "EMPTY" => MaterialFlag::Empty,
+    //         "ANY_STRAND_TISSUE" => MaterialFlag::StrandTissue,
+    //         "ANY_STONE_MATERIAL" => MaterialFlag::Stone,
+    //         "ANY_GEM_MATERIAL" => MaterialFlag::Gem,
+    //         "ANY_TOOTH_MATERIAL" => MaterialFlag::Tooth,
+    //         "ANY_HORN_MATERIAL" => MaterialFlag::Horn,
+    //         "ANY_PEARL_MATERIAL" => MaterialFlag::Pearl,
+    //         "ANY_SOAP_MATERIAL" => MaterialFlag::Soap,
+    //         "HARD_ITEM_MATERIAL" => MaterialFlag::HardMat,
+    //         "METAL_ITEM_MATERIAL" => MaterialFlag::Metal,
+    //         "GLASS_MATERIAL" => MaterialFlag::Glass,
+    //         "IS_SAND_MATERIAL" => MaterialFlag::Sand,
+    //         "CONTAINS_LYE" => MaterialFlag::Lye,
+    //         "POTASHABLE" => MaterialFlag::Potashable,
+    //         "FOOD_STORAGE_CONTAINER" => MaterialFlag::FoodStorage,
+    //         "NOT_CONTAIN_BARREL_ITEM" => MaterialFlag::EmptyBarrel,
+    //         "NOT_PRESSED" => MaterialFlag::NotPressed,
+    //         "FIRE_BUILD_SAFE" => MaterialFlag::FireSafe,
+    //         "MAGMA_BUILD_SAFE" => MaterialFlag::MagmaSafe,
+    //         "BUILDMAT" => MaterialFlag::BuildMat,
+    //         "WORTHLESS_STONE_ONLY" => MaterialFlag::WorthlessStone,
+    //         "USE_BODY_COMPONENT" => MaterialFlag::BodyComp,
+    //         "CAN_USE_LOCATION_RESERVED" => MaterialFlag::CanUseLocation,
+    //         "NO_EDGE_ALLOWED" => MaterialFlag::NoEdge,
+    //         "HAS_EDGE" => MaterialFlag::Edge,
+    //         "NOT_ENGRAVED" => MaterialFlag::NotEngraved,
+    //         "HAS_WRITING_IMPROVEMENT" => MaterialFlag::WritingImprovment,
+    //         "DOES_NOT_ABSORB" => MaterialFlag::NotAbsorb,
+    //         "UNROTTEN" => MaterialFlag::Unrotten,
+    //         "NOT_WEB" => MaterialFlag::NotWeb,
+    //         "WEB_ONLY" => MaterialFlag::Web,
+    //         "CAN_USE_ARTIFACT" => MaterialFlag::CanArtifact,
+    //         "ON_GROUND" => MaterialFlag::OnGround,
+    //         _ => MaterialFlag::None,
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3004,58 +3019,58 @@ impl ItemType {
         }
     }
 
-    fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
-        let len = strings.len();
-        match strings[0].as_str() {
-            "BY_CATEGORY" => {
-                if len > 3 {
-                    Ok(
-                        (ItemType::ByCategory(strings[1].clone(),
-                        Equipment::from(strings[2].clone())),
-                        strings[3..].to_vec())
-                    )
-                } else {
-                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
-                    return Err(DFGHError::None)//todo fix
-                }
-            },
-            "BY_TOKEN" => {
-                if len > 3 {
-                    Ok(
-                        (ItemType::ByToken(strings[1].clone(),
-                        Equipment::from(strings[2].clone())),
-                        strings[3..].to_vec())
-                    )
-                } else {
-                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
-                    return Err(DFGHError::None)//todo fix
-                }
-            },
-            "ANY_HELD" => {
-                if len > 2 {
-                    Ok(
-                        (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
-                        strings[2..].to_vec())
-                    )
-                } else {
-                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
-                    return Err(DFGHError::None)//todo fix
-                }
-            },
-            "WIELD" => {
-                if len > 2 {
-                    Ok(
-                        (ItemType::Wield(Equipment::from(strings[1].clone())),
-                        strings[2..].to_vec())
-                    )
-                } else {
-                    // return Err(DFGHError::ImportConditionError(strings.join(":")))
-                    return Err(DFGHError::None)//todo fix
-                }
-            },
-            _ => {Ok((ItemType::None, strings))}
-        }
-    }
+    // fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
+    //     let len = strings.len();
+    //     match strings[0].as_str() {
+    //         "BY_CATEGORY" => {
+    //             if len > 3 {
+    //                 Ok(
+    //                     (ItemType::ByCategory(strings[1].clone(),
+    //                     Equipment::from(strings[2].clone())),
+    //                     strings[3..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "BY_TOKEN" => {
+    //             if len > 3 {
+    //                 Ok(
+    //                     (ItemType::ByToken(strings[1].clone(),
+    //                     Equipment::from(strings[2].clone())),
+    //                     strings[3..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "ANY_HELD" => {
+    //             if len > 2 {
+    //                 Ok(
+    //                     (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
+    //                     strings[2..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "WIELD" => {
+    //             if len > 2 {
+    //                 Ok(
+    //                     (ItemType::Wield(Equipment::from(strings[1].clone())),
+    //                     strings[2..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         _ => {Ok((ItemType::None, strings))}
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3088,20 +3103,20 @@ impl Equipment {
         }
     }
 
-    fn from(string: String) -> Equipment {
-        match string.as_str() {
-            "ARMOR" => Equipment::Armor,
-            "HELM" => Equipment::Helm,
-            "GLOVES" => Equipment::Gloves,
-            "SHOES" => Equipment::Shoes,
-            "PANTS" => Equipment::Pants,
-            "SHIELD" => Equipment::Shield,
-            "WEAPON" => Equipment::Weapon,
-            "TOOL" => Equipment::Tool,
-            "ANY" => Equipment::Any,
-            _ => Equipment::None,
-        }
-    }
+    // fn from(string: String) -> Equipment {
+    //     match string.as_str() {
+    //         "ARMOR" => Equipment::Armor,
+    //         "HELM" => Equipment::Helm,
+    //         "GLOVES" => Equipment::Gloves,
+    //         "SHOES" => Equipment::Shoes,
+    //         "PANTS" => Equipment::Pants,
+    //         "SHIELD" => Equipment::Shield,
+    //         "WEAPON" => Equipment::Weapon,
+    //         "TOOL" => Equipment::Tool,
+    //         "ANY" => Equipment::Any,
+    //         _ => Equipment::None,
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3150,28 +3165,29 @@ impl Profession {
         }
     }
 
-    fn from(string: String) -> Profession {
-        match string.as_str() {
-            "STONEWORKER" => Profession::Stoneworker,
-            "MINER" => Profession::Miner,
-            "METALSMITH" => Profession::Metalsmith,
-            "ENGINEER" => Profession::Engineer,
-            "FARMER" => Profession::Farmer,
-            "WOODWORKER" => Profession::Woodworker,
-            "JEWELER" => Profession::Jeweler,
-            "RANGER" => Profession::Ranger,
-            "STANDARD" => Profession::Standard,
-            "CRAFTSMAN" => Profession::Craftsman,
-            "FISHERY_WORKER" => Profession::FisheryWorker,
-            "MERCHANT" => Profession::Merchant,
-            "NONE" => Profession::None,
-            prof=> Profession::Custom(prof.to_string()),
-        }
-    }
+    // fn from(string: String) -> Profession {
+    //     match string.as_str() {
+    //         "STONEWORKER" => Profession::Stoneworker,
+    //         "MINER" => Profession::Miner,
+    //         "METALSMITH" => Profession::Metalsmith,
+    //         "ENGINEER" => Profession::Engineer,
+    //         "FARMER" => Profession::Farmer,
+    //         "WOODWORKER" => Profession::Woodworker,
+    //         "JEWELER" => Profession::Jeweler,
+    //         "RANGER" => Profession::Ranger,
+    //         "STANDARD" => Profession::Standard,
+    //         "CRAFTSMAN" => Profession::Craftsman,
+    //         "FISHERY_WORKER" => Profession::FisheryWorker,
+    //         "MERCHANT" => Profession::Merchant,
+    //         "NONE" => Profession::None,
+    //         prof=> Profession::Custom(prof.to_string()),
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Statue {
+    pub name: String,
     pub state: State,
     pub tile_name: String,
     pub coords: [u32; 2],
@@ -3180,13 +3196,27 @@ pub struct Statue {
 impl RAW for Statue {
     fn new() -> Self {
         Self {
+            name: "(new)".to_string(),
             state: State::Default,
             tile_name: String::new(),
             coords: [0, 0],
             large_coords: None,
         }
     }
-
+    // "STATUE_CREATURE_CASTE_GRAPHICS" |
+    // "STATUE_CREATURE_GRAPHICS" => {
+    //     if block_buffer.len() > 0 {
+    //         match Statue::read(block_buffer.clone(), Vec::new(), path) {
+    //             Ok(statue) => {
+    //                 if statue.ne(&Statue::new()) {
+    //                     statues.push(statue.clone());
+    //                 }
+    //             },
+    //             Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
+    //         }
+    //         block_buffer.clear();
+    //     }
+    // },
     fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
         let mut statue = Statue::new();
         let buffer_len = buffer.len();        
@@ -3194,27 +3224,42 @@ impl RAW for Statue {
         for (i_line, line_vec) in buffer.iter().enumerate() {
             let len = line_vec.len();
 
-            let mut reduced_line = line_vec.clone();
-            reduced_line.retain(|l| l.ne("AS_IS"));
-            let reduced_len = reduced_line.len();
-
-            if reduced_len > 3 {//don't false index error on caste statues 
-                if reduced_len == 6 {
-                    let (x,y) = 
-                        (buffer_err_wrap!(line_vec[2].parse::<u32>(), i_line, buffer_len, 2..=2),
-                        buffer_err_wrap!(line_vec[3].parse::<u32>(), i_line, buffer_len, 3..=3));
-                    let (x_l,y_l) = 
-                        (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_line, buffer_len, 4..=4),
-                        buffer_err_wrap!(line_vec[5].parse::<u32>(), i_line, buffer_len, 5..=5));
-                    statue = Statue{
-                        state: State::from(line_vec[0].clone()),
-                        tile_name: reduced_line[1].clone(),
-                        coords: [x, y],
-                        large_coords: Some([x_l.abs_diff(x), y_l.abs_diff(y)]),
-                    };
-                    break
-                } else {
-                    index_err!(i_line, buffer_len, len, 6, Statue);
+            match line_vec[0].as_str() {
+                "STATUE_CREATURE_CASTE_GRAPHICS" |
+                "STATUE_CREATURE_GRAPHICS" => {
+                    if len >= 2 {
+                        statue.name = line_vec[1].clone();
+                    } else {
+                        index_err!(i_line, buffer_len, len, 2, Statue);
+                    }
+                },
+                other => {
+                    match State::from(other.to_string()) {
+                        State::Custom(_) => {},
+                        _ => {
+                            let mut reduced_line = line_vec.clone();
+                            reduced_line.retain(|l| l.ne("AS_IS"));
+                            let reduced_len = reduced_line.len();
+                
+                            if reduced_len > 3 {//don't false index error on caste statues 
+                                if reduced_len == 6 {
+                                    let (x,y) = 
+                                        (buffer_err_wrap!(line_vec[2].parse::<u32>(), i_line, buffer_len, 2..=2),
+                                        buffer_err_wrap!(line_vec[3].parse::<u32>(), i_line, buffer_len, 3..=3));
+                                    let (x_l,y_l) = 
+                                        (buffer_err_wrap!(line_vec[4].parse::<u32>(), i_line, buffer_len, 4..=4),
+                                        buffer_err_wrap!(line_vec[5].parse::<u32>(), i_line, buffer_len, 5..=5));
+                                    statue.state = State::from(line_vec[0].clone());
+                                    statue.tile_name = reduced_line[1].clone();
+                                    statue.coords = [x, y];
+                                    statue.large_coords = Some([x_l.abs_diff(x), y_l.abs_diff(y)]);
+                                }
+                                break
+                            } else {
+                                index_err!(i_line, buffer_len, len, 6, Statue);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3238,10 +3283,10 @@ impl RAW for Statue {
     }
 }
 impl Menu for Statue {
-    fn menu(&mut self, ui: &mut Ui) {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         //, tile_info: Vec<(String, [u32;2])>
 
-        let [x1, y1] = &mut self.coords;
+        // let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
         // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
         
@@ -3300,11 +3345,11 @@ pub struct Plant {
 impl RAW for Plant {
     fn new() -> Self {
         Self {
-            
+
         }
     }
 
-    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
         Ok(Plant::new())
     }
 
@@ -3325,7 +3370,7 @@ impl RAW for TileGraphic {
         }
     }
 
-    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
         Ok(TileGraphic::new())
     }
 
@@ -3344,7 +3389,7 @@ impl RAW for Palette {
         todo!()
     }
 
-    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
         todo!()
     }
 
@@ -3363,7 +3408,7 @@ impl RAW for ASCIIGraphics {
         todo!()
     }
 
-    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: Option<&path::PathBuf>) -> Result<Self> {
+    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
         todo!()
     }
 
@@ -3372,66 +3417,60 @@ impl RAW for ASCIIGraphics {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Shared {
+    tile_page_info: HashMap<String, TilePageInfo>,
+}
+impl Shared {
+    fn new() -> Self {
+        Self {
+            tile_page_info: HashMap::new(),
+        }
+    }
 
-    // fn import_layer_set(state: State, ls_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerSet> {
-    //     let mut layer_groups = Vec::new();
-    //     let mut lg_buffer = Vec::new();
+    pub fn update(&mut self, tp_files: &Vec<TilePageFile>, _g_files: &Vec<GraphicsFile>, folder: &path::PathBuf) {
+        for tp_file in tp_files.iter() {
+            for tp in tp_file.tile_pages.iter() {
+                dbg!(tp.name.clone());
+                dbg!(tp.file_name.clone());
+                self.tile_page_info.entry(tp.name.clone())
+                    .or_insert_with(|| {Self::tile_page_info(tp, folder)}
+                );
+            }
+        }
+    }
 
-    //     for (i_b_line, line_vec) in ls_buffer.iter().enumerate() {
-    //         match line_vec[0].as_str() {
-    //             "LAYER_SET" => {},//do nothing
-    //             "LAYER_GROUP" => {//($layer_groups:ident, $lg_buffer:ident, $i_b_line:ident, $raw_buffer:ident)
-    //                 lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
-    //                 lg_buffer.push(line_vec.clone());
-    //             },
-    //             "END_LAYER_GROUP" => {
-    //                 lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
-    //                 lg_buffer.push(line_vec.clone());
-    //             },
-    //             _ => {
-    //                 lg_buffer.push(line_vec.clone());
-    //             }
-    //         }
-    //     }
+    fn tile_page_info(tp: &TilePage, folder: &path::PathBuf) -> TilePageInfo {
+        let image_path = folder.join("graphics").join("images")
+            .join(tp.file_name.clone()).with_extension("png");
+        dbg!(image_path.clone());
+        let image = image::open(&image_path).ok();
+        let image_size: [usize; 2];
 
-    //     let i_b_line = ls_buffer.len() - 1;
-    //     lg_push!(layer_groups, lg_buffer, i_b_line, raw_buffer);
+        if let Some(dyn_image) = &image {
+            image_size = [dyn_image.width() as usize, dyn_image.height() as usize];
+        } else {
+            image_size = tp.image_size;
+        }
 
-    //     Self::rename_layer_groups(state.clone(), &mut layer_groups);
-        
-    //     Ok(LayerSet::Layered(state, layer_groups))
-    // }
+        TilePageInfo {image_path, image_size, image, ..Default::default()}
+    }
+}
 
-    // fn import_layer_group(lg_buffer: Vec<Vec<String>>, raw_buffer: Vec<String>) -> Result<LayerGroup> {
-    //     let name = String::new();
-    //     let mut layers = Vec::new();
-    //     let mut l_buffer = Vec::new();
-
-    //     for (i_b_line, line_vec) in lg_buffer.iter().enumerate() {
-    //         match line_vec[0].as_str() {
-    //             "LAYER_GROUP" | "END_LAYER_GROUP" => {},
-    //             "LAYER" => {
-    //                 if !l_buffer.is_empty() {
-    //                     layers.push(
-    //                         buffer_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
-    //                     );
-    //                     l_buffer.clear();
-    //                 }
-    //                 l_buffer.push(line_vec.clone());
-    //             },
-    //             _ => {
-    //                 l_buffer.push(line_vec.clone());
-    //             },
-    //         }
-    //     }
-        
-    //     let i_b_line = lg_buffer.len() - 1;
-    //     if !l_buffer.is_empty() {
-    //         layers.push(
-    //             buffer_err_wrap!(Self::import_layer(l_buffer.clone(), raw_buffer.clone()), i_b_line, raw_buffer, 0..=0)
-    //         );
-    //         l_buffer.clear();
-    //     }
-
-    //     Ok(LayerGroup {name, layers})
-    // }
+#[derive(Clone, Default, PartialEq)]
+pub struct TilePageInfo {
+    image_path: path::PathBuf,
+    image_size: [usize; 2],
+    image: Option<image::DynamicImage>,
+    texture: Option<egui::TextureHandle>,
+}
+impl Debug for TilePageInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TilePageInfo")
+            .field("image_path", &self.image_path)
+            .field("image_size", &self.image_size)
+            .field("image", &self.image)
+            .field("texture", &self.texture.clone().map(|t| t.name()))
+            .finish()
+    }
+}
