@@ -1657,6 +1657,17 @@ pub enum Condition {
     TissueMayHaveShaping(Vec<String>),
     TissueNotShaped,
     TissueSwap(String, u32, String, [u32;2], Option<[u32;2]>),
+    ItemQuality(usize),
+    UsePalette(String, usize),
+    UseStandardPalette,
+    LSPalette(String),
+    LSPaletteFile(String),
+    LSPaletteDefault(usize),
+    ConditionBP(BodyPartType),
+    LGConditionBP(BodyPartType),
+    BPAppearanceModifierRange(BPAppMod, usize, usize),
+    BPPresent,
+    BPScarred,
     Custom(String),
 }
 impl RAW for Condition {
@@ -2091,6 +2102,39 @@ impl RAW for Condition {
                         y1,
                     ));
                 }
+            },
+            Condition::ItemQuality(index) => {//todo check
+                out = format!("\t\t\t\t[ITEM_QUALITY:{}]\n", index);
+            },
+            Condition::UsePalette(palette_name, row) => {
+                out = format!("\t\t\t\t[USE_PALETTE:{}:{}]\n", palette_name.clone(), row);
+            },
+            Condition::UseStandardPalette => {
+                out = format!("\t\t\t\t[USE_STANDARD_PALETTE_FROM_ITEM]\n");
+            },
+            Condition::LSPalette(string) => {//todo check
+                out = format!("\t\t\t\t[LS_PALETTE:{}]\n", string);
+            },
+            Condition::LSPaletteFile(string) => {//todo check
+                out = format!("\t\t\t\t[LS_PALETTE_FILE:{}]\n", string);
+            },
+            Condition::LSPaletteDefault(index) => {//todo check
+                out = format!("\t\t\t\t[LS_PALETTE_DEFAULT:{}]\n", index);
+            },
+            Condition::ConditionBP(bp_type) => {
+                out = format!("\t\t\t\t[CONDITION_BP:{}]\n", Into::<String>::into(bp_type.clone()));
+            },
+            Condition::LGConditionBP(bp_type) => {//todo check
+                out = format!("\t\t\t\t[LG_CONDITION_BP:{}]\n", Into::<String>::into(bp_type.clone()));
+            },
+            Condition::BPAppearanceModifierRange(bp_app_mod, min, max) => {
+                out = format!("\t\t\t\t[\t\t\t\t[BP_APPEARANCE_MODIFIER_RANGE:{},{},{}]\n", Into::<String>::into(bp_app_mod.clone()), min, max);
+            },
+            Condition::BPPresent => {
+                out = format!("\t\t\t\t[BP_PRESENT]\n");
+            },
+            Condition::BPScarred => {
+                out = format!("\t\t\t\t[BP_SCARRED]\n");
             },
             Condition::Custom(string) => {
                 out = format!("\t\t\t\t[{0}]\n",
@@ -2689,6 +2733,17 @@ impl Condition {
             Condition::TissueMayHaveShaping(..) => "TISSUE_MAY_HAVE_SHAPING".to_string(),
             Condition::TissueNotShaped => "TISSUE_NOT_SHAPED".to_string(),
             Condition::TissueSwap(..) => "TISSUE_SWAP".to_string(),
+            Condition::ItemQuality(..) => "ITEM_QUALITY".to_string(),
+            Condition::UsePalette(..) => "USE_PALETTE".to_string(),
+            Condition::UseStandardPalette => "USE_STANDARD_PALETTE".to_string(),
+            Condition::ConditionBP(..) => "CONDITION_BP".to_string(),
+            Condition::LGConditionBP(..) => "LG_CONDITION_BP".to_string(),
+            Condition::LSPalette(..) => "LS_PALETTE".to_string(),
+            Condition::LSPaletteFile(..) => "LS_PALETTE_FILE".to_string(),
+            Condition::LSPaletteDefault(..) => "LS_PALETTE_DEFAULT".to_string(),
+            Condition::BPAppearanceModifierRange(..) => "BP_APP_MOD_RANGE".to_string(),
+            Condition::BPPresent => "BP_PRESENT".to_string(),
+            Condition::BPScarred => "BP_SCARRED".to_string(),
             Self::Custom(string) => {
                 string.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
@@ -2708,6 +2763,7 @@ pub enum State {
     Animated,
     Corpse,
     ListIcon,
+    Portrait,
     TrainedHunter,
     TrainedWar,
     Skeleton,
@@ -2723,6 +2779,7 @@ impl State {
             Self::Animated => "ANIMATED".to_string(),
             Self::Corpse => "CORPSE".to_string(),
             Self::ListIcon => "LIST_ICON".to_string(),
+            Self::Portrait => "PORTRAIT".to_string(),
             Self::TrainedHunter => "TRAINED_HUNTER".to_string(),
             Self::TrainedWar => "TRAINED_WAR".to_string(),
             Self::Skeleton => "SKELETON".to_string(),
@@ -2737,13 +2794,14 @@ impl State {
     }
 
     fn iterator() -> std::slice::Iter<'static, Self> {
-        static STATES: [State; 10] = [
+        static STATES: [State; 11] = [
             State::Default,
             State::Child,
             State::Baby,
             State::Animated,
             State::Corpse,
             State::ListIcon,
+            State::Portrait,
             State::TrainedHunter,
             State::TrainedWar,
             State::Skeleton,
@@ -2761,6 +2819,7 @@ impl From<String> for State {
             "ANIMATED" => State::Animated,
             "CORPSE" => State::Corpse,
             "LIST_ICON" => State::ListIcon,
+            "PORTRAIT" => State::Portrait,
             "TRAINED_HUNTER" => State::TrainedHunter,
             "TRAINED_WAR" => State::TrainedWar,
             "SKELETON" => State::Skeleton,
@@ -3071,6 +3130,172 @@ impl ItemType {
     //         _ => {Ok((ItemType::None, strings))}
     //     }
     // }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum BodyPartType {
+    #[default]
+    None,
+    ByType(String, BodyPart),
+    ByCategory(String, BodyPart),
+    ByToken(String, BodyPart),
+}
+impl BodyPartType {
+    // fn name(&self) -> String {
+    //     match self {
+    //         BodyPartType::None => String::new(),
+    //         BodyPartType::ByType(..) => "BY_TYPE".to_string(),
+    //         BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
+    //         BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
+    //     }
+    // }
+
+    // fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
+    //     let len = strings.len();
+    //     match strings[0].as_str() {
+    //         "BY_CATEGORY" => {
+    //             if len > 3 {
+    //                 Ok(
+    //                     (ItemType::ByCategory(strings[1].clone(),
+    //                     Equipment::from(strings[2].clone())),
+    //                     strings[3..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "BY_TOKEN" => {
+    //             if len > 3 {
+    //                 Ok(
+    //                     (ItemType::ByToken(strings[1].clone(),
+    //                     Equipment::from(strings[2].clone())),
+    //                     strings[3..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "ANY_HELD" => {
+    //             if len > 2 {
+    //                 Ok(
+    //                     (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
+    //                     strings[2..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "WIELD" => {
+    //             if len > 2 {
+    //                 Ok(
+    //                     (ItemType::Wield(Equipment::from(strings[1].clone())),
+    //                     strings[2..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         _ => {Ok((ItemType::None, strings))}
+    //     }
+    // }
+}
+// impl From<Vec<String>> for BodyPartType {
+//     fn from(value: Vec<String>) -> Self {
+//         todo!()
+//     }
+// }
+impl Into<String> for BodyPartType {
+    fn into(self) -> String {
+        todo!()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum BodyPart {
+    #[default]
+    None,
+    Custom(Vec<String>),
+}
+impl BodyPart {
+    // fn name(&self) -> String {
+    //     match self {
+    //         BodyPart::None => String::new(),
+    //         BodyPart::Custom(..) => "BP".to_string(),//todo
+    //     }
+    // }
+
+    // fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
+    //     let len = strings.len();
+    //     match strings[0].as_str() {
+    //         "BY_CATEGORY" => {
+    //             if len > 3 {
+    //                 Ok(
+    //                     (ItemType::ByCategory(strings[1].clone(),
+    //                     Equipment::from(strings[2].clone())),
+    //                     strings[3..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "BY_TOKEN" => {
+    //             if len > 3 {
+    //                 Ok(
+    //                     (ItemType::ByToken(strings[1].clone(),
+    //                     Equipment::from(strings[2].clone())),
+    //                     strings[3..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "ANY_HELD" => {
+    //             if len > 2 {
+    //                 Ok(
+    //                     (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
+    //                     strings[2..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         "WIELD" => {
+    //             if len > 2 {
+    //                 Ok(
+    //                     (ItemType::Wield(Equipment::from(strings[1].clone())),
+    //                     strings[2..].to_vec())
+    //                 )
+    //             } else {
+    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
+    //                 return Err(DFGHError::None)//todo fix
+    //             }
+    //         },
+    //         _ => {Ok((ItemType::None, strings))}
+    //     }
+    // }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum BPAppMod {
+    #[default]
+    None,
+}
+// impl From<Vec<String>> for BPAppMod {
+//     fn from(value: Vec<String>) -> Self {
+//         todo!()
+//     }
+// }
+impl Into<String> for BPAppMod {
+    fn into(self) -> String {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
