@@ -804,6 +804,7 @@ pub struct Creature {
     pub caste: Option<Caste>,
     pub simple_layers: Vec<SimpleLayer>,
     pub layer_sets: Vec<LayerSet>, 
+    pub creature_shared: CreatureShared,
 }
 impl RAW for Creature {
     fn new() -> Creature {
@@ -812,6 +813,7 @@ impl RAW for Creature {
             caste: None,
             simple_layers: Vec::new(),
             layer_sets: Vec::new(),
+            creature_shared: CreatureShared::new(),
         }
     }
 
@@ -1164,12 +1166,14 @@ impl Menu for SimpleLayer {
 pub struct LayerSet {
     state: State,
     layer_groups: Vec<LayerGroup>,
+    palettes: Vec<Palette>,
 }
 impl RAW for LayerSet {
     fn new() -> Self {
         Self {
             state: State::default(),
             layer_groups: Vec::new(),
+            palettes: Vec::new(),
         }
     }
 
@@ -1204,6 +1208,28 @@ impl RAW for LayerSet {
                             block_buffer.clear();
                         }
                     },
+                    "LS_PALETTE" => {
+                        if len >= 2 {
+                            layer_set.palettes.push(Palette{name: line_vec[1].clone(), file_name: "".to_string(), default_index: 0});
+                        } else {
+                            index_err!(i_line, buffer_len, len, 2, LayerSet);
+                        }
+                    }
+                    "LS_PALETTE_FILE" => {
+                        if len >= 2 {
+                            layer_set.palettes.last_mut().get_or_insert(&mut Palette::new()).file_name = line_vec[1].clone();
+                        } else {
+                            index_err!(i_line, buffer_len, len, 2, LayerSet);
+                        }
+                    }
+                    "LS_PALETTE_DEFAULT" => {
+                        if len >= 2 {
+                            layer_set.palettes.last_mut().get_or_insert(&mut Palette::new()).default_index = 
+                                buffer_err_wrap!(line_vec[1].parse::<usize>(), i_line, buffer_len, 1..=1);
+                        } else {
+                            index_err!(i_line, buffer_len, len, 2, LayerSet);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1660,9 +1686,9 @@ pub enum Condition {
     ItemQuality(usize),
     UsePalette(String, usize),
     UseStandardPalette,
-    LSPalette(String),
-    LSPaletteFile(String),
-    LSPaletteDefault(usize),
+    // LSPalette(String),
+    // LSPaletteFile(String),
+    // LSPaletteDefault(usize),
     ConditionBP(BodyPartType),
     LGConditionBP(BodyPartType),
     BPAppearanceModifierRange(BPAppMod, usize, usize),
@@ -2112,15 +2138,15 @@ impl RAW for Condition {
             Condition::UseStandardPalette => {
                 out = format!("\t\t\t\t[USE_STANDARD_PALETTE_FROM_ITEM]\n");
             },
-            Condition::LSPalette(string) => {//todo check
-                out = format!("\t\t\t\t[LS_PALETTE:{}]\n", string);
-            },
-            Condition::LSPaletteFile(string) => {//todo check
-                out = format!("\t\t\t\t[LS_PALETTE_FILE:{}]\n", string);
-            },
-            Condition::LSPaletteDefault(index) => {//todo check
-                out = format!("\t\t\t\t[LS_PALETTE_DEFAULT:{}]\n", index);
-            },
+            // Condition::LSPalette(string) => {//todo check
+            //     out = format!("\t\t\t\t[LS_PALETTE:{}]\n", string);
+            // },
+            // Condition::LSPaletteFile(string) => {//todo check
+            //     out = format!("\t\t\t\t[LS_PALETTE_FILE:{}]\n", string);
+            // },
+            // Condition::LSPaletteDefault(index) => {//todo check
+            //     out = format!("\t\t\t\t[LS_PALETTE_DEFAULT:{}]\n", index);
+            // },
             Condition::ConditionBP(bp_type) => {
                 out = format!("\t\t\t\t[CONDITION_BP:{}]\n", Into::<String>::into(bp_type.clone()));
             },
@@ -2738,9 +2764,9 @@ impl Condition {
             Condition::UseStandardPalette => "USE_STANDARD_PALETTE".to_string(),
             Condition::ConditionBP(..) => "CONDITION_BP".to_string(),
             Condition::LGConditionBP(..) => "LG_CONDITION_BP".to_string(),
-            Condition::LSPalette(..) => "LS_PALETTE".to_string(),
-            Condition::LSPaletteFile(..) => "LS_PALETTE_FILE".to_string(),
-            Condition::LSPaletteDefault(..) => "LS_PALETTE_DEFAULT".to_string(),
+            // Condition::LSPalette(..) => "LS_PALETTE".to_string(),
+            // Condition::LSPaletteFile(..) => "LS_PALETTE_FILE".to_string(),
+            // Condition::LSPaletteDefault(..) => "LS_PALETTE_DEFAULT".to_string(),
             Condition::BPAppearanceModifierRange(..) => "BP_APP_MOD_RANGE".to_string(),
             Condition::BPPresent => "BP_PRESENT".to_string(),
             Condition::BPScarred => "BP_SCARRED".to_string(),
@@ -3607,19 +3633,32 @@ impl RAW for TileGraphic {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Palette {
-    
+    name: String,
+    file_name: String,
+    default_index: usize,
 }
 impl RAW for Palette {
     fn new() -> Self {
-        todo!()
+        Self {
+            name: "(new)".to_string(),
+            file_name: String::new(),
+            default_index: 0,
+        }
     }
 
     fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
-        todo!()
+        Ok(Self::new())
     }
 
     fn display(&self) -> String {
-        todo!()
+        format!(
+            "\t\t[LS_PALETTE:{}]\n
+            \t\t\t[LS_PALETTE_FILE:{}]\n
+            \t\t\t[LS_PALETTE_DEFAULT:{}]\n",
+            self.name.clone(),
+            self.file_name.clone(),
+            self.default_index
+        )
     }
 }
 
@@ -3645,15 +3684,18 @@ impl RAW for ASCIIGraphics {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shared {
     tile_page_info: HashMap<String, TilePageInfo>,
+    creature_shared: CreatureShared,
+    //
 }
 impl Shared {
     fn new() -> Self {
         Self {
             tile_page_info: HashMap::new(),
+            creature_shared: CreatureShared::new(),
         }
     }
 
-    pub fn update(&mut self, tp_files: &Vec<TilePageFile>, _g_files: &Vec<GraphicsFile>, folder: &path::PathBuf) {
+    fn update(&mut self, tp_files: &Vec<TilePageFile>, _g_files: &Vec<GraphicsFile>, folder: &path::PathBuf) {
         for tp_file in tp_files.iter() {
             for tp in tp_file.tile_pages.iter() {
                 self.tile_page_info.entry(tp.name.clone())
@@ -3694,5 +3736,33 @@ impl Debug for TilePageInfo {
             .field("image", &self.image)
             .field("texture", &self.texture.clone().map(|t| t.name()))
             .finish()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CreatureShared {
+    palettes: Vec<Palette>,
+    tile_page_names: Vec<String>,
+    items: Vec<ItemType>,//must be custom item
+    item_groups: Vec<Vec<ItemType>>,
+    castes: Vec<Caste>,
+    states: Vec<State>,
+    conditions: Vec<Condition>,
+    random_part_groups: Vec<Condition>,//must be a random part index condition
+    metals: Vec<Vec<Metal>>,
+}
+impl CreatureShared {
+    fn new() -> Self {
+        Self {
+            palettes: Vec::new(),
+            tile_page_names: Vec::new(),
+            items: Vec::new(),
+            item_groups: Vec::new(),
+            castes: Vec::new(),
+            states: Vec::new(),
+            conditions: Vec::new(),
+            random_part_groups: Vec::new(),
+            metals: Vec::new(),
+        }
     }
 }

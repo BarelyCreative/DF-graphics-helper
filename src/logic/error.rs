@@ -171,7 +171,7 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
                 ui.add(egui::Label::new(egui::RichText::new(
                     state.exception.to_string())
                     .monospace())
-                    .wrap(false)
+                    .wrap(true)
                 );
             }
         );
