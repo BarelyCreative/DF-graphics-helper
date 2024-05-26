@@ -66,7 +66,7 @@ macro_rules! graphics_file_export {
         return Ok(())  
     };
 }
-
+//
 // macro_rules! coordinates {
 //     () => {
         
@@ -354,11 +354,6 @@ impl RAW for TilePageFile {
         // Ok(String)
     }
 }
-// impl Menu for TilePageFile {
-//     fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
-//         todo!()
-//     }
-// }
 impl TilePageFile {
     fn export(&self, path: &path::PathBuf) -> Result<()> {
         let mut tpf_name = format!("{}.txt", self.name.clone())
@@ -486,29 +481,38 @@ impl RAW for TilePage {
         )
     }
 }
-impl Menu for TilePage {//todo edit menu
+impl Menu for TilePage {
     fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         ui.separator();
         ui.label("TilePage token");
         ui.text_edit_singleline(&mut self.name);
         ui.add_space(PADDING);
 
-        ui.label("Image file path");
+        ui.label("Image file path:");
         ui.horizontal(|ui| {
             ui.label("/graphics/images/");
             ui.text_edit_singleline(&mut self.file_name);
-            ui.label(".png");
+            if ui.button("⏷").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title(&self.name)
+                    .add_filter("png", &["png"])
+                    .pick_file() {
+                    if let Some(file_name) = path.file_name() {
+                        self.file_name = file_name.to_string_lossy().to_string();
+                    }
+                }
+            }
         });
         ui.add_space(PADDING);
 
-        ui.label("Image size (pixels)");
+        ui.label("Image size (pixels):");
         ui.horizontal(|ui| {
             ui.label(format!("Width: {}", self.image_size[0]));
             ui.label(format!("Height: {}", self.image_size[1]));
         });
         ui.add_space(PADDING);
 
-        ui.label("TilePage size (pixels)");
+        ui.label("TilePage size (pixels):");
         ui.horizontal(|ui| {
             ui.add(egui::Slider::new(&mut self.tile_size[0], 0..=64).prefix("Width: "));
             ui.add(egui::Slider::new(&mut self.tile_size[1], 0..=96).prefix("Height: "));
@@ -2183,6 +2187,60 @@ impl RAW for Condition {
     }
 }
 impl Menu for Condition {
+    // fn condition_menu(&mut self, ui: &mut Ui) -> Result<()> {
+    //     ui.horizontal(|ui| {
+    //         ui.label("Condition Menu");
+    //         if ui.button("Delete").clicked() {
+    //             self.action = Action::Delete(ContextData::Condition(Condition::default()));
+    //         }
+    //     });
+
+    //     // let tile_info = self.tile_info();
+        
+    //     // let indices = &mut self.indices;
+
+    //     // let graphics_type = self
+    //     //     .loaded_graphics
+    //     //     .graphics_files
+    //     //     .get_mut(indices.graphics_file_index)
+    //     //     .ok_or(DFGHError::IndexError)?
+    //     //     .creatures
+    //     //     .get_mut(indices.graphics_index)
+    //     //     .ok_or(DFGHError::IndexError)?
+    //     //     .graphics_type
+    //     //     .get_mut(indices.layer_set_index)
+    //     //     .ok_or(DFGHError::IndexError)?;
+
+    //     // if let LayerSet::Layered(_, layergroups) = graphics_type {
+    //     //     let conditions = &mut layergroups
+    //     //         .get_mut(indices.layer_group_index)
+    //     //         .ok_or(DFGHError::IndexError)?
+    //     //         .layers
+    //     //         .get_mut(indices.layer_index)
+    //     //         .ok_or(DFGHError::IndexError)?
+    //     //         .conditions;
+
+    //     //     if conditions.is_empty() {
+    //     //         if ui.small_button("New condition").clicked() {
+    //     //             self.action = Action::Insert(ContextData::Condition(Condition::default()));
+    //     //         }
+    //     //     } else {
+    //     //         let condition = conditions
+    //     //             .get_mut(indices.condition_index)
+    //     //             .ok_or(DFGHError::IndexError)?;
+
+    //     //         ui.separator();
+    
+    //     //         condition.condition_menu(ui, tile_info);
+    //     //     }
+    //     // }
+
+    //     self.preview = false;
+    //     self.preview_name = String::new();
+        
+    //     Ok(())
+    // }
+
     fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
         //, tile_info: Vec<(String, [u32; 2])>
         egui::ComboBox::from_label("Condition type")
@@ -3737,6 +3795,11 @@ impl Shared {
             tile_page_info: HashMap::new(),
             creature_shared: CreatureShared::new(),
         }
+    }
+
+    fn clear(&mut self) {
+        self.tile_page_info.clear();
+        self.creature_shared = CreatureShared::new();
     }
 
     fn update(&mut self, tp_files: &Vec<TilePageFile>, _g_files: &Vec<GraphicsFile>, folder: &path::PathBuf) {
