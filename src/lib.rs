@@ -779,6 +779,16 @@ impl RAW for GraphicsFile {
     }
 }
 impl GraphicsFile {
+    fn name(&self) -> String {
+        match self {
+            GraphicsFile::DefaultFile => "(new)".to_string(),
+            GraphicsFile::CreatureFile(name, _) => name.clone().replace("graphics_", ""),
+            GraphicsFile::StatueCreatureFile(name, _) => name.clone().replace("graphics_", ""),
+            GraphicsFile::PlantFile(name, _) => name.clone().replace("graphics_", ""),
+            GraphicsFile::TileGraphicsFile(name, _) => name.clone().replace("graphics_", ""),
+        }
+    }
+
     fn export(&self, path: &path::PathBuf) -> Result<()> {
         match self {
             GraphicsFile::DefaultFile => return Ok(()),
@@ -1323,7 +1333,7 @@ impl LayerSet {
     fn rename_layer_groups(&mut self) {
     //state: State, layer_groups: &mut Vec<LayerGroup>) {
         for lg in self.layer_groups.iter_mut() {
-            if lg.name.eq("") {
+            if lg.name.eq(&LayerGroup::new().name) {
                 let mut layer_names: Vec<String> = lg.layers.iter().map(|layer|layer.name.clone()).collect();
                 layer_names.sort();
                 layer_names.dedup();
@@ -2794,6 +2804,18 @@ pub enum State {
     TrainedWar,
     Skeleton,
     SkeletonWithSkull,
+    Vermin,
+    VerminAlt,
+    SwarmSmall,
+    SwarmMedium,
+    SwarmLarge,
+    LightVermin,
+    LightVerminAlt,
+    LightSwarmSmall,
+    LightSwarmMedium,
+    LightSwarmLarge,
+    Remains,
+    Hive,
     Custom(String),
 }
 impl State {
@@ -2810,6 +2832,18 @@ impl State {
             Self::TrainedWar => "TRAINED_WAR".to_string(),
             Self::Skeleton => "SKELETON".to_string(),
             Self::SkeletonWithSkull => "SKELETON_WITH_SKULL".to_string(),
+            Self::Vermin => "VERMIN".to_string(),
+            Self::VerminAlt => "VERMIN_ALT".to_string(),
+            Self::SwarmSmall => "SWARM_SMALL".to_string(),
+            Self::SwarmMedium => "SWARM_MEDIUM".to_string(),
+            Self::SwarmLarge => "SWARM_LARGE".to_string(),
+            Self::LightVermin => "LIGHT_VERMIN".to_string(),
+            Self::LightVerminAlt => "LIGHT_VERMIN_ALT".to_string(),
+            Self::LightSwarmSmall => "LIGHT_SWARM_SMALL".to_string(),
+            Self::LightSwarmMedium => "LIGHT_SWARM_MEDIUM".to_string(),
+            Self::LightSwarmLarge => "LIGHT_SWARM_LARGE".to_string(),
+            Self::Hive => "HIVE".to_string(),
+            Self::Remains => "REMAINS".to_string(),
             Self::Custom(name) => {
                 name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
@@ -2820,7 +2854,7 @@ impl State {
     }
 
     fn iterator() -> std::slice::Iter<'static, Self> {
-        static STATES: [State; 11] = [
+        static STATES: [State; 23] = [
             State::Default,
             State::Child,
             State::Baby,
@@ -2832,6 +2866,18 @@ impl State {
             State::TrainedWar,
             State::Skeleton,
             State::SkeletonWithSkull,
+            State::Vermin,
+            State::Remains,
+            State::Hive,
+            State::VerminAlt,
+            State::SwarmSmall,
+            State::SwarmMedium,
+            State::SwarmLarge,
+            State::LightVermin,
+            State::LightVerminAlt,
+            State::LightSwarmSmall,
+            State::LightSwarmMedium,
+            State::LightSwarmLarge,
         ];
         STATES.iter()
     }
@@ -2839,18 +2885,30 @@ impl State {
 impl From<String> for State {
     fn from(string: String) -> Self {
         match string.to_uppercase().as_str() {
-            "DEFAULT" => State::Default,
-            "CHILD" => State::Child,
-            "BABY" => State::Baby,
-            "ANIMATED" => State::Animated,
-            "CORPSE" => State::Corpse,
-            "LIST_ICON" => State::ListIcon,
-            "PORTRAIT" => State::Portrait,
-            "TRAINED_HUNTER" => State::TrainedHunter,
-            "TRAINED_WAR" => State::TrainedWar,
-            "SKELETON" => State::Skeleton,
-            "SKELETON_WITH_SKULL" => State::SkeletonWithSkull,
-            other => { State::Custom(other.to_uppercase().to_string()) }
+            "DEFAULT" => Self::Default,
+            "CHILD" => Self::Child,
+            "BABY" => Self::Baby,
+            "ANIMATED" => Self::Animated,
+            "CORPSE" => Self::Corpse,
+            "LIST_ICON" => Self::ListIcon,
+            "PORTRAIT" => Self::Portrait,
+            "TRAINED_HUNTER" => Self::TrainedHunter,
+            "TRAINED_WAR" => Self::TrainedWar,
+            "SKELETON" => Self::Skeleton,
+            "SKELETON_WITH_SKULL" => Self::SkeletonWithSkull,
+            "VERMIN" => Self::Vermin,
+            "VERMIN_ALT" => Self::VerminAlt,
+            "SWARM_SMALL" => Self::SwarmSmall,
+            "SWARM_MEDIUM" => Self::SwarmMedium,
+            "SWARM_LARGE" => Self::SwarmLarge,
+            "LIGHT_VERMIN" => Self::LightVermin,
+            "LIGHT_VERMIN_ALT" => Self::LightVerminAlt,
+            "LIGHT_SWARM_SMALL" => Self::LightSwarmSmall,
+            "LIGHT_SWARM_MEDIUM" => Self::LightSwarmMedium,
+            "LIGHT_SWARM_LARGE" => Self::LightSwarmLarge,
+            "HIVE" => Self::Hive,
+            "REMAINS" => Self::Remains,
+            other => { Self::Custom(other.to_uppercase().to_string()) }
         }
     }
 }
@@ -2863,17 +2921,17 @@ pub enum Caste {
     Custom(String),
 }
 impl Caste {
-    // fn name(&self) -> String {
-    //     match self {
-    //         Caste::Female => "FEMALE".to_string(),
-    //         Caste::Male => "MALE".to_string(),
-    //         Caste::Custom(caste) => {
-    //             caste.with_boundaries(&[Boundary::Space])
-    //                 .to_case(Case::UpperSnake)
-    //                 .to_string()
-    //         },
-    //     }
-    // }
+    fn name(&self) -> String {
+        match self {
+            Caste::Female => "FEMALE".to_string(),
+            Caste::Male => "MALE".to_string(),
+            Caste::Custom(caste) => {
+                caste.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
+        }
+    }
 
     fn from(string: String) -> Caste {
         match string.as_str() {
@@ -3443,6 +3501,7 @@ pub struct Statue {
     pub tile_name: String,
     pub coords: [u32; 2],
     pub large_coords: Option<[u32; 2]>,
+    pub caste: Option<Caste>,
 }
 impl RAW for Statue {
     fn new() -> Self {
@@ -3452,22 +3511,10 @@ impl RAW for Statue {
             tile_name: String::new(),
             coords: [0, 0],
             large_coords: None,
+            caste: None,
         }
     }
-    // "STATUE_CREATURE_CASTE_GRAPHICS" |
-    // "STATUE_CREATURE_GRAPHICS" => {
-    //     if block_buffer.len() > 0 {
-    //         match Statue::read(block_buffer.clone(), Vec::new(), path) {
-    //             Ok(statue) => {
-    //                 if statue.ne(&Statue::new()) {
-    //                     statues.push(statue.clone());
-    //                 }
-    //             },
-    //             Err(e) => return wrap_import_file_error(raw_buffer, e, rel_line, file_path)
-    //         }
-    //         block_buffer.clear();
-    //     }
-    // },
+    
     fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
         let mut statue = Statue::new();
         let buffer_len = buffer.len();        
@@ -3476,12 +3523,19 @@ impl RAW for Statue {
             let len = line_vec.len();
 
             match line_vec[0].as_str() {
-                "STATUE_CREATURE_CASTE_GRAPHICS" |
                 "STATUE_CREATURE_GRAPHICS" => {
                     if len >= 2 {
                         statue.name = line_vec[1].clone();
                     } else {
                         index_err!(i_line, buffer_len, len, 2, Statue);
+                    }
+                },
+                "STATUE_CREATURE_CASTE_GRAPHICS" => {
+                    if len >= 3 {
+                        statue.name = line_vec[1].clone();
+                        statue.caste = Some(Caste::from(line_vec[2].clone()));
+                    } else {
+                        index_err!(i_line, buffer_len, len, 3, Statue);
                     }
                 },
                 other => {
@@ -3591,12 +3645,18 @@ impl Menu for Statue {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Plant {
-    
+    pub name: String,
+    pub tiles: [Option<String>; 9],
+    pub coords: [Option<[usize; 2]>; 9],
 }
 impl RAW for Plant {
     fn new() -> Self {
+        const TILES_REPEAT_VALUE: Option<String> = None;
+        const COORDS_REPEAT_VALUE: Option<[usize; 2]> = None;
         Self {
-
+            name: "(ARRAY_REPEAT_VALUE)".to_string(),
+            tiles: [TILES_REPEAT_VALUE; 9],
+            coords: [COORDS_REPEAT_VALUE; 9],
         }
     }
 
@@ -3605,19 +3665,23 @@ impl RAW for Plant {
     }
 
     fn display(&self) -> String {
-        todo!()
+        "".to_string()
     }
 }
 
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TileGraphic {
+    pub name: String,
+    pub tiles: Vec<String>,
+    pub coords: Vec<String>,
     
 }
 impl RAW for TileGraphic {
     fn new() -> Self {
         Self {
-
+            name: "(new)".to_string(),
+            tiles: Vec::new(),
+            coords: Vec::new(),
         }
     }
 
@@ -3629,7 +3693,6 @@ impl RAW for TileGraphic {
         todo!()
     }
 }
-
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Palette {
@@ -3659,25 +3722,6 @@ impl RAW for Palette {
             self.file_name.clone(),
             self.default_index
         )
-    }
-}
-
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ASCIIGraphics {
-    
-}
-impl RAW for ASCIIGraphics {
-    fn new() -> Self {
-        todo!()
-    }
-
-    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
-        todo!()
-    }
-
-    fn display(&self) -> String {
-        todo!()
     }
 }
 

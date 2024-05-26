@@ -185,7 +185,6 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
                 if ui.button("      Ok      ").clicked() {
                     match state.exception {
                         DFGHError::ImageError(..) => {
-                            state.undo();
                             state.exception = DFGHError::None;
                         },
                         DFGHError::IndexError => {
