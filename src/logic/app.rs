@@ -157,6 +157,7 @@ enum Action {
     Export,
     Update,
     Zoom(PreviewZoom),
+    Debug,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -235,6 +236,10 @@ impl DFGraphicsHelper {
             redo_buffer: Vec::with_capacity(100),
             exception: DFGHError::None,
         }
+    }
+
+    fn debug(&mut self) {
+        dbg!(self.copied.clone());
     }
 
     fn import(&mut self) {
@@ -1240,31 +1245,110 @@ impl DFGraphicsHelper {
     }
 
     fn graphics_file_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        ui.horizontal(|ui| {
-            ui.label("Graphics File Menu");
-            if ui.button("Delete").clicked() {
-                self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
-            }
-        });
-        
-        // let indices = &mut self.indices;
+        let indices = &mut self.indices;
+        let graphics_file = self.loaded_graphics.graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)?;
 
-        if self.loaded_graphics.graphics_files.is_empty() {
-            self.main_window = MainWindow::GraphicsFileDefaultMenu;
-        } else {
-            // let graphics_file = self
-            //     .loaded_graphics
-            //     .graphics_files
-            //     .get_mut(indices.graphics_file_index)
-            //     .ok_or(DFGHError::IndexError)?;
+        match graphics_file {
+            GraphicsFile::DefaultFile => {
+                ui.horizontal(|ui| {
+                    ui.label("Graphics File Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
+                    }
+                });
+                ui.separator();
+                ui.add_space(PADDING);
+                egui::ComboBox::from_label("Graphics Type")
+                    .selected_text(&graphics_file.name())
+                    .show_ui(ui, |ui| {
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::CreatureFile("(new)".to_string(), Vec::new()),
+                        "Creature"
+                    );
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::StatueCreatureFile("(new)".to_string(), Vec::new()),
+                        "Statue"
+                    );
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::PlantFile("(new)".to_string(), Vec::new()),
+                        "Plant"
+                    );
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::TileGraphicsFile("(new)".to_string(), Vec::new()),
+                        "Tile Graphic"
+                    );
+                });
+            },
+            GraphicsFile::CreatureFile(name, _) => {
+                ui.horizontal(|ui| {
+                    ui.label("Creature File Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
+                    }
+                });
 
-            ui.separator();
-            // ui.text_edit_singleline(&mut graphics_file.name);
-            ui.add_space(PADDING);
+                ui.add_space(PADDING);
+                ui.label("File Name:");
+                ui.text_edit_singleline(name);
 
-            if ui.button("New Graphics").clicked() {
-                self.action = Action::Insert(ContextData::Creature(Creature::new()));
-            }
+                ui.add_space(PADDING);
+                if ui.button("New Tile Graphic").clicked() {
+                    self.action = Action::Insert(ContextData::Creature(Creature::new()));
+                }
+            },
+            GraphicsFile::StatueCreatureFile(name, _) => {
+                ui.horizontal(|ui| {
+                    ui.label("Statue File Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
+                    }
+                });
+
+                ui.add_space(PADDING);
+                ui.label("File Name:");
+                ui.text_edit_singleline(name);
+
+                ui.add_space(PADDING);
+                if ui.button("New Tile Graphic").clicked() {
+                    self.action = Action::Insert(ContextData::Statue(Statue::new()));
+                }
+            },
+            GraphicsFile::PlantFile(name, _) => {
+                ui.horizontal(|ui| {
+                    ui.label("Plant File Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
+                    }
+                });
+
+                ui.add_space(PADDING);
+                ui.label("File Name:");
+                ui.text_edit_singleline(name);
+
+                ui.add_space(PADDING);
+                if ui.button("New Tile Graphic").clicked() {
+                    self.action = Action::Insert(ContextData::Plant(Plant::new()));
+                }
+            },
+            GraphicsFile::TileGraphicsFile(name, _) => {
+                ui.horizontal(|ui| {
+                    ui.label("Tile Graphic File Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::GraphicsFile(GraphicsFile::new()));
+                    }
+                });
+
+                ui.add_space(PADDING);
+                ui.label("File Name:");
+                ui.text_edit_singleline(name);
+
+                ui.add_space(PADDING);
+                if ui.button("New Tile Graphic").clicked() {
+                    self.action = Action::Insert(ContextData::TileGraphic(TileGraphic::new()));
+                }
+            },
         }
 
         self.preview = false;
@@ -1275,72 +1359,168 @@ impl DFGraphicsHelper {
     }
 
     fn graphics_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        ui.horizontal(|ui| {
-            ui.label("Creature Menu");
-            if ui.button("Delete").clicked() {
-                self.action = Action::Delete(ContextData::Creature(Creature::new()));
-            }
-        });
+        let indices = &mut self.indices;
+        let shared = &mut self.loaded_graphics.shared;
+        let graphics_file = self.loaded_graphics.graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)?;
+        match graphics_file {
+            GraphicsFile::DefaultFile => {
+                ui.horizontal(|ui| {
+                    ui.label("Graphics Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::Creature(Creature::new()));
+                    }
+                });
+                ui.separator();
+                ui.add_space(PADDING);
+                egui::ComboBox::from_label("Graphics Type")
+                    .selected_text(&graphics_file.name())
+                    .show_ui(ui, |ui| {
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::CreatureFile("(new)".to_string(), Vec::new()),
+                        "Creature"
+                    );
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::StatueCreatureFile("(new)".to_string(), Vec::new()),
+                        "Statue"
+                    );
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::PlantFile("(new)".to_string(), Vec::new()),
+                        "Plant"
+                    );
+                    ui.selectable_value(graphics_file,
+                        GraphicsFile::TileGraphicsFile("(new)".to_string(), Vec::new()),
+                        "Tile Graphic"
+                    );
+                });
 
-        // let indices = &mut self.indices;
+                self.preview = false;
+                self.preview_name = String::new();
+                self.selected_region = None;
+                
+                return Ok(())
+            },
+            GraphicsFile::CreatureFile(_, creatures) => {
+                ui.horizontal(|ui| {
+                    ui.label("Creature Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::Creature(Creature::new()));
+                    }
+                });
 
-        // let graphics = &mut self
-        //     .loaded_graphics
-        //     .graphics_files
-        //     .get_mut(indices.graphics_file_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .creatures;
-        
-        // if graphics.is_empty() {
-        //     if ui.small_button("Create Graphics").clicked() {
-        //         self.action = Action::Insert(ContextData::Creature(Creature::new()));
-        //     }
-        // } else {
-        //     let creature = graphics
-        //         .get_mut(indices.graphics_index)
-        //         .ok_or(DFGHError::IndexError)?;
+                let creature = creatures
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
 
-        //     creature.creature_menu(ui);
-        // }
-        
-        self.preview = false;
-        self.preview_name = String::new();
-        self.selected_region = None;
-        
-        Ok(())
+                creature.menu(ui, shared);
+
+                self.preview = true;
+                self.preview_name = "Creature Preview".to_string();
+                self.selected_region = None;
+                
+                return Ok(())
+            },
+            GraphicsFile::StatueCreatureFile(_, statues) => {
+                ui.horizontal(|ui| {
+                    ui.label("Statue Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::Statue(Statue::new()));
+                    }
+                });
+
+                let statue = statues
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+
+                statue.menu(ui, shared);
+
+                self.preview = true;
+                self.preview_name = "Statue Preview".to_string();
+                self.selected_region = None;
+                
+                return Ok(())
+            },
+            GraphicsFile::PlantFile(_, plants) => {
+                ui.horizontal(|ui| {
+                    ui.label("Plant Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::Plant(Plant::new()));
+                    }
+                });
+
+                let plant = plants
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+
+                plant.menu(ui, shared);
+
+                self.preview = true;
+                self.preview_name = "Plant Preview".to_string();
+                self.selected_region = None;
+                
+                return Ok(())
+            },
+            GraphicsFile::TileGraphicsFile(_, tile_graphics) => {
+                ui.horizontal(|ui| {
+                    ui.label("Tile Graphic Menu");
+                    if ui.button("Delete").clicked() {
+                        self.action = Action::Delete(ContextData::TileGraphic(TileGraphic::new()));
+                    }
+                });
+
+                let tile_graphic = tile_graphics
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+
+                tile_graphic.menu(ui, shared);
+
+                self.preview = false;
+                self.preview_name = String::new();
+                self.selected_region = None;
+                
+                return Ok(())
+            },
+        }
     }
 
     fn layer_set_menu(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Layer Set Menu");
             if ui.button("Delete").clicked() {
-                self.action = Action::Delete(ContextData::LayerSet(LayerSet::new()));
+                self.action = Action::Delete(ContextData::LayerGroup(LayerGroup::new()));
             }
         });
-
-        // let indices = &mut self.indices;
-
-        // let layer_sets = &mut self
-        //     .loaded_graphics
-        //     .graphics_files
-        //     .get_mut(indices.graphics_file_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .creatures
-        //     .get_mut(indices.graphics_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .graphics_type;
         
-        // if layer_sets.is_empty() {
-        //     if ui.small_button("Create Layer Set").clicked() {
-        //         self.action = Action::Insert(ContextData::LayerSet(LayerSet::default()));
-        //     }
-        // } else {
-        //     let layer_set = layer_sets
-        //         .get_mut(indices.layer_set_index)
-        //         .ok_or(DFGHError::IndexError)?;
+        let indices = &mut self.indices;
 
-        //     layer_set.layer_set_menu(ui);
-        // }
+        if let GraphicsFile::CreatureFile(_, creatures) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            let layer_sets = &mut creatures
+                .get_mut(indices.graphics_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_sets;
+            if layer_sets.is_empty() {
+                if ui.small_button("Create Layer Set").clicked() {
+                    self.action = Action::Insert(ContextData::LayerSet(LayerSet::new()));
+                }
+            } else {
+                let layer_set = layer_sets
+                    .get_mut(indices.layer_set_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                layer_set.menu(ui, shared);
+    
+                self.preview = false;
+                self.preview_name = String::new();
+                self.selected_region = None;
+            }
+        }
         Ok(())
     }
 
@@ -1352,199 +1532,130 @@ impl DFGraphicsHelper {
             }
         });
         
-        // let indices = &mut self.indices;
+        let indices = &mut self.indices;
 
-        // let graphics_type = self
-        //     .loaded_graphics
-        //     .graphics_files
-        //     .get_mut(indices.graphics_file_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .creatures
-        //     .get_mut(indices.graphics_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .graphics_type
-        //     .get_mut(indices.layer_set_index)
-        //     .ok_or(DFGHError::IndexError)?;
-
-        // if let LayerSet::Layered(_, layer_groups) = graphics_type {
-        //     if layer_groups.is_empty() {
-        //         if ui.small_button("Create Layer Group").clicked() {
-        //             self.action = Action::Insert(ContextData::LayerGroup(LayerGroup::new()));
-        //         }
-        //     } else {
-        //         let layer_group = layer_groups
-        //             .get_mut(indices.layer_group_index)
-        //             .ok_or(DFGHError::IndexError)?;
-
-        //         layer_group.layer_group_menu(ui);
-        //     }
-        // }
+        if let GraphicsFile::CreatureFile(_, creatures) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            let layer_groups = &mut creatures
+                .get_mut(indices.graphics_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_sets
+                .get_mut(indices.layer_set_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_groups;
+            if layer_groups.is_empty() {
+                if ui.small_button("Create Layer Group").clicked() {
+                    self.action = Action::Insert(ContextData::LayerSet(LayerSet::new()));
+                }
+            } else {
+                let layer_group = layer_groups
+                    .get_mut(indices.layer_group_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                layer_group.menu(ui, shared);
+    
+                self.preview = false;
+                self.preview_name = String::new();
+                self.selected_region = None;
+            }
+        }
         Ok(())
     }
 
     fn layer_menu(&mut self, ui: &mut Ui) -> Result<()> {
-        ui.label("layer menu");
-        // let tile_info = self.tile_info();
-
-        // let cursor_coords = self.cursor_coords;
+        ui.horizontal(|ui| {
+            ui.label("Layer Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::Layer(Layer::new()));
+            }
+        });
         
-        // let indices = &mut self.indices;
+        let indices = &mut self.indices;
 
-        // let layer_groups = self
-        //     .loaded_graphics
-        //     .graphics_files
-        //     .get_mut(indices.graphics_file_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .creatures
-        //     .get_mut(indices.graphics_index)
-        //     .ok_or(DFGHError::IndexError)?
-        //     .graphics_type
-        //     .get_mut(indices.layer_set_index)
-        //     .ok_or(DFGHError::IndexError)?;
-
-        // let tile_pages: Vec<&TilePage> = self
-        //     .loaded_graphics
-        //     .tile_page_files
-        //     .iter()
-        //     .flat_map(|tp| tp.tile_pages.iter())
-        //     .collect();
-
-        // match layer_groups {
-        //     LayerSet::Simple(simple_layers) => {
-        //         if simple_layers.is_empty() {
-        //             //if there are no layers defined show create layer button only
-        //             ui.label("Simple Layer Menu");
-        //             ui.separator();
-        //             if ui.small_button("Create Layer").clicked() {
-        //                 self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
-        //             }
-        //         } else {
-        //             ui.horizontal(|ui| {
-        //                 ui.label("Layer Menu");
-        //                 if ui.button("Delete").clicked() {
-        //                     self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
-        //                 }
-        //             });
-
-        //             let simple_layer = simple_layers
-        //                 .get_mut(indices.layer_index)
-        //                 .ok_or(DFGHError::IndexError)?;
-
-        //             if let Some(coords) = cursor_coords {
-        //                 simple_layer.coords = coords;
-        //             }
-
-        //             simple_layer.layer_menu(ui, tile_info);
-
-        //             ui.add_space(PADDING);
-        //             let mut file_name = String::new();
-        //             for tile_page in tile_pages {
-        //                 if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
-        //                     file_name = tile_page.file_name.clone();
-        //                     break;
-        //                 }
-        //             }
-        //             let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
-        //             self.preview_image(ui, file_name, rect)?;
-        //         }
-        //     },
-        //     LayerSet::Statue(simple_layers) => {
-        //         if simple_layers.is_empty() {
-        //             //if there are no layers defined show create layer button only
-        //             ui.label("Statue Layer Menu");
-        //             ui.separator();
-        //             if ui.small_button("Create Layer").clicked() {
-        //                 self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
-        //             }
-        //         } else {
-        //             ui.horizontal(|ui| {
-        //                 ui.label("Layer Menu");
-        //                 if ui.button("Delete").clicked() {
-        //                     self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
-        //                 }
-        //             });
-                    
-        //             let simple_layer = simple_layers
-        //                 .get_mut(indices.layer_index)
-        //                 .ok_or(DFGHError::IndexError)?;
-
-        //             if let Some(coords) = cursor_coords {
-        //                 simple_layer.coords = coords;
-        //             }
-
-        //             simple_layer.statue_layer_menu(ui, tile_info);
-
-        //             ui.add_space(PADDING);
-        //             let mut file_name = String::new();
-        //             for tile_page in tile_pages {
-        //                 if tile_page.name.to_case(Case::UpperSnake).eq(&simple_layer.tile_name.to_case(Case::UpperSnake)) {
-        //                     file_name = tile_page.file_name.clone();
-        //                     break;
-        //                 }
-        //             }
-        //             let rect = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or_else(|| [0, 0])]);
-        //             self.preview_image(ui, file_name, rect)?;
-        //         }
-        //     },
-        //     LayerSet::Layered(_, layer_groups) => {
-        //         let layers = 
-        //             &mut layer_groups
-        //             .get_mut(indices.layer_group_index)
-        //             .ok_or(DFGHError::IndexError)?
-        //             .layers;
-
-        //         if layers.is_empty() {
-        //             //if there are no layers defined show create layer button only
-        //             ui.label("Layer Menu");
-        //             ui.separator();
-        //             if ui.small_button("Create Layer").clicked() {
-        //                 self.action = Action::Insert(ContextData::Layer(Layer::new()));
-        //             }
-        //         } else {
-        //             ui.horizontal(|ui| {
-        //                 ui.label("Layer Menu");
-        //                 if ui.button("Delete").clicked() {
-        //                     self.action = Action::Delete(ContextData::Layer(Layer::new()));
-        //                 }
-        //             });
-
-        //             let layer = layers
-        //                 .get_mut(indices.layer_index)
-        //                 .ok_or(DFGHError::IndexError)?;
-
-        //             if let Some(coords) = cursor_coords {
-        //                 layer.coords = coords;
-        //             }
-
-        //             layer.layer_menu(ui, tile_info);
-
-        //             ui.add_space(PADDING);
-        //             let mut file_name = String::new();
-        //             for tile_page in tile_pages {
-        //                 if tile_page.name.to_case(Case::UpperSnake).eq(&layer.tile_name.to_case(Case::UpperSnake)) {
-        //                     file_name = tile_page.file_name.clone();
-        //                     break;
-        //                 }
-        //             }
-        //             let rect = Some([layer.coords, layer.large_coords.unwrap_or_else(|| [0, 0])]);
-        //             self.preview_image(ui, file_name, rect)?;
-        //         }
-
-        //     },
-        //     LayerSet::Empty => {
-        //         ui.horizontal(|ui| {
-        //             ui.label("Empty Layer Menu");
-        //             if ui.button("Delete").clicked() {
-        //                 self.action = Action::Delete(ContextData::Layer(Layer::new()));
-        //             }
-        //         });
-        //     },
-        // }
+        if let GraphicsFile::CreatureFile(_, creatures) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            let layers = &mut creatures
+                .get_mut(indices.graphics_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_sets
+                .get_mut(indices.layer_set_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_groups
+                .get_mut(indices.layer_group_index)
+                .ok_or(DFGHError::IndexError)?
+                .layers;
+            if layers.is_empty() {
+                if ui.small_button("Create Layer").clicked() {
+                    self.action = Action::Insert(ContextData::Layer(Layer::new()));
+                }
+            } else {
+                let layer = layers
+                    .get_mut(indices.layer_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                layer.menu(ui, shared);
+    
+                self.preview = true;
+                self.preview_name = layer.tile_name.clone();
+                self.selected_region = Some([layer.coords, layer.large_coords.unwrap_or([0,0])]);
+                if let Some(coords) = self.cursor_coords {
+                    layer.coords = coords;
+                }
+            }
+        }
         Ok(())
     }
 
-    fn simple_layer_menu(&mut self, _ui: &mut Ui) -> Result<()> {
-        //todo
+    fn simple_layer_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Layer Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::SimpleLayer(SimpleLayer::new()));
+            }
+        });
+        
+        let indices = &mut self.indices;
+
+        if let GraphicsFile::CreatureFile(_, creatures) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            let simple_layers = &mut creatures
+                .get_mut(indices.simple_layer_index)
+                .ok_or(DFGHError::IndexError)?
+                .simple_layers;
+            if simple_layers.is_empty() {
+                if ui.small_button("Create Layer").clicked() {
+                    self.action = Action::Insert(ContextData::SimpleLayer(SimpleLayer::new()));
+                }
+            } else {
+                let simple_layer = simple_layers
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                simple_layer.menu(ui, shared);
+    
+                self.preview = true;
+                self.preview_name = simple_layer.tile_name.clone();
+                self.selected_region = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or([0,0])]);
+                if let Some(coords) = self.cursor_coords {
+                    simple_layer.coords = coords;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1579,18 +1690,89 @@ impl DFGraphicsHelper {
                 self.preview = true;
                 self.preview_name = statue.tile_name.clone();
                 self.selected_region = Some([statue.coords, statue.large_coords.unwrap_or([0,0])]);
+                if let Some(coords) = self.cursor_coords {
+                    statue.coords = coords;
+                }
             }
         }
         Ok(())
     }
 
-    fn plant_menu(&mut self, _ui: &mut Ui) -> Result<()> {
-        //todo
+    fn plant_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Plant Graphics Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::Plant(Plant::new()));
+            }
+        });
+        
+        let indices = &mut self.indices;
+
+        if let GraphicsFile::PlantFile(_, plants) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            if plants.is_empty() {
+                if ui.small_button("Create Plant").clicked() {
+                    self.action = Action::Insert(ContextData::Plant(Plant::new()));
+                }
+            } else {
+                let plant = plants
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                plant.menu(ui, shared);
+    
+                self.preview = true;
+                self.preview_name = plant.tile_name.clone();
+                self.selected_region = None;
+                if let Some(coords) = self.cursor_coords {
+                    plant.coords[0] = Some(coords);
+                }
+            }
+        }
         Ok(())
     }
 
-    fn tile_graphic_menu(&mut self, _ui: &mut Ui) -> Result<()> {
-        //todo
+    fn tile_graphic_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Tile Graphic Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::TileGraphic(TileGraphic::new()));
+            }
+        });
+        
+        let indices = &mut self.indices;
+
+        if let GraphicsFile::TileGraphicsFile(_, tile_graphics) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            if tile_graphics.is_empty() {
+                if ui.small_button("Create Tile Graphic").clicked() {
+                    self.action = Action::Insert(ContextData::TileGraphic(TileGraphic::new()));
+                }
+            } else {
+                let tile_graphic = tile_graphics
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                tile_graphic.menu(ui, shared);
+    
+                self.preview = true;
+                self.preview_name = tile_graphic.tile_name.clone();
+                self.selected_region = Some([tile_graphic.coords, [0, 0]]);
+                if let Some(coords) = self.cursor_coords {
+                    tile_graphic.coords = coords;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1896,6 +2078,13 @@ impl eframe::App for DFGraphicsHelper {
             if ctx.input_mut(|i| i.consume_shortcut(export)) {
                 self.action = Action::Export;
             }
+            let debug = &KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                logical_key: Key::P
+            };
+            if ctx.input_mut(|i| i.consume_shortcut(debug)) {
+                self.action = Action::Debug;
+            }
         }
 
         //Action handler
@@ -1938,6 +2127,9 @@ impl eframe::App for DFGraphicsHelper {
                 },
                 Action::Zoom(zoom) => {
                     self.zoom(zoom.clone());
+                },
+                Action::Debug => {
+                    self.debug();
                 }
                 Action::None => {},
             }

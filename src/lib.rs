@@ -66,12 +66,6 @@ macro_rules! graphics_file_export {
         return Ok(())  
     };
 }
-//
-// macro_rules! coordinates {
-//     () => {
-        
-//     }
-// }
 
 pub trait RAW {
     fn new() -> Self;
@@ -1150,13 +1144,11 @@ impl RAW for SimpleLayer {
     }
 }
 impl Menu for SimpleLayer {
-    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
-        //, tile_info: Vec<(String, [u32;2])>
-
-        // let [x1, y1] = &mut self.coords;
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
         let sub_state = &mut self.sub_state;
-        // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
+        let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
         
         egui::ComboBox::from_label("State")
             .selected_text(state.name())
@@ -1176,7 +1168,7 @@ impl Menu for SimpleLayer {
         egui::ComboBox::from_label("Second state (optional)")
             .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
             .show_ui(ui, |ui| {
-            ui.selectable_value(sub_state, Some(State::Empty), State::Empty.name());
+            ui.selectable_value(sub_state, None, State::Empty.name());
             for s in State::iterator() {
                 ui.selectable_value(sub_state, Some(s.clone()), s.name());
             }
@@ -1192,37 +1184,45 @@ impl Menu for SimpleLayer {
         egui::ComboBox::from_label("TilePage")
             .selected_text(&self.tile_name)
             .show_ui(ui, |ui| {
-            // for (t, _) in &tile_info {
-            //     ui.selectable_value(&mut self.tile_name, t.clone(), t);
-            // }
+            for &t in &tile_names {
+                ui.selectable_value(&mut self.tile_name, t.clone(), t);
+            }
             ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
         });
-        // if !tile_names.contains(&self.tile_name) {
-        //     ui.label("Custom tile name:");
-        //     ui.text_edit_singleline(&mut self.tile_name);
-        // }
+        if !tile_names.contains(&&self.tile_name) {
+            ui.label("Custom tile name:");
+            ui.text_edit_singleline(&mut self.tile_name);
+        }
 
         ui.add_space(PADDING);
         let mut large = self.large_coords.is_some();
         ui.checkbox(&mut large, "Large Image:");
 
-        // if large {
-        //     let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
-        //     ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-        //         .unwrap_or_default()).prefix("TilePage X: "));
-        //     ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-        //         .unwrap_or_default()).prefix("TilePage Y: "));
-
-        //     ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
-        //     ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
-        // } else {
-        //     ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
-        //     ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
-
-        //     if self.large_coords.is_some() {
-        //         self.large_coords.take();
-        //     }
-        // }
+        let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+        let max_coords;
+        if let Some(tp_info) = shared.tile_page_info.get(&self.tile_name) {
+            max_coords = [(tp_info.image_size[0]/32) as u32, (tp_info.image_size[1]/32) as u32];
+        } else {
+            max_coords = [100,100];
+        }
+        if large {
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2+1)
+                    .unwrap_or_default()).prefix("X: "));
+                ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2+1)
+                    .unwrap_or_default()).prefix("Y: "));
+                ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+            });
+        } else {
+            self.large_coords = None;
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(1)
+                .unwrap_or(0)).prefix("X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(1)
+                .unwrap_or(0)).prefix("Y: "));
+        }
 
         ui.add_space(PADDING);
         ui.label("Preview:");
@@ -1495,11 +1495,11 @@ impl Menu for LayerGroup {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
-    pub name: String,                     //LAYER_NAME for patterning
-    pub conditions: Vec<Condition>,       //Set of condition(s) that layer displays in
-    pub tile_name: String,                     //TILE_NAME of image
-    pub coords: [u32; 2],               //x,y coordinates of layer on image in tiles
-    pub large_coords: Option<[u32; 2]>, //(optional) x2,y2 coordinates of bottom right corner of layer in tiles
+    pub name: String,
+    pub conditions: Vec<Condition>,
+    pub tile_name: String,
+    pub coords: [u32; 2],
+    pub large_coords: Option<[u32; 2]>,
 }
 impl RAW for Layer {
     fn new() -> Layer {
@@ -1617,97 +1617,94 @@ impl RAW for Layer {
 }
 impl Menu for Layer {
     fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
-        //, tile_info: Vec<(String, [u32; 2])>
         let layer = self.clone();
-        // let [x1, y1] = &mut self.coords;
         let conditions = &mut self.conditions;
-        // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
+        let [x1, y1] = &mut self.coords;
+        let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
 
         ui.separator();
-
-        ui.columns(2, |ui| {
-            ui[0].label("Layer name:");
-            ui[0].text_edit_singleline(&mut self.name);
-            ui[0].add_space(PADDING);
-            
-            egui::ComboBox::from_label("TilePage:")
+        ui.label("Layer name:");
+        ui.text_edit_singleline(&mut self.name);
+        
+        ui.add_space(PADDING);
+        egui::ComboBox::from_label("TilePage")
             .selected_text(&self.tile_name)
-            .show_ui(&mut ui[0], |ui| {
-                ui.selectable_value(&mut self.tile_name, String::from("(select)"), "(select)");
-                // for tile_name in tile_names {
-                //     ui.selectable_value(
-                //         &mut self.tile_name,
-                //         tile_name.to_string(),
-                //         tile_name,
-                //     );
-                // }
-                ui.selectable_value(&mut self.tile_name, String::new(), "New TilePage");
-            });
-            ui[0].text_edit_singleline(&mut self.tile_name);
-
-            ui[0].add_space(PADDING);
-            let mut large = self.large_coords.is_some();
-            ui[0].checkbox(&mut large, "Large Image:");
-
-            if large {
-                let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
-                // ui[0].add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                //     .unwrap_or_default()).prefix("TilePage X: "));
-                // ui[0].add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                //     .unwrap_or_default()).prefix("TilePage Y: "));
-
-                ui[0].add(egui::Slider::new(x2, 0..=2).prefix("X + "));
-                ui[0].add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
-            } else {
-                // ui[0].add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
-                // ui[0].add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
-
-                if self.large_coords.is_some() {
-                    self.large_coords.take();
-                }
+            .show_ui(ui, |ui| {
+            for &t in &tile_names {
+                ui.selectable_value(&mut self.tile_name, t.clone(), t);
             }
+            ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
+        });
+        if !tile_names.contains(&&self.tile_name) {
+            ui.label("Custom tile name:");
+            ui.text_edit_singleline(&mut self.tile_name);
+        }
 
-            ui[0].add_space(PADDING);
-            if ui[0].button("Add Condition").clicked() {
-                conditions.push(Condition::default());
-            }
+        ui.add_space(PADDING);
+        let mut large = self.large_coords.is_some();
+        ui.checkbox(&mut large, "Large Image:");
 
-            ui[0].add_space(PADDING);
-            ui[0].label("Preview:");
-            egui::ScrollArea::horizontal()
-                .id_source("Preview scroll")
-                .show(&mut ui[0], |ui| {
-                ui.add(egui::Label::new(
-                    layer.display())
-                    .wrap(false)
-                );
+        let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+        let max_coords;
+        if let Some(tp_info) = shared.tile_page_info.get(&self.tile_name) {
+            max_coords = [(tp_info.image_size[0]/32) as u32, (tp_info.image_size[1]/32) as u32];
+        } else {
+            max_coords = [100,100];
+        }
+        if large {
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2+1)
+                    .unwrap_or_default()).prefix("X: "));
+                ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
             });
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2+1)
+                    .unwrap_or_default()).prefix("Y: "));
+                ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+            });
+        } else {
+            self.large_coords.take();
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(1)
+                .unwrap_or(0)).prefix("X: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(1)
+                .unwrap_or(0)).prefix("Y: "));
+        }
 
-            let mut delete = None;
-            
-            egui::ScrollArea::vertical()
-                .id_source("Condition scroll")
-                .max_height(300.0)
-                .show(&mut ui[1], |ui| {
-                for (i_cond, condition) in conditions.iter_mut().enumerate() {
-                    ui.push_id(i_cond, |ui| {
-                        ui.group(|ui| {
-                            condition.menu(ui, shared);//, tile_info.clone());
-                            ui.add_space(PADDING);
-                            if ui.button("Remove Condition").clicked() {
-                                delete = Some(i_cond);
-                            }
-                        });
-                        
+        ui.add_space(PADDING);
+        if ui.button("Add Condition").clicked() {
+            conditions.push(Condition::default());
+        }
+        
+        ui.add_space(PADDING);
+        ui.label("Preview:");
+        egui::ScrollArea::horizontal().id_source("Preview Scroll").show(ui, |ui| {
+            ui.add(egui::Label::new(layer.display()).wrap(false));
+        });
+
+        let mut delete = None;
+        
+        egui::ScrollArea::vertical()
+            .id_source("Condition scroll")
+            .max_height(300.0)
+            .show(ui, |ui| {
+            for (i_cond, condition) in conditions.iter_mut().enumerate() {
+                ui.push_id(i_cond, |ui| {
+                    ui.group(|ui| {
+                        condition.menu(ui, shared);
                         ui.add_space(PADDING);
+                        if ui.button("Remove Condition").clicked() {
+                            delete = Some(i_cond);
+                        }
                     });
-                }
-            });
-
-            if let Some(i_cond) = delete {
-                conditions.remove(i_cond);//checked
+                    
+                    ui.add_space(PADDING);
+                });
             }
         });
+
+        if let Some(i_cond) = delete {
+            conditions.remove(i_cond);//checked
+        }
     }
 }
 
@@ -2923,6 +2920,7 @@ pub enum State {
 impl State {
     pub fn name(&self) -> String {
         match self {
+            Self::Empty => "(none)".to_string(),
             Self::Default => "DEFAULT".to_string(),
             Self::Child => "CHILD".to_string(),
             Self::Baby => "BABY".to_string(),
@@ -2951,7 +2949,6 @@ impl State {
                     .to_case(Case::UpperSnake)
                     .to_string()
             },
-            Self::Empty => "(empty)".to_string(),
         }
     }
 
@@ -2980,6 +2977,7 @@ impl State {
             "LIGHT_SWARM_LARGE" => Self::LightSwarmLarge,
             "HIVE" => Self::Hive,
             "REMAINS" => Self::Remains,
+            "(none)" => Self::Empty,
             other => { Self::Custom(other.to_uppercase().to_string()) }
         }
     }
@@ -3322,14 +3320,14 @@ pub enum BodyPartType {
     ByToken(String),
 }
 impl BodyPartType {
-    fn name(&self) -> String {
-        match self {
-            BodyPartType::None => String::new(),
-            BodyPartType::ByType(..) => "BY_TYPE".to_string(),
-            BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
-            BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
-        }
-    }
+    // fn name(&self) -> String {
+    //     match self {
+    //         BodyPartType::None => String::new(),
+    //         BodyPartType::ByType(..) => "BY_TYPE".to_string(),
+    //         BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
+    //         BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
+    //     }
+    // }
 
     fn display(&self) -> String {
         match self {
@@ -3639,19 +3637,17 @@ impl RAW for Statue {
     }
 
     fn display(&self) -> String {
-        if let Some([x2, y2]) = self.large_coords {
-            format!(
-                "\t[{}:{}:{}:{}:{}:{}]\n",
-                self.state.name(),
-                self.tile_name.with_boundaries(&[Boundary::Space])
-                    .to_case(Case::UpperSnake)
-                    .to_string(),
-                self.coords[0],
-                self.coords[1],
-                self.coords[0] + x2,
-                self.coords[1] + y2,
-            )
-        } else {String::new()}
+        let [x2, y2] = self.large_coords.unwrap_or([0, 1]);
+        format!(
+            "\t[{}:{}:{}:{}:{}:{}]\n",
+            self.state.name(),
+            self.tile_name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                .to_case(Case::UpperSnake),
+            self.coords[0],
+            self.coords[1],
+            self.coords[0] + x2,
+            self.coords[1] + y2,
+        )
     }
 }
 impl Menu for Statue {
@@ -3712,15 +3708,14 @@ impl Menu for Statue {
         } else {
             max_coords = [100,100];
         }
-
         ui.horizontal(|ui| {
-            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                .unwrap_or_default()).prefix("TilePage X: "));
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2+1)
+                .unwrap_or_default()).prefix("X: "));
             ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
         });
         ui.horizontal(|ui| {
-            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                .unwrap_or_default()).prefix("TilePage Y: "));
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2+1)
+                .unwrap_or_default()).prefix("Y: "));
             ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
         });
 
@@ -3735,51 +3730,76 @@ impl Menu for Statue {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Plant {
     pub name: String,
-    pub tiles: [Option<String>; 9],
-    pub coords: [Option<[usize; 2]>; 9],
+    pub tile_name: String,
+    pub coords: [Option<[u32; 2]>; 9],
 }
 impl RAW for Plant {
     fn new() -> Self {
-        const TILES_REPEAT_VALUE: Option<String> = None;
-        const COORDS_REPEAT_VALUE: Option<[usize; 2]> = None;
+        const COORDS_REPEAT_VALUE: Option<[u32; 2]> = None;
         Self {
-            name: "(ARRAY_REPEAT_VALUE)".to_string(),
-            tiles: [TILES_REPEAT_VALUE; 9],
+            name: "(new)".to_string(),
+            tile_name: String::new(),
             coords: [COORDS_REPEAT_VALUE; 9],
         }
     }
 
     fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
+        //todo
         Ok(Plant::new())
     }
 
     fn display(&self) -> String {
+        //todo
         "".to_string()
+    }
+}
+impl Menu for Plant {
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        //todo
+        ui.label("plant menu");
+        let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
+        for tile_name in tile_names {
+            ui.label(tile_name);
+        }
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TileGraphic {
     pub name: String,
-    pub tiles: Vec<String>,
-    pub coords: Vec<String>,
+    pub tile_name: String,
+    pub coords: [u32; 2],
     
 }
 impl RAW for TileGraphic {
     fn new() -> Self {
         Self {
             name: "(new)".to_string(),
-            tiles: Vec::new(),
-            coords: Vec::new(),
+            tile_name: String::new(),
+            coords: [0, 0],
         }
     }
 
     fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
+        //todo
         Ok(TileGraphic::new())
     }
 
     fn display(&self) -> String {
-        todo!()
+        //todo
+        let out = "".to_string();
+
+        out
+    }
+}
+impl Menu for TileGraphic {
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        //todo
+        ui.label("tile graphic menu");
+        let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
+        for tile_name in tile_names {
+            ui.label(tile_name);
+        }
     }
 }
 
@@ -3799,6 +3819,7 @@ impl RAW for Palette {
     }
 
     fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
+        //todo
         Ok(Self::new())
     }
 
