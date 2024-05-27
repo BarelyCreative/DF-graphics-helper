@@ -13,7 +13,7 @@ use logic::error::{Result, DFGHError, wrap_import_buffer_error, wrap_import_file
 
 pub const PADDING: f32 = 8.0;
 
-//$func:expr, $rel_line:ident, $r_error:expr
+//$func:expr, $rel_line:ident, $buffer_len:ident, $r_error:expr
 macro_rules! buffer_err_wrap {
     ($func:expr, $rel_line:ident, $buffer_len:ident, $r_error:expr) => {
         match $func {
@@ -22,7 +22,7 @@ macro_rules! buffer_err_wrap {
         }
     };
 }
-//$rel_line:ident, $actual:ident, $expected:expr, $type:ty
+//$rel_line:ident, $buffer_len:ident, $actual:ident, $expected:expr, $type:ty
 macro_rules! index_err {
     ($rel_line:ident, $buffer_len:ident, $actual:ident, $expected:expr, $type:ty) => {
         let e = DFGHError::ImportIndexError($expected, $actual);
@@ -755,7 +755,64 @@ impl RAW for GraphicsFile {
     }
 
     fn display(&self) -> String {
-        todo!()
+        let mut out;
+        
+        match self {
+            GraphicsFile::DefaultFile => out = "".to_string(),
+            GraphicsFile::CreatureFile(file_name, creatures) => {
+                out = format!("graphics_creatures_{}\n\n[OBJECT:GRAPHICS]\n\n",
+                    file_name
+                    .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                    .to_case(Case::Snake)
+                    .replace("graphics_", "")
+                    .replace("creatures_", "")
+                );
+
+                for creature in creatures {
+                    out.push_str(&creature.display());
+                }
+            },
+            GraphicsFile::StatueCreatureFile(file_name, statues) => {
+                out = format!("creatures_{}_statue\n\n[OBJECT:GRAPHICS]\n\n",
+                    file_name
+                    .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                    .to_case(Case::Snake)
+                    .replace("graphics_", "")
+                    .replace("creatures_", "")
+                    .replace("_statue", "")
+                );
+
+                for statue in statues {
+                    out.push_str(&statue.display());
+                }
+            },
+            GraphicsFile::PlantFile(file_name, plants) => {
+                out = format!("graphics_{}\n\n[OBJECT:GRAPHICS]\n\n",
+                    file_name
+                    .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                    .to_case(Case::Snake)
+                    .replace("graphics_", "")
+                );
+
+                for plant in plants {
+                    out.push_str(&plant.display());
+                }
+            },
+            GraphicsFile::TileGraphicsFile(file_name, tile_graphics) => {
+                out = format!("graphics_{}\n\n[OBJECT:GRAPHICS]\n\n",
+                    file_name
+                    .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                    .to_case(Case::Snake)
+                    .replace("graphics_", "")
+                );
+
+                for tile_graphic in tile_graphics {
+                    out.push_str(&tile_graphic.display());
+                }
+            },
+        }
+
+        out
         // let creature_file = fs::File::create(
         //     path
         //     .join("graphics")
@@ -914,34 +971,33 @@ impl RAW for Creature {
     }
 
     fn display(&self) -> String {
-        let mut out = String::new();
+        let mut out;
+        if let Some(caste) = &self.caste {
+            out = format!("[CREATURE_CASTE_GRAPHICS:{}:{}]\n",
+                self.name
+                .with_boundaries(&[Boundary::Space])
+                .to_case(Case::UpperSnake)
+                .to_string(),
+                caste.name()
+            );
+        } else {
+            out = format!("[CREATURE_GRAPHICS:{}]\n",
+                self.name
+                .with_boundaries(&[Boundary::Space])
+                .to_case(Case::UpperSnake)
+                .to_string()
+            );
+        }
 
-        let mut layer_sets = self.layer_sets.clone();
+        for simple_layer in &self.simple_layers {
+            out.push_str(&simple_layer.display());
+        }
 
-        for layer_set in layer_sets.iter_mut() {//test
-            // if let LayerSet::Statue(simple_layers) = layer_set {
-            //     if !out.contains("[STATUE_CREATURE_GRAPHICS ") {
-            //         out.push_str(&format!(
-            //             "[STATUE_CREATURE_GRAPHICS:{}]\n",
-            //             self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
-            //         ));
-            //     } else if simple_layers.len() > 1 {
-            //         simple_layers.drain(1..);
-            //     }
-            // } else 
-            // if let LayerSet::Empty = layer_set {
-                
-            // } else {
-            //     if !out.contains("[CREATURE_GRAPHICS") {
-            //         out.push_str(&format!(
-            //             "[CREATURE_GRAPHICS:{}]\n",
-            //             self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
-            //         ));
-            //     }
-            // }
-            
+        for layer_set in &self.layer_sets {
             out.push_str(&layer_set.display());
         }
+
+        out.push_str("\n");
 
         out
     }
@@ -1266,34 +1322,19 @@ impl RAW for LayerSet {
     }
 
     fn display(&self) -> String {
-        todo!();
-        // let mut out = String::new();
+        let mut out = String::new();
 
-        // match self {
-        //     LayerSet::Simple(simple_layers) => {
-        //         for simple_layer in simple_layers {
-        //             out.push_str(&simple_layer.display());
-        //         }
+        out.push_str(&format!("\t[LAYER_SET:{}]\n\n", self.state.name()));
 
-        //         out.push_str("\n");
-        //     },
-        //     LayerSet::Statue(simple_layers) => {
-        //         for simple_layer in simple_layers {
-        //             out.push_str(&simple_layer.display_statue());
-        //         }
+        for palette in &self.palettes {
+            out.push_str(&palette.display());
+        }
 
-        //         out.push_str("\n");
-        //     },
-        //     LayerSet::Layered(state, layer_groups) => {
-        //         out.push_str(&format!("\t[LAYER_SET:{}]\n", state.name()));
+        for layer_group in &self.layer_groups {
+            out.push_str(&layer_group.display());
+        }
 
-        //         for layer_group in layer_groups {
-        //             out.push_str(&layer_group.display());
-        //         }
-        //     },
-        //     LayerSet::Empty => {}
-        // }
-        // out
+        out
     }
 }
 impl Menu for LayerSet {
@@ -1424,9 +1465,8 @@ impl RAW for LayerGroup {
             self.name
             .with_boundaries(&[Boundary::Space])
             .to_case(Case::UpperSnake)
-            .to_string()
         ));
-        for layer in self.layers.iter() {
+        for layer in &self.layers {
             out.push_str(&layer.display());
         }
         out.push_str("\n");
@@ -1542,7 +1582,7 @@ impl RAW for Layer {
 
         if let Some([x2, y2]) = self.large_coords {
             out.push_str(&format!(
-                "\t\t\t[LAYER:{}:{}:LARGE_IMAGE:{}:{}:{}:{}:AS_IS]\n",
+                "\t\t\t[LAYER:{}:{}:LARGE_IMAGE:{}:{}:{}:{}]\n",
                 self.name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
@@ -1556,7 +1596,7 @@ impl RAW for Layer {
             ));
         } else {
             out.push_str(&format!(
-                "\t\t\t[LAYER:{}:{}:{}:{}:AS_IS]\n",
+                "\t\t\t[LAYER:{}:{}:{}:{}]\n",
                 self.name.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string(),
@@ -1715,215 +1755,231 @@ impl RAW for Condition {
         Self::default()
     }
 
-    fn read(_buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
-        // let mut line_vec = buffer[0].clone();
-        // let len = line_vec.len();
-        Ok(Condition::new())
-        // if len > 0 {
-        //     match line_vec[0].as_str() {
-        //         "(default)" => Ok(Condition::Default),
-        //         "CONDITION_ITEM_WORN" => {
-        //             let (item_type, items) = ItemType::from(line_vec[1..].to_vec())?;
-        //             Ok(Condition::ItemWorn(item_type, items))
-        //         },
-        //         "SHUT_OFF_IF_ITEM_PRESENT" => {
-        //             let (item_type, items) = ItemType::from(line_vec[1..].to_vec())?;
-        //             Ok(Condition::ShutOffIfItemPresent(item_type, items))
-        //         },
-        //         "CONDITION_DYE" => {
-        //             if len > 1 {
-        //                 Ok(Condition::Dye(line_vec[1].clone()))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_NOT_DYED" => Ok(Condition::NotDyed),
-        //         "CONDITION_MATERIAL_FLAG" => {
-        //             if len > 1 {
-        //                 Ok(Condition::MaterialFlag(
-        //                     line_vec[1..]
-        //                         .iter()
-        //                         .map(|flag| MaterialFlag::from(flag.clone()))
-        //                         .collect()
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_MATERIAL_TYPE" => {
-        //             if len > 2 {
-        //                 Ok(Condition::MaterialType(
-        //                     Metal::from(line_vec[2].clone())
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_PROFESSION_CATEGORY" => {
-        //             if len > 1 {
-        //                 Ok(Condition::ProfessionCategory(
-        //                     line_vec[1..]
-        //                         .iter()
-        //                         .map(|prof| Profession::from(prof.clone()))
-        //                         .collect()
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_RANDOM_PART_INDEX" => {
-        //             if len > 3 {
-        //                 Ok(Condition::RandomPartIndex(
-        //                     line_vec[1].clone(),
-        //                     line_vec[2].parse()?,
-        //                     line_vec[3].parse()?
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_HAUL_COUNT_MIN" => {
-        //             if len > 1 {
-        //                 Ok(Condition::HaulCountMin(
-        //                     line_vec[1].parse()?
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_HAUL_COUNT_MAX" => {
-        //             if len > 1 {
-        //                 Ok(Condition::HaulCountMax(
-        //                     line_vec[1].parse()?
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_CHILD" => Ok(Condition::Child),
-        //         "CONDITION_NOT_CHILD" => Ok(Condition::NotChild),
-        //         "CONDITION_CASTE" => {
-        //             if len > 1 {
-        //                 Ok(Condition::Caste(
-        //                     line_vec[1].clone()
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_GHOST" => Ok(Condition::Ghost),
-        //         "CONDITION_SYN_CLASS" => {
-        //             if len > 1 {
-        //                 Ok(Condition::SynClass(
-        //                     line_vec.drain(1..).collect()
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "CONDITION_TISSUE_LAYER" => {
-        //             if len > 3 {
-        //                 Ok(Condition::TissueLayer(
-        //                     line_vec[2].clone(),
-        //                     line_vec[3].clone(),
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "TISSUE_MIN_LENGTH" => {
-        //             if len > 0 {
-        //                 Ok(Condition::TissueMinLength(
-        //                     line_vec[1].parse()?
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "TISSUE_MAX_LENGTH" => {
-        //             if len > 1 {
-        //                 Ok(Condition::TissueMaxLength(
-        //                     line_vec[1].parse()?
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "TISSUE_MAY_HAVE_COLOR" => {
-        //             if len > 1 {
-        //                 Ok(Condition::TissueMayHaveColor(
-        //                     line_vec.drain(1..).collect()
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "TISSUE_MAY_HAVE_SHAPING" => {
-        //             if len > 1 {
-        //                 Ok(Condition::TissueMayHaveShaping(
-        //                     line_vec.drain(1..).collect()
-        //                 ))
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         "TISSUE_NOT_SHAPED" => Ok(Condition::TissueNotShaped),
-        //         "TISSUE_SWAP" => {
-        //             if len > 5 {
-        //                 if line_vec[4].eq("LARGE_IMAGE") && len > 8 {
-        //                     let c = [line_vec[5].parse()?,
-        //                         line_vec[6].parse()?];
-        //                     let l_c = [line_vec[7].parse()?,
-        //                         line_vec[8].parse()?];
-        //                     let large;
-        //                     if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
-        //                         large = [l_c[0]-c[0], l_c[1]-c[1]]; 
-        //                         Ok(Condition::TissueSwap(
-        //                             line_vec[1].clone(),
-        //                             line_vec[2].parse()?,
-        //                             line_vec[3].clone(),
-        //                             c,
-        //                             Some(large),
-        //                         ))
-        //                     } else {
-        //                         // return Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                         return Err(DFGHError::None)//todo fix
-        //                     }
-        //                 } else {
-        //                     Ok(Condition::TissueSwap(
-        //                         line_vec[1].clone(),
-        //                         line_vec[2].parse()?,
-        //                         line_vec[3].clone(),
-        //                         [line_vec[4].parse()?, 
-        //                         line_vec[5].parse()?],
-        //                         None,
-        //                     ))
-        //                 }
-        //             } else {
-        //                 // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //                 return Err(DFGHError::None)//todo fix
-        //             }
-        //         },
-        //         other => Ok(Condition::Custom(other.to_string())),
-        //     }
-        // } else {
-        //     // Err(DFGHError::ImportConditionError(line_vec.join(":")))
-        //     Err(DFGHError::None)//todo fix
-        // }
+    fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, _path: Option<&path::PathBuf>) -> Result<Self> {
+        let mut line_vec = buffer[0].clone();
+        let len = line_vec.len();
+        let buffer_len = buffer.len();
+        let i_line = 0;
+
+        if len > 0 {
+            match line_vec[0].as_str() {
+                "(default)" => return Ok(Condition::Default),
+                "CONDITION_ITEM_WORN" => {
+                    let (item_type, items) = ItemType::from(line_vec[1..].to_vec())?;
+                    return Ok(Condition::ItemWorn(item_type, items))
+                },
+                "SHUT_OFF_IF_ITEM_PRESENT" => {
+                    let (item_type, items) = ItemType::from(line_vec[1..].to_vec())?;
+                    return Ok(Condition::ShutOffIfItemPresent(item_type, items))
+                },
+                "CONDITION_DYE" => {
+                    if len > 1 {
+                        return Ok(Condition::Dye(line_vec[1].clone()))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_NOT_DYED" => return Ok(Condition::NotDyed),
+                "CONDITION_MATERIAL_FLAG" => {
+                    if len > 1 {
+                        return Ok(Condition::MaterialFlag(
+                            line_vec[1..]
+                                .iter()
+                                .map(|flag| MaterialFlag::from(flag.clone()))
+                                .collect()
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_MATERIAL_TYPE" => {
+                    if len > 2 {
+                        return Ok(Condition::MaterialType(
+                            Metal::from(line_vec[2].clone())
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_PROFESSION_CATEGORY" => {
+                    if len > 1 {
+                        return Ok(Condition::ProfessionCategory(
+                            line_vec[1..]
+                                .iter()
+                                .map(|prof| Profession::from(prof.clone()))
+                                .collect()
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_RANDOM_PART_INDEX" => {
+                    if len > 3 {
+                        return Ok(Condition::RandomPartIndex(
+                            line_vec[1].clone(),
+                            line_vec[2].parse()?,
+                            line_vec[3].parse()?
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_HAUL_COUNT_MIN" => {
+                    if len > 1 {
+                        return Ok(Condition::HaulCountMin(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_HAUL_COUNT_MAX" => {
+                    if len > 1 {
+                        return Ok(Condition::HaulCountMax(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_CHILD" => return Ok(Condition::Child),
+                "CONDITION_NOT_CHILD" => return Ok(Condition::NotChild),
+                "CONDITION_CASTE" => {
+                    if len > 1 {
+                        return Ok(Condition::Caste(
+                            line_vec[1].clone()
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_GHOST" => return Ok(Condition::Ghost),
+                "CONDITION_SYN_CLASS" => {
+                    if len > 1 {
+                        return Ok(Condition::SynClass(
+                            line_vec.drain(1..).collect()
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "CONDITION_TISSUE_LAYER" => {
+                    if len > 3 {
+                        return Ok(Condition::TissueLayer(
+                            line_vec[2].clone(),
+                            line_vec[3].clone(),
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "TISSUE_MIN_LENGTH" => {
+                    if len > 0 {
+                        return Ok(Condition::TissueMinLength(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "TISSUE_MAX_LENGTH" => {
+                    if len > 1 {
+                        return Ok(Condition::TissueMaxLength(
+                            line_vec[1].parse()?
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "TISSUE_MAY_HAVE_COLOR" => {
+                    if len > 1 {
+                        return Ok(Condition::TissueMayHaveColor(
+                            line_vec.drain(1..).collect()
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "TISSUE_MAY_HAVE_SHAPING" => {
+                    if len > 1 {
+                        return Ok(Condition::TissueMayHaveShaping(
+                            line_vec.drain(1..).collect()
+                        ))
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "TISSUE_NOT_SHAPED" => return Ok(Condition::TissueNotShaped),
+                "TISSUE_SWAP" => {
+                    if len > 5 {
+                        if line_vec[4].eq("LARGE_IMAGE") && len > 8 {
+                            let c = [line_vec[5].parse()?,
+                                line_vec[6].parse()?];
+                            let l_c = [line_vec[7].parse()?,
+                                line_vec[8].parse()?];
+                            let large;
+                            if (c[0] <= l_c[0]) && (c[1] <= l_c[1]) {
+                                large = [l_c[0]-c[0], l_c[1]-c[1]]; 
+                                return Ok(Condition::TissueSwap(
+                                    line_vec[1].clone(),
+                                    line_vec[2].parse()?,
+                                    line_vec[3].clone(),
+                                    c,
+                                    Some(large),
+                                ))
+                            } else {
+                                return Err(DFGHError::None)//todo fix
+                            }
+                        } else {
+                            return Ok(Condition::TissueSwap(
+                                line_vec[1].clone(),
+                                line_vec[2].parse()?,
+                                line_vec[3].clone(),
+                                [line_vec[4].parse()?, 
+                                line_vec[5].parse()?],
+                                None,
+                            ))
+                        }
+                    } else {
+                        return Err(DFGHError::None)//todo fix
+                    }
+                },
+                "ITEM_QUALITY" => {
+                    return Ok(Condition::ItemQuality(
+                        line_vec[1].parse()?
+                    ))
+                },
+                "USE_PALETTE" => {//Condition::UsePalette(palette_name, row) => {
+                    return Ok(Condition::UsePalette(
+                        line_vec[1].clone(),
+                        line_vec[2].parse()?
+                    ))
+                },
+                "USE_STANDARD_PALETTE_FROM_ITEM" => return Ok(Condition::UseStandardPalette),
+                "CONDITION_BP" => {//bp_type
+                    return Ok(Condition::ConditionBP(
+                        BodyPartType::from(line_vec.clone())?
+                    ));
+                },
+                "LG_CONDITION_BP" => {//bp_type
+                    return Ok(Condition::LGConditionBP(
+                        BodyPartType::from(line_vec.clone())?
+                    ));
+                },
+                "BP_APPEARANCE_MODIFIER_RANGE" => {//bp_app_mod, min, max
+                    return Ok(Condition::BPAppearanceModifierRange(
+                        BPAppMod::from(line_vec[1].clone()),
+                        line_vec[2].parse()?,
+                        line_vec[3].parse()?
+                    ));
+                },
+                "BP_PRESENT" => return Ok(Condition::BPPresent),
+                "BP_SCARRED" => return Ok(Condition::BPScarred),
+                other => return Ok(Condition::Custom(other.to_string())),
+            }
+        } else {
+            index_err!(i_line, buffer_len, len, 1, Condition);
+        }
     }
 
     fn display(&self) -> String {
@@ -2143,7 +2199,7 @@ impl RAW for Condition {
                     ));
                 }
             },
-            Condition::ItemQuality(index) => {//todo check
+            Condition::ItemQuality(index) => {
                 out = format!("\t\t\t\t[ITEM_QUALITY:{}]\n", index);
             },
             Condition::UsePalette(palette_name, row) => {
@@ -2152,23 +2208,14 @@ impl RAW for Condition {
             Condition::UseStandardPalette => {
                 out = format!("\t\t\t\t[USE_STANDARD_PALETTE_FROM_ITEM]\n");
             },
-            // Condition::LSPalette(string) => {//todo check
-            //     out = format!("\t\t\t\t[LS_PALETTE:{}]\n", string);
-            // },
-            // Condition::LSPaletteFile(string) => {//todo check
-            //     out = format!("\t\t\t\t[LS_PALETTE_FILE:{}]\n", string);
-            // },
-            // Condition::LSPaletteDefault(index) => {//todo check
-            //     out = format!("\t\t\t\t[LS_PALETTE_DEFAULT:{}]\n", index);
-            // },
             Condition::ConditionBP(bp_type) => {
-                out = format!("\t\t\t\t[CONDITION_BP:{}]\n", Into::<String>::into(bp_type.clone()));
+                out = format!("\t\t\t\t[CONDITION_BP:{}]\n", bp_type.clone().display());
             },
-            Condition::LGConditionBP(bp_type) => {//todo check
-                out = format!("\t\t\t\t[LG_CONDITION_BP:{}]\n", Into::<String>::into(bp_type.clone()));
+            Condition::LGConditionBP(bp_type) => {
+                out = format!("\t\t\t\t[LG_CONDITION_BP:{}]\n", bp_type.clone().display());
             },
             Condition::BPAppearanceModifierRange(bp_app_mod, min, max) => {
-                out = format!("\t\t\t\t[\t\t\t\t[BP_APPEARANCE_MODIFIER_RANGE:{},{},{}]\n", Into::<String>::into(bp_app_mod.clone()), min, max);
+                out = format!("\t\t\t\t[\t\t\t\t[BP_APPEARANCE_MODIFIER_RANGE:{}:{}:{}]\n", bp_app_mod.clone().name(), min, max);
             },
             Condition::BPPresent => {
                 out = format!("\t\t\t\t[BP_PRESENT]\n");
@@ -2832,9 +2879,6 @@ impl Condition {
             Condition::UseStandardPalette => "USE_STANDARD_PALETTE".to_string(),
             Condition::ConditionBP(..) => "CONDITION_BP".to_string(),
             Condition::LGConditionBP(..) => "LG_CONDITION_BP".to_string(),
-            // Condition::LSPalette(..) => "LS_PALETTE".to_string(),
-            // Condition::LSPaletteFile(..) => "LS_PALETTE_FILE".to_string(),
-            // Condition::LSPaletteDefault(..) => "LS_PALETTE_DEFAULT".to_string(),
             Condition::BPAppearanceModifierRange(..) => "BP_APP_MOD_RANGE".to_string(),
             Condition::BPPresent => "BP_PRESENT".to_string(),
             Condition::BPScarred => "BP_SCARRED".to_string(),
@@ -2911,36 +2955,6 @@ impl State {
         }
     }
 
-    fn iterator() -> std::slice::Iter<'static, Self> {
-        static STATES: [State; 23] = [
-            State::Default,
-            State::Child,
-            State::Baby,
-            State::Animated,
-            State::Corpse,
-            State::ListIcon,
-            State::Portrait,
-            State::TrainedHunter,
-            State::TrainedWar,
-            State::Skeleton,
-            State::SkeletonWithSkull,
-            State::Vermin,
-            State::Remains,
-            State::Hive,
-            State::VerminAlt,
-            State::SwarmSmall,
-            State::SwarmMedium,
-            State::SwarmLarge,
-            State::LightVermin,
-            State::LightVerminAlt,
-            State::LightSwarmSmall,
-            State::LightSwarmMedium,
-            State::LightSwarmLarge,
-        ];
-        STATES.iter()
-    }
-}
-impl From<String> for State {
     fn from(string: String) -> Self {
         match string.to_uppercase().as_str() {
             "DEFAULT" => Self::Default,
@@ -2968,6 +2982,35 @@ impl From<String> for State {
             "REMAINS" => Self::Remains,
             other => { Self::Custom(other.to_uppercase().to_string()) }
         }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static STATES: [State; 23] = [
+            State::Default,
+            State::Child,
+            State::Baby,
+            State::Animated,
+            State::Corpse,
+            State::ListIcon,
+            State::Portrait,
+            State::TrainedHunter,
+            State::TrainedWar,
+            State::Skeleton,
+            State::SkeletonWithSkull,
+            State::Vermin,
+            State::Remains,
+            State::Hive,
+            State::VerminAlt,
+            State::SwarmSmall,
+            State::SwarmMedium,
+            State::SwarmLarge,
+            State::LightVermin,
+            State::LightVerminAlt,
+            State::LightSwarmSmall,
+            State::LightSwarmMedium,
+            State::LightSwarmLarge,
+        ];
+        STATES.iter()
     }
 }
 
@@ -3032,18 +3075,18 @@ impl Metal {
         }
     }
 
-    // fn from(string: String) -> Metal {
-    //     match string.as_str() {
-    //         "COPPER" => Metal::Copper,
-    //         "SILVER" => Metal::Silver,
-    //         "BRONZE" => Metal::Bronze,
-    //         "BLACK_BRONZE" => Metal::BlackBronze,
-    //         "IRON" => Metal::Iron,
-    //         "STEEL" => Metal::Steel,
-    //         "ADAMANTINE" => Metal::Adamantine,
-    //         metal => Metal::Custom(metal.to_string()),
-    //     }
-    // }
+    fn from(string: String) -> Metal {
+        match string.as_str() {
+            "COPPER" => Metal::Copper,
+            "SILVER" => Metal::Silver,
+            "BRONZE" => Metal::Bronze,
+            "BLACK_BRONZE" => Metal::BlackBronze,
+            "IRON" => Metal::Iron,
+            "STEEL" => Metal::Steel,
+            "ADAMANTINE" => Metal::Adamantine,
+            metal => Metal::Custom(metal.to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3148,56 +3191,56 @@ impl MaterialFlag {
         }
     }
 
-    // fn from(string: String) -> MaterialFlag {
-    //     match string.as_str() {
-    //         "IS_DIVINE_MATERIAL" => MaterialFlag::DivineMaterial,
-    //         "IS_CRAFTED_ARTIFACT" => MaterialFlag::Artifact,
-    //         "NOT_ARTIFACT" => MaterialFlag::NotArtifact,
-    //         "ANY_LEATHER_MATERIAL" => MaterialFlag::Leather,
-    //         "ANY_BONE_MATERIAL" => MaterialFlag::Bone,
-    //         "ANY_SHELL_MATERIAL" => MaterialFlag::Shell,
-    //         "ANY_WOOD_MATERIAL" => MaterialFlag::Wood,
-    //         "WOVEN_ITEM" => MaterialFlag::Woven,
-    //         "ANY_SILK_MATERIAL" => MaterialFlag::Silk,
-    //         "ANY_YARN_MATERIAL" => MaterialFlag::Yarn,
-    //         "ANY_PLANT_MATERIAL" => MaterialFlag::Plant,
-    //         "NOT_IMPROVED" => MaterialFlag::NotImproved,
-    //         "EMPTY" => MaterialFlag::Empty,
-    //         "ANY_STRAND_TISSUE" => MaterialFlag::StrandTissue,
-    //         "ANY_STONE_MATERIAL" => MaterialFlag::Stone,
-    //         "ANY_GEM_MATERIAL" => MaterialFlag::Gem,
-    //         "ANY_TOOTH_MATERIAL" => MaterialFlag::Tooth,
-    //         "ANY_HORN_MATERIAL" => MaterialFlag::Horn,
-    //         "ANY_PEARL_MATERIAL" => MaterialFlag::Pearl,
-    //         "ANY_SOAP_MATERIAL" => MaterialFlag::Soap,
-    //         "HARD_ITEM_MATERIAL" => MaterialFlag::HardMat,
-    //         "METAL_ITEM_MATERIAL" => MaterialFlag::Metal,
-    //         "GLASS_MATERIAL" => MaterialFlag::Glass,
-    //         "IS_SAND_MATERIAL" => MaterialFlag::Sand,
-    //         "CONTAINS_LYE" => MaterialFlag::Lye,
-    //         "POTASHABLE" => MaterialFlag::Potashable,
-    //         "FOOD_STORAGE_CONTAINER" => MaterialFlag::FoodStorage,
-    //         "NOT_CONTAIN_BARREL_ITEM" => MaterialFlag::EmptyBarrel,
-    //         "NOT_PRESSED" => MaterialFlag::NotPressed,
-    //         "FIRE_BUILD_SAFE" => MaterialFlag::FireSafe,
-    //         "MAGMA_BUILD_SAFE" => MaterialFlag::MagmaSafe,
-    //         "BUILDMAT" => MaterialFlag::BuildMat,
-    //         "WORTHLESS_STONE_ONLY" => MaterialFlag::WorthlessStone,
-    //         "USE_BODY_COMPONENT" => MaterialFlag::BodyComp,
-    //         "CAN_USE_LOCATION_RESERVED" => MaterialFlag::CanUseLocation,
-    //         "NO_EDGE_ALLOWED" => MaterialFlag::NoEdge,
-    //         "HAS_EDGE" => MaterialFlag::Edge,
-    //         "NOT_ENGRAVED" => MaterialFlag::NotEngraved,
-    //         "HAS_WRITING_IMPROVEMENT" => MaterialFlag::WritingImprovment,
-    //         "DOES_NOT_ABSORB" => MaterialFlag::NotAbsorb,
-    //         "UNROTTEN" => MaterialFlag::Unrotten,
-    //         "NOT_WEB" => MaterialFlag::NotWeb,
-    //         "WEB_ONLY" => MaterialFlag::Web,
-    //         "CAN_USE_ARTIFACT" => MaterialFlag::CanArtifact,
-    //         "ON_GROUND" => MaterialFlag::OnGround,
-    //         _ => MaterialFlag::None,
-    //     }
-    // }
+    fn from(string: String) -> MaterialFlag {
+        match string.as_str() {
+            "IS_DIVINE_MATERIAL" => MaterialFlag::DivineMaterial,
+            "IS_CRAFTED_ARTIFACT" => MaterialFlag::Artifact,
+            "NOT_ARTIFACT" => MaterialFlag::NotArtifact,
+            "ANY_LEATHER_MATERIAL" => MaterialFlag::Leather,
+            "ANY_BONE_MATERIAL" => MaterialFlag::Bone,
+            "ANY_SHELL_MATERIAL" => MaterialFlag::Shell,
+            "ANY_WOOD_MATERIAL" => MaterialFlag::Wood,
+            "WOVEN_ITEM" => MaterialFlag::Woven,
+            "ANY_SILK_MATERIAL" => MaterialFlag::Silk,
+            "ANY_YARN_MATERIAL" => MaterialFlag::Yarn,
+            "ANY_PLANT_MATERIAL" => MaterialFlag::Plant,
+            "NOT_IMPROVED" => MaterialFlag::NotImproved,
+            "EMPTY" => MaterialFlag::Empty,
+            "ANY_STRAND_TISSUE" => MaterialFlag::StrandTissue,
+            "ANY_STONE_MATERIAL" => MaterialFlag::Stone,
+            "ANY_GEM_MATERIAL" => MaterialFlag::Gem,
+            "ANY_TOOTH_MATERIAL" => MaterialFlag::Tooth,
+            "ANY_HORN_MATERIAL" => MaterialFlag::Horn,
+            "ANY_PEARL_MATERIAL" => MaterialFlag::Pearl,
+            "ANY_SOAP_MATERIAL" => MaterialFlag::Soap,
+            "HARD_ITEM_MATERIAL" => MaterialFlag::HardMat,
+            "METAL_ITEM_MATERIAL" => MaterialFlag::Metal,
+            "GLASS_MATERIAL" => MaterialFlag::Glass,
+            "IS_SAND_MATERIAL" => MaterialFlag::Sand,
+            "CONTAINS_LYE" => MaterialFlag::Lye,
+            "POTASHABLE" => MaterialFlag::Potashable,
+            "FOOD_STORAGE_CONTAINER" => MaterialFlag::FoodStorage,
+            "NOT_CONTAIN_BARREL_ITEM" => MaterialFlag::EmptyBarrel,
+            "NOT_PRESSED" => MaterialFlag::NotPressed,
+            "FIRE_BUILD_SAFE" => MaterialFlag::FireSafe,
+            "MAGMA_BUILD_SAFE" => MaterialFlag::MagmaSafe,
+            "BUILDMAT" => MaterialFlag::BuildMat,
+            "WORTHLESS_STONE_ONLY" => MaterialFlag::WorthlessStone,
+            "USE_BODY_COMPONENT" => MaterialFlag::BodyComp,
+            "CAN_USE_LOCATION_RESERVED" => MaterialFlag::CanUseLocation,
+            "NO_EDGE_ALLOWED" => MaterialFlag::NoEdge,
+            "HAS_EDGE" => MaterialFlag::Edge,
+            "NOT_ENGRAVED" => MaterialFlag::NotEngraved,
+            "HAS_WRITING_IMPROVEMENT" => MaterialFlag::WritingImprovment,
+            "DOES_NOT_ABSORB" => MaterialFlag::NotAbsorb,
+            "UNROTTEN" => MaterialFlag::Unrotten,
+            "NOT_WEB" => MaterialFlag::NotWeb,
+            "WEB_ONLY" => MaterialFlag::Web,
+            "CAN_USE_ARTIFACT" => MaterialFlag::CanArtifact,
+            "ON_GROUND" => MaterialFlag::OnGround,
+            _ => MaterialFlag::None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3220,223 +3263,189 @@ impl ItemType {
         }
     }
 
-    // fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
-    //     let len = strings.len();
-    //     match strings[0].as_str() {
-    //         "BY_CATEGORY" => {
-    //             if len > 3 {
-    //                 Ok(
-    //                     (ItemType::ByCategory(strings[1].clone(),
-    //                     Equipment::from(strings[2].clone())),
-    //                     strings[3..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "BY_TOKEN" => {
-    //             if len > 3 {
-    //                 Ok(
-    //                     (ItemType::ByToken(strings[1].clone(),
-    //                     Equipment::from(strings[2].clone())),
-    //                     strings[3..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "ANY_HELD" => {
-    //             if len > 2 {
-    //                 Ok(
-    //                     (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
-    //                     strings[2..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "WIELD" => {
-    //             if len > 2 {
-    //                 Ok(
-    //                     (ItemType::Wield(Equipment::from(strings[1].clone())),
-    //                     strings[2..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         _ => {Ok((ItemType::None, strings))}
-    //     }
-    // }
+    fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
+        let len = strings.len();
+        match strings[0].as_str() {
+            "BY_CATEGORY" => {
+                if len > 3 {
+                    Ok(
+                        (ItemType::ByCategory(strings[1].clone(),
+                        Equipment::from(strings[2].clone())),
+                        strings[3..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::None)//todo fix
+                }
+            },
+            "BY_TOKEN" => {
+                if len > 3 {
+                    Ok(
+                        (ItemType::ByToken(strings[1].clone(),
+                        Equipment::from(strings[2].clone())),
+                        strings[3..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::None)//todo fix
+                }
+            },
+            "ANY_HELD" => {
+                if len > 2 {
+                    Ok(
+                        (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
+                        strings[2..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::None)//todo fix
+                }
+            },
+            "WIELD" => {
+                if len > 2 {
+                    Ok(
+                        (ItemType::Wield(Equipment::from(strings[1].clone())),
+                        strings[2..].to_vec())
+                    )
+                } else {
+                    return Err(DFGHError::None)//todo fix
+                }
+            },
+            _ => {Ok((ItemType::None, strings))}
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum BodyPartType {
     #[default]
     None,
-    ByType(String, BodyPart),
-    ByCategory(String, BodyPart),
-    ByToken(String, BodyPart),
+    ByType(String),
+    ByCategory(String),
+    ByToken(String),
 }
 impl BodyPartType {
-    // fn name(&self) -> String {
-    //     match self {
-    //         BodyPartType::None => String::new(),
-    //         BodyPartType::ByType(..) => "BY_TYPE".to_string(),
-    //         BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
-    //         BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
-    //     }
-    // }
-
-    // fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
-    //     let len = strings.len();
-    //     match strings[0].as_str() {
-    //         "BY_CATEGORY" => {
-    //             if len > 3 {
-    //                 Ok(
-    //                     (ItemType::ByCategory(strings[1].clone(),
-    //                     Equipment::from(strings[2].clone())),
-    //                     strings[3..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "BY_TOKEN" => {
-    //             if len > 3 {
-    //                 Ok(
-    //                     (ItemType::ByToken(strings[1].clone(),
-    //                     Equipment::from(strings[2].clone())),
-    //                     strings[3..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "ANY_HELD" => {
-    //             if len > 2 {
-    //                 Ok(
-    //                     (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
-    //                     strings[2..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "WIELD" => {
-    //             if len > 2 {
-    //                 Ok(
-    //                     (ItemType::Wield(Equipment::from(strings[1].clone())),
-    //                     strings[2..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         _ => {Ok((ItemType::None, strings))}
-    //     }
-    // }
-}
-// impl From<Vec<String>> for BodyPartType {
-//     fn from(value: Vec<String>) -> Self {
-//         todo!()
-//     }
-// }
-impl Into<String> for BodyPartType {
-    fn into(self) -> String {
-        todo!()
+    fn name(&self) -> String {
+        match self {
+            BodyPartType::None => String::new(),
+            BodyPartType::ByType(..) => "BY_TYPE".to_string(),
+            BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
+            BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
+        }
     }
-}
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum BodyPart {
-    #[default]
-    None,
-    Custom(Vec<String>),
-}
-impl BodyPart {
-    // fn name(&self) -> String {
-    //     match self {
-    //         BodyPart::None => String::new(),
-    //         BodyPart::Custom(..) => "BP".to_string(),//todo
-    //     }
-    // }
+    fn display(&self) -> String {
+        match self {
+            BodyPartType::None => String::new(),
+            BodyPartType::ByType(bodypart) => {
+                format!(":BY_TYPE:{}", bodypart.clone())
+            },
+            BodyPartType::ByCategory(bodypart) => {
+                format!("BY_CATEGORY:{}", bodypart.clone())
+            },
+            BodyPartType::ByToken(bodypart) => {
+                format!("BY_TOKEN:{}", bodypart.clone())
+            },
+        }
+    }
 
-    // fn from(strings: Vec<String>) -> Result<(ItemType, Vec<String>)> {
-    //     let len = strings.len();
-    //     match strings[0].as_str() {
-    //         "BY_CATEGORY" => {
-    //             if len > 3 {
-    //                 Ok(
-    //                     (ItemType::ByCategory(strings[1].clone(),
-    //                     Equipment::from(strings[2].clone())),
-    //                     strings[3..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "BY_TOKEN" => {
-    //             if len > 3 {
-    //                 Ok(
-    //                     (ItemType::ByToken(strings[1].clone(),
-    //                     Equipment::from(strings[2].clone())),
-    //                     strings[3..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "ANY_HELD" => {
-    //             if len > 2 {
-    //                 Ok(
-    //                     (ItemType::AnyHeld(Equipment::from(strings[1].clone())),
-    //                     strings[2..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         "WIELD" => {
-    //             if len > 2 {
-    //                 Ok(
-    //                     (ItemType::Wield(Equipment::from(strings[1].clone())),
-    //                     strings[2..].to_vec())
-    //                 )
-    //             } else {
-    //                 // return Err(DFGHError::ImportConditionError(strings.join(":")))
-    //                 return Err(DFGHError::None)//todo fix
-    //             }
-    //         },
-    //         _ => {Ok((ItemType::None, strings))}
-    //     }
-    // }
+    fn from(line_vec: Vec<String>) -> Result<Self> {
+        let i_line = 0;
+        let buffer_len = 1;
+        let len = line_vec.len();
+
+        if len >= 2 {
+            match line_vec[0].as_str() {
+                "BY_CATEGORY" => {
+                    Ok(BodyPartType::ByCategory(line_vec[1].clone()))
+                },
+                "BY_TOKEN" => {
+                    Ok(BodyPartType::ByToken(line_vec[1].clone()))
+                },
+                "BY_TYPE" => {
+                    Ok(BodyPartType::ByType(line_vec[1].clone()))
+                },
+                _ => {Ok(BodyPartType::None)}
+            }
+        } else {
+            index_err!(i_line, buffer_len, len, 2, BodyPartType);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum BPAppMod {
     #[default]
     None,
+    Thickness,
+    Broadness,
+    Length,
+    Height,
+    CloseSet,
+    DeepSet,
+    RoundVsNarrow,
+    LargeIris,
+    Upturned,
+    Convex,
+    SplayedOut,
+    HangingLobes,
+    Gaps,
+    HighCheekbones,
+    BroadChin,
+    Jutting,
+    Chin,
+    SquareChin,
+    DeepVoice,
+    RaspyVoice,
 }
-// impl From<Vec<String>> for BPAppMod {
-//     fn from(value: Vec<String>) -> Self {
-//         todo!()
-//     }
-// }
-impl Into<String> for BPAppMod {
-    fn into(self) -> String {
-        todo!()
+impl BPAppMod {
+    fn name(&self) -> String {
+        match self {
+            BPAppMod::None => "".to_string(),
+            BPAppMod::Thickness => "THICKNESS".to_string(),
+            BPAppMod::Broadness => "BROADNESS".to_string(),
+            BPAppMod::Length => "LENGTH".to_string(),
+            BPAppMod::Height => "HEIGHT".to_string(),
+            BPAppMod::CloseSet => "CLOSE_SET".to_string(),
+            BPAppMod::DeepSet => "DEEP_SET".to_string(),
+            BPAppMod::RoundVsNarrow => "ROUND_VS_NARROW".to_string(),
+            BPAppMod::LargeIris => "LARGE_IRIS".to_string(),
+            BPAppMod::Upturned => "UPTURNED".to_string(),
+            BPAppMod::Convex => "CONVEX".to_string(),
+            BPAppMod::SplayedOut => "SPLAYED_OUT".to_string(),
+            BPAppMod::HangingLobes => "HANGING_LOBES".to_string(),
+            BPAppMod::Gaps => "GAPS".to_string(),
+            BPAppMod::HighCheekbones => "HIGH_CHEEKBONES".to_string(),
+            BPAppMod::BroadChin => "BROAD_CHIN".to_string(),
+            BPAppMod::Jutting => "JUTTING".to_string(),
+            BPAppMod::Chin => "CHIN".to_string(),
+            BPAppMod::SquareChin => "SQUARE_CHIN".to_string(),
+            BPAppMod::DeepVoice => "DEEP_VOICE".to_string(),
+            BPAppMod::RaspyVoice => "RASPY_VOICE".to_string(),
+        }
+    }
+
+    fn from(bp_app_mod: String) -> Self {
+        match bp_app_mod.as_str() {
+            "CLOSE_SET" => {BPAppMod::CloseSet},
+            "DEEP_SET" => {BPAppMod::DeepSet},
+            "ROUND_VS_NARROW" => {BPAppMod::RoundVsNarrow},
+            "LARGE_IRIS" => {BPAppMod::LargeIris},
+            "THICKNESS" => {BPAppMod::Thickness},
+            "BROADNESS" => {BPAppMod::Broadness},
+            "LENGTH" => {BPAppMod::Length},
+            "UPTURNED" => {BPAppMod::Upturned},
+            "CONVEX" => {BPAppMod::Convex},
+            "SPLAYED_OUT" => {BPAppMod::SplayedOut},
+            "HANGING_LOBES" => {BPAppMod::HangingLobes},
+            "HEIGHT" => {BPAppMod::Height},
+            "GAPS" => {BPAppMod::Gaps},
+            "HIGH_CHEEKBONES" => {BPAppMod::HighCheekbones},
+            "BROAD_CHIN" => {BPAppMod::BroadChin},
+            "JUTTING" => {BPAppMod::Jutting},
+            "CHIN" => {BPAppMod::Chin},
+            "SQUARE_CHIN" => {BPAppMod::SquareChin},
+            "DEEP_VOICE" => {BPAppMod::DeepVoice},
+            "RASPY_VOICE" => {BPAppMod::RaspyVoice},
+            _ => BPAppMod::None
+        }
     }
 }
 
@@ -3470,20 +3479,20 @@ impl Equipment {
         }
     }
 
-    // fn from(string: String) -> Equipment {
-    //     match string.as_str() {
-    //         "ARMOR" => Equipment::Armor,
-    //         "HELM" => Equipment::Helm,
-    //         "GLOVES" => Equipment::Gloves,
-    //         "SHOES" => Equipment::Shoes,
-    //         "PANTS" => Equipment::Pants,
-    //         "SHIELD" => Equipment::Shield,
-    //         "WEAPON" => Equipment::Weapon,
-    //         "TOOL" => Equipment::Tool,
-    //         "ANY" => Equipment::Any,
-    //         _ => Equipment::None,
-    //     }
-    // }
+    fn from(string: String) -> Equipment {
+        match string.as_str() {
+            "ARMOR" => Equipment::Armor,
+            "HELM" => Equipment::Helm,
+            "GLOVES" => Equipment::Gloves,
+            "SHOES" => Equipment::Shoes,
+            "PANTS" => Equipment::Pants,
+            "SHIELD" => Equipment::Shield,
+            "WEAPON" => Equipment::Weapon,
+            "TOOL" => Equipment::Tool,
+            "ANY" => Equipment::Any,
+            _ => Equipment::None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3532,24 +3541,24 @@ impl Profession {
         }
     }
 
-    // fn from(string: String) -> Profession {
-    //     match string.as_str() {
-    //         "STONEWORKER" => Profession::Stoneworker,
-    //         "MINER" => Profession::Miner,
-    //         "METALSMITH" => Profession::Metalsmith,
-    //         "ENGINEER" => Profession::Engineer,
-    //         "FARMER" => Profession::Farmer,
-    //         "WOODWORKER" => Profession::Woodworker,
-    //         "JEWELER" => Profession::Jeweler,
-    //         "RANGER" => Profession::Ranger,
-    //         "STANDARD" => Profession::Standard,
-    //         "CRAFTSMAN" => Profession::Craftsman,
-    //         "FISHERY_WORKER" => Profession::FisheryWorker,
-    //         "MERCHANT" => Profession::Merchant,
-    //         "NONE" => Profession::None,
-    //         prof=> Profession::Custom(prof.to_string()),
-    //     }
-    // }
+    fn from(string: String) -> Profession {
+        match string.as_str() {
+            "STONEWORKER" => Profession::Stoneworker,
+            "MINER" => Profession::Miner,
+            "METALSMITH" => Profession::Metalsmith,
+            "ENGINEER" => Profession::Engineer,
+            "FARMER" => Profession::Farmer,
+            "WOODWORKER" => Profession::Woodworker,
+            "JEWELER" => Profession::Jeweler,
+            "RANGER" => Profession::Ranger,
+            "STANDARD" => Profession::Standard,
+            "CRAFTSMAN" => Profession::Craftsman,
+            "FISHERY_WORKER" => Profession::FisheryWorker,
+            "MERCHANT" => Profession::Merchant,
+            "NONE" => Profession::None,
+            prof=> Profession::Custom(prof.to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3646,12 +3655,11 @@ impl RAW for Statue {
     }
 }
 impl Menu for Statue {
-    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
-        //, tile_info: Vec<(String, [u32;2])>
-
-        // let [x1, y1] = &mut self.coords;
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        let [x1, y1] = &mut self.coords;
         let state = &mut self.state;
-        // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &self.tile_name);
+        let caste_opt = &mut self.caste;
+        let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
         
         egui::ComboBox::from_label("State")
             .selected_text(state.name())
@@ -3668,30 +3676,53 @@ impl Menu for Statue {
         }
         ui.label("Note: only DEFAULT is known to work v50.05");
 
+        if let Some(caste) = caste_opt {
+            egui::ComboBox::from_label("Caste")
+                .selected_text(caste.name())
+                .show_ui(ui, |ui| {
+                ui.selectable_value(caste, Caste::Female, "FEMALE");
+                ui.selectable_value(caste, Caste::Male, "MALE");
+                ui.selectable_value(caste, Caste::Custom(String::new()), "(custom)");
+            });
+            if let Caste::Custom(cust_caste) = caste {
+                ui.label("Custom caste:");
+                ui.text_edit_singleline(cust_caste);
+            }
+        }
+
         ui.add_space(PADDING);
         egui::ComboBox::from_label("TilePage")
             .selected_text(&self.tile_name)
             .show_ui(ui, |ui| {
-            // for t in &tile_names {
-            //     ui.selectable_value(&mut self.tile_name, t.clone(), t);
-            // }
+            for &t in &tile_names {
+                ui.selectable_value(&mut self.tile_name, t.clone(), t);
+            }
             ui.selectable_value(&mut self.tile_name, String::new(), "Custom");
         });
-        // if !tile_names.contains(&self.tile_name) {
-        //     ui.label("Custom tile name:");
-        //     ui.text_edit_singleline(&mut self.tile_name);
-        // }
+        if !tile_names.contains(&&self.tile_name) {
+            ui.label("Custom tile name:");
+            ui.text_edit_singleline(&mut self.tile_name);
+        }
 
         ui.add_space(PADDING);
         let [x2, y2] = self.large_coords.get_or_insert([0, 0]);
+        let max_coords;
+        if let Some(tp_info) = shared.tile_page_info.get(&self.tile_name) {
+            max_coords = [(tp_info.image_size[0]/32) as u32, (tp_info.image_size[1]/32) as u32];
+        } else {
+            max_coords = [100,100];
+        }
 
-        // ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-        //     .unwrap_or_default()).prefix("TilePage X: "));
-        // ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-        //     .unwrap_or_default()).prefix("TilePage Y: "));
-
-        ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
-        ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+        ui.horizontal(|ui| {
+            ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
+                .unwrap_or_default()).prefix("TilePage X: "));
+            ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+        });
+        ui.horizontal(|ui| {
+            ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
+                .unwrap_or_default()).prefix("TilePage Y: "));
+            ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+        });
 
         ui.add_space(PADDING);
         ui.label("Preview:");
@@ -3771,11 +3802,16 @@ impl RAW for Palette {
         Ok(Self::new())
     }
 
+    
+            // Condition::LSPalette(..) => "LS_PALETTE".to_string(),
+            // Condition::LSPaletteFile(..) => "LS_PALETTE_FILE".to_string(),
+            // Condition::LSPaletteDefault(..) => "LS_PALETTE_DEFAULT".to_string(),
+
     fn display(&self) -> String {
         format!(
             "\t\t[LS_PALETTE:{}]\n
             \t\t\t[LS_PALETTE_FILE:{}]\n
-            \t\t\t[LS_PALETTE_DEFAULT:{}]\n",
+            \t\t\t[LS_PALETTE_DEFAULT:{}]\n\n",
             self.name.clone(),
             self.file_name.clone(),
             self.default_index

@@ -1074,7 +1074,7 @@ impl DFGraphicsHelper {
                             );
                             if statue_response.clicked() {
                                 self.indices = [0, 0, i_file, i_statue, 0, 0, 0, 0].into();
-                                self.main_window = MainWindow::TileGraphicMenu;
+                                self.main_window = MainWindow::StatueMenu;
                             }
                             statue_response.context_menu(|ui| {
                                 self.indices = [0, 0, i_file, i_statue, 0, 0, 0, 0].into();
@@ -1090,7 +1090,7 @@ impl DFGraphicsHelper {
                             );
                             if plant_response.clicked() {
                                 self.indices = [0, 0, i_file, i_plant, 0, 0, 0, 0].into();
-                                self.main_window = MainWindow::TileGraphicMenu;
+                                self.main_window = MainWindow::PlantMenu;
                             }
                             plant_response.context_menu(|ui| {
                                 self.indices = [0, 0, i_file, i_plant, 0, 0, 0, 0].into();
@@ -1131,6 +1131,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
+        self.selected_region = None;
 
         Ok(())
     }
@@ -1145,6 +1146,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
+        self.selected_region = None;
 
         Ok(())
     }
@@ -1180,6 +1182,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
+        self.selected_region = None;
         
         Ok(())
     }
@@ -1216,6 +1219,7 @@ impl DFGraphicsHelper {
 
             self.preview = true;
             self.preview_name = tile_page.name.clone();
+            self.selected_region = None;
         }
         Ok(())
     }
@@ -1230,6 +1234,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
+        self.selected_region = None;
 
         Ok(())
     }
@@ -1264,6 +1269,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
+        self.selected_region = None;
         
         Ok(())
     }
@@ -1299,6 +1305,7 @@ impl DFGraphicsHelper {
         
         self.preview = false;
         self.preview_name = String::new();
+        self.selected_region = None;
         
         Ok(())
     }
@@ -1541,8 +1548,39 @@ impl DFGraphicsHelper {
         Ok(())
     }
 
-    fn statue_menu(&mut self, _ui: &mut Ui) -> Result<()> {
-        //todo
+    fn statue_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Creature Statue Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::Statue(Statue::new()));
+            }
+        });
+        
+        let indices = &mut self.indices;
+
+        if let GraphicsFile::StatueCreatureFile(_, statues) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            if statues.is_empty() {
+                if ui.small_button("Create Statue").clicked() {
+                    self.action = Action::Insert(ContextData::Statue(Statue::new()));
+                }
+            } else {
+                let statue = statues
+                    .get_mut(indices.graphics_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                statue.menu(ui, shared);
+    
+                self.preview = true;
+                self.preview_name = statue.tile_name.clone();
+                self.selected_region = Some([statue.coords, statue.large_coords.unwrap_or([0,0])]);
+            }
+        }
         Ok(())
     }
 
@@ -1810,7 +1848,7 @@ impl eframe::App for DFGraphicsHelper {
                     MainWindow::LayerGroupMenu =>           result = self.layer_group_menu(ui),
                     MainWindow::LayerMenu =>                result = self.layer_menu(ui),
                     MainWindow::SimpleLayerMenu =>          result = self.simple_layer_menu(ui),//todo
-                    MainWindow::StatueMenu =>               result = self.statue_menu(ui),//todo
+                    MainWindow::StatueMenu =>               result = self.statue_menu(ui),
                     MainWindow::PlantMenu =>                result = self.plant_menu(ui),//todo
                     MainWindow::TileGraphicMenu =>          result = self.tile_graphic_menu(ui),//todo
                     MainWindow::DefaultMenu =>              result = self.default_menu(ui),
