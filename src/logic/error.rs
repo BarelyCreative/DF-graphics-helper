@@ -12,9 +12,6 @@ pub type Result<T> = std::result::Result<T, DFGHError>;
 //Dwarf Fortress Graphics Helper Error
 #[derive(Debug, thiserror::Error)]
 pub enum DFGHError {
-    #[error("Unexpected error type. This error is not intended to be displayed.")]
-    None,
-
     #[error("Index out of bounds")]
     IndexError,
 
@@ -77,15 +74,19 @@ fn highlight_error(raw_buffer: Vec<String>, i_line: usize, r_error: RangeInclusi
             if breaks.len() >= 2 {
                 let (start, end);
                 let breaks_end = breaks.len().saturating_sub(1);
+
+                //determine where to put error marks
                 if r_error.start() > &breaks_end {
                     (start, end) = (0, breaks_end);
-                } else if r_error.end() > &breaks_end {
+                } else if r_error.end() >= &breaks_end {
                     (start, end) = (*r_error.start(), breaks_end);
                 } else {
-                    (start, end) = (*r_error.start(), *r_error.end());
+                    (start, end) = (*r_error.start(), *r_error.end()+1);
                 }
+
+                //add highlight
                 for (i_highlight, char) in raw_line.chars().enumerate() {
-                    if (breaks[start]..=breaks[end]).contains(&i_highlight) {
+                    if (breaks[start]..=breaks[end]).contains(&i_highlight) {//index error
                         highlight.push_str("^");
                     } else if char == '\t' {
                         highlight.push_str("\t");
@@ -108,53 +109,37 @@ fn highlight_error(raw_buffer: Vec<String>, i_line: usize, r_error: RangeInclusi
     highlighted
 }
 
-pub fn wrap_import_file_error<T>(raw_buffer: Vec<String>, e: DFGHError, i_line: usize, path: &path::PathBuf) -> Result<T> {
+pub fn wrap_import_file_error(raw_buffer: Vec<String>, e: &DFGHError, i_line: usize, path: &path::PathBuf) -> DFGHError {
     match e {
-        DFGHError::ImportBufferError(i_rel_line, buffer_len, r_error, error_string) => {
-            let line_number = (i_line + i_rel_line).saturating_sub(buffer_len);
-            dbg!(format!("w_I {}", line_number));
-            dbg!(i_rel_line);
-            dbg!(buffer_len);
-            dbg!(i_line);
-            Err(
-                DFGHError::ImportError(
-                    line_number + 1,
-                    path.to_path_buf(),
-                    highlight_error(raw_buffer, line_number, r_error),
-                    error_string,
-                )
+        DFGHError::ImportBufferError(i_rel_line, _buffer_len, r_error, error_string) => {
+            let line_index = (i_line).saturating_sub(*i_rel_line);
+
+            DFGHError::ImportError(
+                line_index + 1,
+                path.to_path_buf(),
+                highlight_error(raw_buffer, line_index, r_error.clone()),
+                error_string.to_string(),
             )
         },
-        _ => Err(DFGHError::ImportUnknownError),
+        _ => DFGHError::ImportUnknownError,
     }
 }
 
-pub fn wrap_import_buffer_error<T>(i_rel_line: usize,  buffer_len: usize, r_error: RangeInclusive<usize>, e: DFGHError) -> Result<T> {
+pub fn wrap_import_buffer_error(i_rel_line: usize,  buffer_len: usize, r_error: RangeInclusive<usize>, e: &DFGHError) -> DFGHError {
     match e {
         DFGHError::IoError(_) |
         DFGHError::ImageError(_) |
         DFGHError::ImportParseError(_) |
         DFGHError::ImportMismatchError |
         DFGHError::UnsupportedFileName(_) => {
-            dbg!(format!("w_e {}", i_rel_line));
-            dbg!(i_rel_line);
-            dbg!(buffer_len);
-            Err(
-                DFGHError::ImportBufferError(i_rel_line, buffer_len, r_error, e.to_string())
-            )
+            DFGHError::ImportBufferError(buffer_len.saturating_sub(i_rel_line), buffer_len, r_error, e.to_string())
         },
-        DFGHError::ImportBufferError(i_rel, b_len, r_e, e_string) => {
-            let line_number = (i_rel_line + i_rel + 1).saturating_sub(b_len);
-            dbg!(format!("w_B {}", line_number));
-            dbg!(i_rel);
-            dbg!(b_len);
-            dbg!(i_rel_line);
-            dbg!(buffer_len);
-            Err(
-                DFGHError::ImportBufferError(line_number, buffer_len, r_e, e_string)
-            )
+        DFGHError::ImportBufferError(i_rel, _b_len, r_e, e_string) => {
+            let line_index = (i_rel + buffer_len).saturating_sub(i_rel_line);
+            
+            DFGHError::ImportBufferError(line_index, buffer_len, r_e.clone(), e_string.clone())
         },
-        _ => Err(DFGHError::ImportUnknownError),
+        _ => DFGHError::ImportUnknownError,
     }
 }
 
@@ -165,36 +150,33 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
         .title_bar(true)
         .default_size([600.0, 300.0])
         .show(ctx, |ui| {
-
-        egui::ScrollArea::both()
+        egui::ScrollArea::horizontal()
             .show(ui, |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(
-                    state.exception.to_string())
+                    state.errors.first().unwrap().to_string())
                     .monospace())
-                    .wrap(true)
+                    .wrap(false)
                 );
             }
         );
 
-        //button to accept error and potentially attempt to correct.
+        //immediate corrective action
+        match state.errors.first().unwrap() {
+            DFGHError::IndexError => {
+                state.main_window = MainWindow::DefaultMenu;
+                state.indices = [0, 0, 0, 0, 0, 0, 0, 0 as usize].into();
+            },
+            _ => {}
+        }
+
+        //button to acknowledge error
         egui::TopBottomPanel::bottom("Ok")
             .min_height(20.0)
             .show_inside(ui, |ui| {
             ui.add_space(PADDING);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                 if ui.button("      Ok      ").clicked() {
-                    match state.exception {
-                        DFGHError::ImageError(..) => {
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::IndexError => {
-                            state.main_window = MainWindow::DefaultMenu;
-                            state.indices = [0, 0, 0, 0, 0, 0, 0, 0 as usize].into();
-                            state.exception = DFGHError::None;
-                        },
-                        DFGHError::None => {},
-                        _ => {state.exception = DFGHError::None;}
-                    }
+                    state.errors.remove(0);
                 }
             });
         });

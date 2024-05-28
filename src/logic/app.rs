@@ -215,7 +215,7 @@ pub struct DFGraphicsHelper {
     copied: ContextData,
     undo_buffer: Vec<(Vec<TilePageFile>, Vec<GraphicsFile>, GraphicsIndices)>,
     redo_buffer: Vec<(Vec<TilePageFile>, Vec<GraphicsFile>, GraphicsIndices)>,
-    pub exception: DFGHError,
+    pub errors: Vec<DFGHError>,
 }
 impl DFGraphicsHelper {
     pub fn new(_cc: &eframe::CreationContext) -> Self {
@@ -234,7 +234,7 @@ impl DFGraphicsHelper {
             copied: ContextData::default(),
             undo_buffer: Vec::with_capacity(1000),
             redo_buffer: Vec::with_capacity(100),
-            exception: DFGHError::None,
+            errors: Vec::new(),
         }
     }
 
@@ -245,25 +245,17 @@ impl DFGraphicsHelper {
     fn import(&mut self) {
         self.save_state();
         if !self.path.exists() {
-            if let Some(mut path) = rfd::FileDialog::new()
+            if let Some(path) = rfd::FileDialog::new()
                 .set_title("Choose Mod Folder")
                 .pick_folder() {
-                
-                let import_result = Graphics::import(&mut path);
-                if let Ok((graphics, path)) = import_result {
-                    (self.loaded_graphics, self.path) = (graphics, path);
-                } else {
-                    self.exception = import_result.unwrap_err();
-                }
-            }
-        } else {
-            let import_result = Graphics::import(&mut self.path);
-            if let Ok((graphics, path)) = import_result {
-                (self.loaded_graphics, self.path) = (graphics, path);
-            } else {
-                self.exception = import_result.unwrap_err();
+                self.path = path;
             }
         }
+
+        let (graphics, path, mut errors) = Graphics::import(&mut self.path);
+        (self.loaded_graphics, self.path) = (graphics, path);
+        self.errors.append(&mut errors);
+
         self.action = Action::None;
     }
 
@@ -274,13 +266,13 @@ impl DFGraphicsHelper {
                 .pick_folder() {
                 let export_result = self.loaded_graphics.export(&path);
                 if export_result.is_err() {
-                    self.exception = export_result.unwrap_err();
+                    self.errors.push(export_result.unwrap_err());
                 };
             }
         } else {
             let export_result = self.loaded_graphics.export(&self.path);
             if export_result.is_err() {
-                self.exception = export_result.unwrap_err();
+                self.errors.push(export_result.unwrap_err());
             };
         }
         self.action = Action::None;
@@ -918,7 +910,7 @@ impl DFGraphicsHelper {
             })
             .body(|ui| {
                 match graphics_file {
-                    GraphicsFile::DefaultFile => self.main_window = MainWindow::GraphicsFileDefaultMenu,
+                    GraphicsFile::DefaultFile => {/*do nothing*/},
                     GraphicsFile::CreatureFile(_, creatures) => {
                         //creatures
                         for (i_creature, creature) in creatures.iter_mut().enumerate() {
@@ -1009,59 +1001,46 @@ impl DFGraphicsHelper {
                                             }).body(|ui| {
                                                 //layers
                                                 for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
-                                                    let layer_response = ui.add(egui::Label::new(
-                                                        format!("{}", layer.name))
-                                                        .sense(Sense::click())
+                                                    let id_l = ui.make_persistent_id(
+                                                        format!("layer{}{}{}{}{}",
+                                                        i_file, i_creature, i_layer_set, i_layer_group, i_layer)
                                                     );
-                                                    if layer_response.clicked() {
-                                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                        self.main_window = MainWindow::LayerMenu;
-                                                    }
-                                                    layer_response.context_menu(|ui| {
-                                                        self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                        self.action = Self::context(ui, ContextData::from(layer.clone()));
+                                                    egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
+                                                        id_l,
+                                                        false)
+                                                        .show_header(ui, |ui|
+                                                        {
+                                                            let layer_response = ui.add(egui::Label::new(
+                                                                format!("{}", &layer.name))
+                                                                .sense(Sense::click()));
+                                                            if layer_response.clicked() {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.main_window = MainWindow::LayerMenu;
+                                                            }
+                                                            layer_response.context_menu(|ui| {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.action = Self::context(ui, ContextData::from(layer.clone()));
+                                                            });
+                                                        })
+                                                        .body(|ui|
+                                                        {
+                                                        //conditions (no separate menu)
+                                                        for condition in layer.conditions.iter_mut() {
+                                                            let condition_response = ui.add(egui::Label::new(
+                                                                format!("\t{}", condition.name()))
+                                                                .wrap(false)
+                                                                .sense(Sense::click()));
+                                                            if condition_response.clicked() {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.main_window = MainWindow::LayerMenu;
+                                                            }
+                                                            condition_response.context_menu(|ui| {
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.action = Self::context(ui, ContextData::from(condition.clone()));
+                                                            });
+                                                        }
                                                     });
                                                 }
-                                                // for (i_layer, layer) in layer_group.layers.iter_mut().enumerate() {
-                                                //     let id_l = ui.make_persistent_id(
-                                                //         format!("layer{}{}{}{}{}",
-                                                //         i_file, i_graphics, i_layer_set, i_layer_group, i_layer)
-                                                //     );
-                                                //     egui::collapsing_header::CollapsingState::load_with_default_open(ctx,
-                                                //         id_l,
-                                                //         false)
-                                                //         .show_header(ui, |ui|
-                                                //         {
-                                                //             let layer_response = ui.add(egui::Label::new(
-                                                //                 format!("{}", &layer.name))
-                                                //                 .sense(Sense::click()));
-                                                //             if layer_response.clicked() {
-                                                //                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                //                 self.main_window = MainWindow::LayerMenu;
-                                                //             }
-                                                //             layer_response.context_menu(|ui| {
-                                                //                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                //                 self.action = Self::context(ui, ContextData::from(layer.clone()));
-                                                //             });
-                                                //         })
-                                                //         .body(|ui|
-                                                //         {
-                                                //         for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
-                                                //             let condition_response = ui.add(egui::Label::new(
-                                                //                 format!("\t{}", condition.name()))
-                                                //                 .wrap(false)
-                                                //                 .sense(Sense::click()));
-                                                //             if condition_response.clicked() {
-                                                //                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, i_condition].into();
-                                                //                 self.main_window = MainWindow::ConditionMenu;
-                                                //             }
-                                                //             condition_response.context_menu(|ui| {
-                                                //                 self.indices = [0, 0, i_file, i_graphics, i_layer_set, i_layer_group, i_layer, i_condition].into();
-                                                //                 self.action = Self::context(ui, ContextData::from(condition.clone()));
-                                                //             });
-                                                //         }
-                                                //     });
-                                                // }
                                             });
                                         }
                                     });
@@ -1294,7 +1273,7 @@ impl DFGraphicsHelper {
                 ui.text_edit_singleline(name);
 
                 ui.add_space(PADDING);
-                if ui.button("New Tile Graphic").clicked() {
+                if ui.button("New Creature").clicked() {
                     self.action = Action::Insert(ContextData::Creature(Creature::new()));
                 }
             },
@@ -1311,7 +1290,7 @@ impl DFGraphicsHelper {
                 ui.text_edit_singleline(name);
 
                 ui.add_space(PADDING);
-                if ui.button("New Tile Graphic").clicked() {
+                if ui.button("New Creature Statue").clicked() {
                     self.action = Action::Insert(ContextData::Statue(Statue::new()));
                 }
             },
@@ -1328,7 +1307,7 @@ impl DFGraphicsHelper {
                 ui.text_edit_singleline(name);
 
                 ui.add_space(PADDING);
-                if ui.button("New Tile Graphic").clicked() {
+                if ui.button("New Plant").clicked() {
                     self.action = Action::Insert(ContextData::Plant(Plant::new()));
                 }
             },
@@ -1632,7 +1611,7 @@ impl DFGraphicsHelper {
             .get_mut(indices.graphics_file_index)
             .ok_or(DFGHError::IndexError)? {
             let simple_layers = &mut creatures
-                .get_mut(indices.simple_layer_index)
+                .get_mut(indices.graphics_index)
                 .ok_or(DFGHError::IndexError)?
                 .simple_layers;
             if simple_layers.is_empty() {
@@ -1641,7 +1620,7 @@ impl DFGraphicsHelper {
                 }
             } else {
                 let simple_layer = simple_layers
-                    .get_mut(indices.graphics_index)
+                    .get_mut(indices.simple_layer_index)
                     .ok_or(DFGHError::IndexError)?;
     
                 let shared = &mut self.loaded_graphics.shared;
@@ -1813,7 +1792,7 @@ impl DFGraphicsHelper {
 
             match self.draw_image(ui) {
                 Ok(_) => {},
-                Err(e) => {self.exception = DFGHError::from(e)}
+                Err(e) => {self.errors.push(DFGHError::from(e))}
             }
         });
         
@@ -1942,7 +1921,7 @@ impl DFGraphicsHelper {
                     entry.texture = Some(new_texture);
                     self.texture = entry.texture.clone();
                 } else {
-                    self.exception = DFGHError::ImageLoadError(entry.image_path.clone());
+                    self.errors.push(DFGHError::ImageLoadError(entry.image_path.clone()));
                 }
             }
         }
@@ -1954,7 +1933,7 @@ impl DFGraphicsHelper {
 impl eframe::App for DFGraphicsHelper {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         //Error Window
-        if !matches!(self.exception, DFGHError::None) {
+        if self.errors.last().is_some() {
             error_window(self, ctx);
         }
 
@@ -2008,7 +1987,7 @@ impl eframe::App for DFGraphicsHelper {
                 .show(ctx, |ui| {
                 match self.preview_image(ui) {
                     Ok(_) => {},
-                    Err(e) => {self.exception = DFGHError::from(e)}
+                    Err(e) => {self.errors.push(DFGHError::from(e))}
                 }
             });
         }
@@ -2036,7 +2015,7 @@ impl eframe::App for DFGraphicsHelper {
                     MainWindow::DefaultMenu =>              result = self.default_menu(ui),
                 }
                 if result.is_err() {
-                    self.exception = result.unwrap_err();
+                    self.errors.push(result.unwrap_err());
                 }
             });
         });
@@ -2135,7 +2114,7 @@ impl eframe::App for DFGraphicsHelper {
             }
             self.action = Action::None;
             if result.is_err() {
-                self.exception = result.unwrap_err();
+                self.errors.push(result.unwrap_err());
             }
         }
     }
