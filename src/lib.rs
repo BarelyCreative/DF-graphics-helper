@@ -1464,6 +1464,7 @@ impl RAW for LayerGroup {
             
             if len >= 1 {
                 match line_vec[0].as_str() {
+                    "LG_CONDITION_BP" |
                     "LAYER" => {
                         if block_buffer.len() > 0 {
                             let (l_temp, temp) = Layer::read(block_buffer.clone(), Vec::new(), path);
@@ -1501,7 +1502,29 @@ impl RAW for LayerGroup {
             .with_boundaries(&[Boundary::Space])
             .to_case(Case::UpperSnake)
         ));
-        for layer in &self.layers {
+        
+        let mut layers = self.layers.clone();
+
+        //print first lg_condition_bp block followed by its conditions
+        if let Some(lg_bp_position) = layers.iter()
+            .position(|l| l.conditions.iter()
+            .any(|c| matches!(c, Condition::LGConditionBP(..)))) {
+            let mut lg_bp_layer = layers.remove(lg_bp_position);
+            if let Some(lg_bp_cond_pos) = lg_bp_layer.conditions.iter()
+                .position(|c| matches!(c, &Condition::LGConditionBP(..))) {
+                let lg_bp_condition = lg_bp_layer.conditions.remove(lg_bp_cond_pos);
+                lg_bp_layer.conditions.retain(|c| !matches!(c, Condition::LGConditionBP(..)));
+                out.push_str(&lg_bp_condition.display());
+                for condition in lg_bp_layer.conditions {
+                    out.push_str(&condition.display().replacen('\t', "", 1));
+                }
+            }
+        }
+
+        //remove all lg_condition_bp containing layers before printing
+        layers.retain(|l| !l.conditions.iter().any(|c| matches!(c, Condition::LGConditionBP(..))));
+
+        for layer in layers {
             out.push_str(&layer.display());
         }
         out.push_str("\n");
@@ -1595,13 +1618,33 @@ impl RAW for Layer {
                         } else {
                             index_err!(i_rel_line, buffer_len, len, 5, errors);
                         }
-                    },
+                    }
+                    "LG_CONDITION_BP" => {
+                        if len >= 3 {
+                                layer = Layer {
+                                    name: "".to_string(),
+                                    tile_name: "".to_string(),
+                                    coords: [0, 0],
+                                    large_coords: None,
+                                    conditions: layer.conditions,
+                                };
+
+                                let (cond_temp, temp) = Condition::read(vec![line_vec.clone()], Vec::new(), path);
+                                let mut es_temp = temp.iter().map(|e| wrap_import_buffer_error(i_rel_line, buffer_len, 0..=0, e)).collect();
+                                errors.append(&mut es_temp);
+                                if cond_temp.ne(&Condition::new()) {
+                                    layer.conditions.push(cond_temp);
+                                }
+                        } else {
+                            index_err!(i_rel_line, buffer_len, len, 3, errors);
+                        }
+                    }
                     "LAYER_SET" |
                     "LS_PALETTE" |
                     "LS_PALETTE_FILE" |
                     "LS_PALETTE_DEFAULT" |
                     "END_LAYER_GROUP" |
-                    "LAYER_GROUP" => {/*do nothing*/},
+                    "LAYER_GROUP" => {/*do nothing*/}
                     _ => {
                         let (cond_temp, temp) = Condition::read(vec![line_vec.clone()], Vec::new(), path);
                         let mut es_temp = temp.iter().map(|e| wrap_import_buffer_error(i_rel_line, buffer_len, 0..=0, e)).collect();
@@ -1763,26 +1806,23 @@ pub enum Condition {
     NotChild,
     Caste(String),
     Ghost,
-    SynClass(Vec<String>),
+    SynClass(SyndromeClass),
     TissueLayer(String, String),
     TissueMinLength(u32),
     TissueMaxLength(u32),
     TissueMayHaveColor(Vec<String>),
-    TissueMayHaveShaping(Vec<String>),
+    TissueMayHaveShaping(Vec<Shaping>),
     TissueNotShaped,
     TissueSwap(String, u32, String, [u32;2], Option<[u32;2]>),
     ItemQuality(u32),
     UsePalette(String, u32),
     UseStandardPalette,
-    // LSPalette(String),
-    // LSPaletteFile(String),
-    // LSPaletteDefault(u32),
     ConditionBP(BodyPartType),
     LGConditionBP(BodyPartType),
     BPAppearanceModifierRange(BPAppMod, u32, u32),
     BPPresent,
     BPScarred,
-    Custom(Vec<String>),
+    Custom(String),
 }
 impl RAW for Condition {
     fn new() -> Self {
@@ -1895,7 +1935,7 @@ impl RAW for Condition {
                 "CONDITION_SYN_CLASS" => {
                     if len >= 2 {
                         condition = Condition::SynClass(
-                            line_vec.drain(1..).collect()
+                            SyndromeClass::from(line_vec[1].clone())
                         )
                     } else {
                         index_err!(i_line, buffer_len, len, 2, errors);
@@ -1941,7 +1981,7 @@ impl RAW for Condition {
                 "TISSUE_MAY_HAVE_SHAPING" => {
                     if len >= 2 {
                         condition = Condition::TissueMayHaveShaping(
-                            line_vec.drain(1..).collect()
+                            line_vec.drain(1..).map(|s| Shaping::from(s)).collect()
                         )
                     } else {
                         index_err!(i_line, buffer_len, len, 2, errors);
@@ -2032,7 +2072,7 @@ impl RAW for Condition {
                 },
                 "BP_PRESENT" => condition = Condition::BPPresent,
                 "BP_SCARRED" => condition = Condition::BPScarred,
-                _ => condition = Condition::Custom(line_vec.clone()),
+                _ => condition = Condition::Custom(line_vec.iter().map(|s| s.clone()).collect()),
             }
         } else {
             index_err!(i_line, buffer_len, len, 1, errors);
@@ -2187,15 +2227,8 @@ impl RAW for Condition {
             Condition::Ghost => {
                 out = format!("\t\t\t\t[CONDITION_GHOST]\n");
             },
-            Condition::SynClass(syn_classes) => {
-                out = format!("\t\t\t\t[CONDITION_SYN_CLASS");
-                for syn_class in syn_classes {
-                    out.push_str(&format!(
-                        ":{}",
-                        syn_class.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
-                    ));
-                }
-                out.push_str("]\n");
+            Condition::SynClass(syn_class) => {
+                out = format!("\t\t\t\t[CONDITION_SYN_CLASS:{}]\n",syn_class.name());
             },
             Condition::TissueLayer(category, tissue) => {
                 out = format!(
@@ -2224,8 +2257,7 @@ impl RAW for Condition {
                 out = format!("\t\t\t\t\t[TISSUE_MAY_HAVE_SHAPING");
                 for shaping in shapings {
                     out.push_str(&format!(
-                        ":{}",
-                        shaping.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                        ":{}", shaping.name()
                     ));
                 }
                 out.push_str("]\n");
@@ -2270,7 +2302,7 @@ impl RAW for Condition {
                 out = format!("\t\t\t\t[CONDITION_BP:{}]\n", bp_type.clone().display());
             },
             Condition::LGConditionBP(bp_type) => {
-                out = format!("\t\t\t\t[LG_CONDITION_BP:{}]\n", bp_type.clone().display());
+                out = format!("\t\t\t[LG_CONDITION_BP:{}]\n", bp_type.clone().display());
             },
             Condition::BPAppearanceModifierRange(bp_app_mod, min, max) => {
                 out = format!("\t\t\t\t[BP_APPEARANCE_MODIFIER_RANGE:{}:{}:{}]\n", bp_app_mod.clone().name(), min, max);
@@ -2281,19 +2313,9 @@ impl RAW for Condition {
             Condition::BPScarred => {
                 out = format!("\t\t\t\t[BP_SCARRED]\n");
             },
-            Condition::Custom(line_vec) => {
-                let mut line_iter = line_vec.iter();
-
-                let mut line = line_iter.next().unwrap_or(&"".to_string())
-                    .with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake).clone();
-
-                for elem in line_iter {
-                    line.push(':');
-                    line.push_str(&elem.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake));
-                }
-
+            Condition::Custom(cust_line) => {
                 out = format!("\t\t\t\t[{0}]\n",
-                    line
+                    cust_line.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake).clone()
                 );
             },
         }
@@ -2302,83 +2324,16 @@ impl RAW for Condition {
     }
 }
 impl Menu for Condition {
-    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
-        //, tile_info: Vec<(String, [u32; 2])>
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        let tile_page_names: Vec<&String> = shared.tile_page_info.keys().collect();
+
         egui::ComboBox::from_label("Condition type")
             .selected_text(&self.name())
             .show_ui(ui, |ui| {
-                ui.selectable_value(self, Condition::Default, "(select)");
-                ui.selectable_value(
-                    self,
-                    Condition::ItemWorn(ItemType::None, Vec::new()),
-                    "CONDITION_ITEM_WORN"
-                );
-                ui.selectable_value(
-                    self,
-                    Condition::ShutOffIfItemPresent(ItemType::None, Vec::new()),
-                    "SHUT_OFF_IF_ITEM_PRESENT",
-                );
-                ui.selectable_value(self, Condition::Dye(String::new()), "CONDITION_DYE");
-                ui.selectable_value(self, Condition::NotDyed, "CONDITION_NOT_DYED");
-                ui.selectable_value(
-                    self,
-                    Condition::MaterialFlag(Vec::new()),
-                    "CONDITION_MATERIAL_FLAG"
-                );
-                ui.selectable_value(
-                    self,
-                    Condition::MaterialType(Metal::default()),
-                    "CONDITION_MATERIAL_TYPE"
-                );
-                ui.selectable_value(
-                    self,
-                    Condition::ProfessionCategory(Vec::new()),
-                    "CONDITION_PROFESSION_CATEGORY",
-                );
-                ui.selectable_value(
-                    self,
-                    Condition::RandomPartIndex(String::new(), 1, 1),
-                    "CONDITION_RANDOM_PART_INDEX",
-                );
-                ui.selectable_value(self, Condition::HaulCountMin(0), "CONDITION_HAUL_COUNT_MIN");
-                ui.selectable_value(self, Condition::HaulCountMax(0), "CONDITION_HAUL_COUNT_MAX");
-                ui.selectable_value(self, Condition::Child, "CONDITION_CHILD");
-                ui.selectable_value(self, Condition::NotChild, "CONDITION_NOT_CHILD");
-                ui.selectable_value(
-                    self,
-                    Condition::Caste(String::from("MALE")),
-                    "CONDITION_CASTE",
-                );
-                ui.selectable_value(self, Condition::Ghost, "CONDITION_GHOST");
-                ui.selectable_value(
-                    self,
-                    Condition::SynClass(Vec::new()),
-                    "CONDITION_SYN_CLASS",
-                );
-                ui.selectable_value(
-                    self,
-                    Condition::TissueLayer(String::new(), String::new()),
-                    "CONDITION_TISSUE_LAYER"
-                );
-                ui.selectable_value(self, Condition::TissueMinLength(0), "TISSUE_MIN_LENGTH");
-                ui.selectable_value(self, Condition::TissueMaxLength(0), "TISSUE_MAX_LENGTH");
-                ui.selectable_value(
-                    self,
-                    Condition::TissueMayHaveColor(vec![String::new()]),
-                    "TISSUE_MAY_HAVE_COLOR",
-                );
-                ui.selectable_value(
-                    self,
-                    Condition::TissueMayHaveShaping(vec![String::new()]),
-                    "TISSUE_MAY_HAVE_SHAPING",
-                );
-                ui.selectable_value(self, Condition::TissueNotShaped, "TISSUE_NOT_SHAPED");
-                ui.selectable_value(
-                    self,
-                    Condition::TissueSwap(String::from("IF_MIN_CURLY"), 0, String::new(), [0,0], None),
-                    "TISSUE_SWAP",
-                );
-            });
+            for condition in Condition::iterator() {
+                ui.selectable_value(self, condition.clone(), condition.name());
+            }
+        });
 
         ui.add_space(PADDING);
 
@@ -2388,11 +2343,9 @@ impl Menu for Condition {
                 egui::ComboBox::from_label("Selection type")
                     .selected_text(&item_type.name())
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(item_type, ItemType::None, "(none)");
-                        ui.selectable_value(item_type, ItemType::ByCategory(String::new(), Equipment::default()), "By Category");
-                        ui.selectable_value(item_type, ItemType::ByToken(String::new(), Equipment::default()), "By Token");
-                        ui.selectable_value(item_type, ItemType::AnyHeld(Equipment::default()), "Any Held");
-                        ui.selectable_value(item_type, ItemType::Wield(Equipment::default()), "Wield");
+                        for item_type_type in ItemType::iterator() {
+                            ui.selectable_value(item_type, item_type_type.clone(), item_type_type.name());
+                        }
                 });
 
                 ui.label("Selection subtype:");
@@ -2406,13 +2359,9 @@ impl Menu for Condition {
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(equipment, Equipment::Armor, "Armor");
-                                ui.selectable_value(equipment, Equipment::Helm, "Helm");
-                                ui.selectable_value(equipment, Equipment::Gloves, "Gloves");
-                                ui.selectable_value(equipment, Equipment::Shoes, "Shoes");
-                                ui.selectable_value(equipment, Equipment::Pants, "Pants");
-                                ui.selectable_value(equipment, Equipment::Shield, "Shield");
-                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                            for equip_type in Equipment::iterator() {
+                                ui.selectable_value(equipment, equip_type.clone(), equip_type.name());
+                            }
                         });
 
                         ui.label("Item: (e.g. ITEM_HELM_HELM)");
@@ -2439,13 +2388,9 @@ impl Menu for Condition {
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(equipment, Equipment::Armor, "Armor");
-                                ui.selectable_value(equipment, Equipment::Helm, "Helm");
-                                ui.selectable_value(equipment, Equipment::Gloves, "Gloves");
-                                ui.selectable_value(equipment, Equipment::Shoes, "Shoes");
-                                ui.selectable_value(equipment, Equipment::Pants, "Pants");
-                                ui.selectable_value(equipment, Equipment::Shield, "Shield");
-                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                            for equip_type in Equipment::iterator() {
+                                ui.selectable_value(equipment, equip_type.clone(), equip_type.name());
+                            }
                         });
 
                         ui.label("Item: (e.g. ITEM_GLOVES_GAUNTLETS)");
@@ -2469,13 +2414,9 @@ impl Menu for Condition {
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(equipment, Equipment::Armor, "Armor");
-                                ui.selectable_value(equipment, Equipment::Helm, "Helm");
-                                ui.selectable_value(equipment, Equipment::Gloves, "Gloves");
-                                ui.selectable_value(equipment, Equipment::Shoes, "Shoes");
-                                ui.selectable_value(equipment, Equipment::Pants, "Pants");
-                                ui.selectable_value(equipment, Equipment::Shield, "Shield");
-                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
+                            for equip_type in Equipment::iterator() {
+                                ui.selectable_value(equipment, equip_type.clone(), equip_type.name());
+                            }
                         });
 
                         ui.label("Item: (e.g. ITEM_SHIELD_SHIELD)");
@@ -2540,25 +2481,12 @@ impl Menu for Condition {
             Condition::MaterialFlag(flags) => {
                 for (i_flag, flag) in flags.iter_mut().enumerate() {
                     ui.push_id(format!("{}{}", flag.name(), i_flag), |ui| {
-                        egui::ComboBox::from_label(
-                            "Common material flags",
-                        )
-                        .selected_text(flag.name())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(flag, MaterialFlag::default(), "(select)");
-                            ui.selectable_value(flag, MaterialFlag::DivineMaterial, "DIVINE_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Artifact, "ARTIFACT");
-                            ui.selectable_value(flag, MaterialFlag::NotArtifact, "NOT_ARTIFACT");
-                            ui.selectable_value(flag, MaterialFlag::Leather, "ANY_LEATHER_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Bone, "ANY_BONE_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Shell, "ANY_SHELL_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Wood, "ANY_WOOD_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Woven, "WOVEN_ITEM");
-                            ui.selectable_value(flag, MaterialFlag::Silk, "ANY_SILK_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Yarn, "ANY_YARN_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::Plant, "ANY_PLANT_MATERIAL");
-                            ui.selectable_value(flag, MaterialFlag::NotImproved, "NOT_IMPROVED");
-                            ui.selectable_value(flag, MaterialFlag::Empty, "EMPTY");
+                        egui::ComboBox::from_label("Material Flag: ")
+                            .selected_text(flag.name())
+                            .show_ui(ui, |ui| {
+                            for mat_flag_type in MaterialFlag::iterator() {
+                                ui.selectable_value(flag, mat_flag_type.clone(), mat_flag_type.name());
+                            }
                         });
                     });
                 }
@@ -2572,7 +2500,7 @@ impl Menu for Condition {
                 });
 
                 ui.add_space(PADDING);
-                ui.hyperlink_to("List of other useful flags.", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_FLAG");
+                ui.hyperlink_to("List of useful flags.", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_FLAG");
                 ui.hyperlink_to("Full list of all possible flags (v50.05).", "http://www.bay12forums.com/smf/index.php?topic=169696.msg8442543#msg8442543");
             }
             Condition::MaterialType(metal) => {
@@ -2582,14 +2510,10 @@ impl Menu for Condition {
                 )
                 .selected_text(metal.name())
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(metal, Metal::None, "(select)");
-                    ui.selectable_value(metal, Metal::Copper, "COPPER");
-                    ui.selectable_value(metal, Metal::Silver, "SILVER");
-                    ui.selectable_value(metal, Metal::Bronze, "BRONZE");
-                    ui.selectable_value(metal, Metal::BlackBronze, "BLACK_BRONZE");
-                    ui.selectable_value(metal, Metal::Iron, "IRON");
-                    ui.selectable_value(metal, Metal::Steel, "STEEL");
-                    ui.selectable_value(metal, Metal::Adamantine, "ADAMANTINE");
+                    for metal_type in Metal::iterator() {
+                        ui.selectable_value(metal, metal_type.clone(), metal_type.name());
+                    }
+                    ui.selectable_value(metal, Metal::Custom(String::new()), "(custom)");
                 });
 
                 ui.add_space(PADDING);
@@ -2604,22 +2528,10 @@ impl Menu for Condition {
                         egui::ComboBox::from_label("Profession:   (dropdown contains known working ones)")
                             .selected_text(profession.name())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(profession, Profession::Empty, "(select)");
-                                ui.selectable_value(profession, Profession::Stoneworker, Profession::Stoneworker.name());
-                                ui.selectable_value(profession, Profession::Miner, Profession::Miner.name());
-                                ui.selectable_value(profession, Profession::Metalsmith, Profession::Metalsmith.name());
-                                ui.selectable_value(profession, Profession::Engineer, Profession::Engineer.name());
-                                ui.selectable_value(profession, Profession::Farmer, Profession::Farmer.name());
-                                ui.selectable_value(profession, Profession::Woodworker, Profession::Woodworker.name());
-                                ui.selectable_value(profession, Profession::Jeweler, Profession::Jeweler.name());
-                                ui.selectable_value(profession, Profession::Ranger, Profession::Ranger.name());
-                                ui.selectable_value(profession, Profession::Standard, Profession::Standard.name());
-                                ui.selectable_value(profession, Profession::Craftsman, Profession::Craftsman.name());
-                                ui.selectable_value(profession, Profession::FisheryWorker, Profession::FisheryWorker.name());
-                                ui.selectable_value(profession, Profession::Merchant, Profession::Merchant.name());
-                                ui.selectable_value(profession, Profession::Child, Profession::Child.name());
-                                ui.selectable_value(profession, Profession::None, Profession::None.name());
-                                ui.selectable_value(profession, Profession::Custom(String::new()), "Custom");
+                            for profession_type in Profession::iterator() {
+                                ui.selectable_value(profession, profession_type.clone(), profession_type.name());
+                            }
+                            ui.selectable_value(profession, Profession::Custom(String::new()), "Custom");
                         });
                         if let Profession::Custom(prof) = profession {
                             ui.text_edit_singleline(prof);
@@ -2698,7 +2610,7 @@ impl Menu for Condition {
                     .show_ui(ui, |ui| {
                         ui.selectable_value(caste, String::from("MALE"), "MALE");
                         ui.selectable_value(caste, String::from("FEMALE"), "FEMALE");
-                        ui.selectable_value(caste, String::from("(custom)"), "(custom)");
+                        ui.selectable_value(caste, String::new(), "(custom)");
                     });
 
                 if "MALE".ne(caste) && "FEMALE".ne(caste) {
@@ -2711,21 +2623,18 @@ impl Menu for Condition {
             Condition::Ghost => {
                 ui.label("No additional input needed.");
             }
-            Condition::SynClass(syn_classes) => {
+            Condition::SynClass(syn_class) => {
                 ui.hyperlink_to(
                     "Syndrome class:",
                     "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_SYN_CLASS",
                 );
-                for syn_class in syn_classes.iter_mut() {
-                    ui.text_edit_singleline(syn_class);
-                }
-                ui.horizontal(|ui| {
-                    if ui.button("Add syn_class").clicked() {
-                        syn_classes.push(String::new());
+                egui::ComboBox::from_label("Syndrome Class: ")
+                    .selected_text(syn_class.name())
+                    .show_ui(ui, |ui| {
+                    for syn_class_type in SyndromeClass::iterator() {
+                        ui.selectable_value(syn_class, syn_class_type.clone(), syn_class_type.name());
                     }
-                    if ui.button("Remove syn_class").clicked() && syn_classes.len() > 1 {
-                        syn_classes.pop();
-                    }
+                    ui.selectable_value(syn_class, SyndromeClass::Custom(String::new()), "(custom)".to_string());
                 });
             }
             Condition::TissueLayer(category, tissue) => {
@@ -2773,11 +2682,17 @@ impl Menu for Condition {
                     "https://dwarffortresswiki.org/index.php/Entity_token#TS_PREFERRED_SHAPING",
                 );
                 for shaping in shapings.iter_mut() {
-                    ui.text_edit_singleline(shaping);
+                    egui::ComboBox::from_label("Shaping Type")
+                        .selected_text(shaping.name())
+                        .show_ui(ui, |ui| {
+                        for shaping_type in Shaping::iterator() {
+                            ui.selectable_value(shaping, shaping_type.clone(), shaping_type.name());
+                        }
+                    });
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Add shaping").clicked() {
-                        shapings.push(String::new());
+                        shapings.push(Shaping::default());
                     }
                     if ui.button("Remove shaping").clicked() && shapings.len() > 1 {
                         shapings.pop();
@@ -2794,8 +2709,7 @@ impl Menu for Condition {
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
                 ui.label("No additional input needed.");
             }
-            Condition::TissueSwap(app_mod, amount, tile, [_x1, _y1], large_coords) => {
-                // let (tile_names, max_coords) = DFGraphicsHelper::tile_read(&tile_info, &tile);
+            Condition::TissueSwap(app_mod, amount, tile_page, [x1, y1], large_coords) => {
                 egui::ComboBox::from_label(
                     "Appearance Modifier (only IF_MIN_CURLY supported (v50.05)):",
                 )
@@ -2812,49 +2726,160 @@ impl Menu for Condition {
                 );
 
                 egui::ComboBox::from_label("TilePage for swapped layer: ")
-                    .selected_text(tile.clone())
+                    .selected_text(tile_page.clone())
                     .show_ui(ui, |ui| {
-                    ui.selectable_value(tile, String::from(""), "(select)");
-                    // for tile_name in tile_names {
-                    //     ui.selectable_value(tile, tile_name.to_string(), tile_name);
-                    // }
+                    ui.selectable_value(tile_page, String::from(""), "(select)");
+                    for tile_page_name in tile_page_names.clone() {
+                        ui.selectable_value(tile_page, tile_page_name.to_string(), tile_page_name);
+                    }
+                    ui.selectable_value(tile_page, String::from(""), "(custom)")
                 });
+                if !tile_page_names.contains(&&tile_page.clone()) {
+                    ui.label("Custom Tile Page Name: ");
+                    ui.text_edit_singleline(tile_page);
+                }
 
                 ui.add_space(PADDING);
                 let mut large = large_coords.is_some();
                 ui.checkbox(&mut large, "Large Image:");
 
-                if large {
-                    let [x2, y2] = large_coords.get_or_insert([0, 0]);
-                    // ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2)
-                    //     .unwrap_or_default()).prefix("TilePage X: "));
-                    // ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2)
-                    //     .unwrap_or_default()).prefix("TilePage Y: "));
-
-                    ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
-                    ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+                let [x2, y2] = large_coords.get_or_insert([0, 0]);
+                let max_coords;
+                if let Some(tp_info) = shared.tile_page_info.get(tile_page) {
+                    max_coords = [(tp_info.image_size[0]/32) as u32, (tp_info.image_size[1]/32) as u32];
                 } else {
-                    // ui.add(egui::Slider::new(x1, 0..=max_coords[0]).prefix("TilePage X: "));
-                    // ui.add(egui::Slider::new(y1, 0..=max_coords[1]).prefix("TilePage Y: "));
-
-                    if large_coords.is_some() {
-                        large_coords.take();
-                    }
+                    max_coords = [100,100];
+                }
+                if large {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(*x2+1)
+                            .unwrap_or_default()).prefix("X: "));
+                        ui.add(egui::Slider::new(x2, 0..=2).prefix("X + "));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(*y2+1)
+                            .unwrap_or_default()).prefix("Y: "));
+                        ui.add(egui::Slider::new(y2, 0..=1).prefix("Y + "));
+                    });
+                } else {
+                    large_coords.take();
+                    ui.add(egui::Slider::new(x1, 0..=max_coords[0].checked_sub(1)
+                        .unwrap_or(0)).prefix("X: "));
+                    ui.add(egui::Slider::new(y1, 0..=max_coords[1].checked_sub(1)
+                        .unwrap_or(0)).prefix("Y: "));
                 }
                 
                 ui.add_space(PADDING);
                 ui.label("requires a TISSUE_MIN_LENGTH above.");
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
             }
-            Condition::Default => {
-                ui.label("Select a condition type.");
+            Condition::ItemQuality(quality) => {
+                ui.add(
+                    egui::DragValue::new(quality)
+                        .speed(1)
+                        .clamp_range(0..=5)
+                        .prefix("Items Quality: "),
+                );
+
+                ui.add_space(PADDING);
+                ui.label("Adds the layer based on how item quality: 0 is base quality, 5 is masterwork. See [CONDITION_MATERIAL_FLAG:IS_CRAFTED_ARTIFACT] for artifact-quality items.");
             }
-            _ => {
+            Condition::UsePalette(palette, index) => {
+                //todo shared palette
+            }
+            Condition::UseStandardPalette => {
+                ui.label("No additional input needed.");
+            }
+            Condition::ConditionBP(bp_type) => {
+                egui::ComboBox::from_label("Body part type")
+                    .selected_text(&bp_type.name())
+                    .show_ui(ui, |ui| {
+                        for bp_type_type in BodyPartType::iterator() {
+                            ui.selectable_value(bp_type, bp_type_type.clone(), bp_type_type.name());
+                        }
+                });
+
+                match bp_type {
+                    BodyPartType::None => {},
+                    BodyPartType::ByType(by_type) => {
+                        ui.label("Type: (e.g. GRASP)");
+                        ui.text_edit_singleline(by_type);
+                    },
+                    BodyPartType::ByCategory(category) => {
+                        ui.label("Category: (e.g. HEAD)");
+                        ui.text_edit_singleline(category);
+                    },
+                    BodyPartType::ByToken(token) => {
+                        ui.label("Token: (e.g. RH for right hand)");
+                        ui.text_edit_singleline(token);
+                    },
+                }
+            }
+            Condition::LGConditionBP(bp_type) => {
+                ui.label("During export this replaces the layer token.");
+                egui::ComboBox::from_label("Body part type")
+                    .selected_text(&bp_type.name())
+                    .show_ui(ui, |ui| {
+                        for bp_type_type in BodyPartType::iterator() {
+                            ui.selectable_value(bp_type, bp_type_type.clone(), bp_type_type.name());
+                        }
+                });
+
+                match bp_type {
+                    BodyPartType::None => {},
+                    BodyPartType::ByType(by_type) => {
+                        ui.label("Type: (e.g. GRASP)");
+                        ui.text_edit_singleline(by_type);
+                    },
+                    BodyPartType::ByCategory(category) => {
+                        ui.label("Category: (e.g. HEAD)");
+                        ui.text_edit_singleline(category);
+                    },
+                    BodyPartType::ByToken(token) => {
+                        ui.label("Token: (e.g. RH for right hand)");
+                        ui.text_edit_singleline(token);
+                    },
+                }
+            }
+            Condition::BPAppearanceModifierRange(bp_app_mod, min, max) => {
+                egui::ComboBox::from_label("Body part appearance modifier: ")
+                    .selected_text(&bp_app_mod.name())
+                    .show_ui(ui, |ui| {
+                    for bp_app_mod_type in BPAppMod::iterator() {
+                        ui.selectable_value(bp_app_mod, bp_app_mod_type.clone(), bp_app_mod_type.name());
+                    }
+                });
+
+                ui.add(
+                    egui::DragValue::new(min)
+                        .speed(1)
+                        .clamp_range(0..=*max)
+                        .prefix("Min: "),
+                );
+                ui.add(
+                    egui::DragValue::new(max)
+                        .speed(1)
+                        .clamp_range(*min..=10000)
+                        .prefix("Max: "),
+                );
+            }
+            Condition::BPPresent => {
+                ui.label("No additional input needed.");
+            }
+            Condition::BPScarred => {
+                ui.label("No additional input needed.");
+            }
+            Condition::Custom(string) => {
                 ui.label("Select a condition type.\n\n(This condition type is unsupported.\nIf you think this is an error please report it.)");
                 ui.hyperlink_to(
                     "DF Graphics Helper on GitHub",
                     "https://github.com/BarelyCreative/DF-graphics-helper/tree/main",
                 );
+                ui.add_space(PADDING);
+                ui.text_edit_singleline(string);
+            }
+            Condition::Default => {
+                ui.label("Select a condition type.");
             }
         }
 
@@ -2865,51 +2890,76 @@ impl Menu for Condition {
 impl Condition {
     fn name(&self) -> String {
         match self {
-            Condition::Default => "(default)".to_string(),
-            Condition::ItemWorn(..) => "CONDITION_ITEM_WORN".to_string(),
-            Condition::ShutOffIfItemPresent(..) => "SHUT_OFF_IF_ITEM_PRESENT".to_string(),
-            Condition::Dye(..) => "CONDITION_DYE".to_string(),
-            Condition::NotDyed => "CONDITION_NOT_DYED".to_string(),
-            Condition::MaterialFlag(..) => "CONDITION_MATERIAL_FLAG".to_string(),
-            Condition::MaterialType(..) => "CONDITION_MATERIAL_TYPE".to_string(),
-            Condition::ProfessionCategory(..) => "CONDITION_PROFESSION_CATEGORY".to_string(),
-            Condition::RandomPartIndex(..) => "CONDITION_RANDOM_PART_INDEX".to_string(),
-            Condition::HaulCountMin(..) => "CONDITION_HAUL_COUNT_MIN".to_string(),
-            Condition::HaulCountMax(..) => "CONDITION_HAUL_COUNT_MAX".to_string(),
-            Condition::Child => "CONDITION_CHILD".to_string(),
-            Condition::NotChild => "CONDITION_NOT_CHILD".to_string(),
-            Condition::Caste(..) => "CONDITION_CASTE".to_string(),
-            Condition::Ghost => "CONDITION_GHOST".to_string(),
-            Condition::SynClass(..) => "CONDITION_SYN_CLASS".to_string(),
-            Condition::TissueLayer(..) => "CONDITION_TISSUE_LAYER".to_string(),
-            Condition::TissueMinLength(..) => "TISSUE_MIN_LENGTH".to_string(),
-            Condition::TissueMaxLength(..) => "TISSUE_MAX_LENGTH".to_string(),
-            Condition::TissueMayHaveColor(..) => "TISSUE_MAY_HAVE_COLOR".to_string(),
-            Condition::TissueMayHaveShaping(..) => "TISSUE_MAY_HAVE_SHAPING".to_string(),
-            Condition::TissueNotShaped => "TISSUE_NOT_SHAPED".to_string(),
-            Condition::TissueSwap(..) => "TISSUE_SWAP".to_string(),
-            Condition::ItemQuality(..) => "ITEM_QUALITY".to_string(),
-            Condition::UsePalette(..) => "USE_PALETTE".to_string(),
-            Condition::UseStandardPalette => "USE_STANDARD_PALETTE".to_string(),
-            Condition::ConditionBP(..) => "CONDITION_BP".to_string(),
-            Condition::LGConditionBP(..) => "LG_CONDITION_BP".to_string(),
-            Condition::BPAppearanceModifierRange(..) => "BP_APP_MOD_RANGE".to_string(),
-            Condition::BPPresent => "BP_PRESENT".to_string(),
-            Condition::BPScarred => "BP_SCARRED".to_string(),
-            Self::Custom(line_vec) => {
-                let mut line_iter = line_vec.iter();
-
-                let mut line = line_iter.next().unwrap_or(&"".to_string())
-                    .with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake).clone();
-
-                for elem in line_iter {
-                    line.push(':');
-                    line.push_str(&elem.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake));
-                }
-
-                format!("\t\t\t\t[{0}]\n", line)
-            },
+            Self::Default => "(default)".to_string(),
+            Self::ItemWorn(..) => "CONDITION_ITEM_WORN".to_string(),
+            Self::ShutOffIfItemPresent(..) => "SHUT_OFF_IF_ITEM_PRESENT".to_string(),
+            Self::Dye(..) => "CONDITION_DYE".to_string(),
+            Self::NotDyed => "CONDITION_NOT_DYED".to_string(),
+            Self::MaterialFlag(..) => "CONDITION_MATERIAL_FLAG".to_string(),
+            Self::MaterialType(..) => "CONDITION_MATERIAL_TYPE".to_string(),
+            Self::ProfessionCategory(..) => "CONDITION_PROFESSION_CATEGORY".to_string(),
+            Self::RandomPartIndex(..) => "CONDITION_RANDOM_PART_INDEX".to_string(),
+            Self::HaulCountMin(..) => "CONDITION_HAUL_COUNT_MIN".to_string(),
+            Self::HaulCountMax(..) => "CONDITION_HAUL_COUNT_MAX".to_string(),
+            Self::Child => "CONDITION_CHILD".to_string(),
+            Self::NotChild => "CONDITION_NOT_CHILD".to_string(),
+            Self::Caste(..) => "CONDITION_CASTE".to_string(),
+            Self::Ghost => "CONDITION_GHOST".to_string(),
+            Self::SynClass(..) => "CONDITION_SYN_CLASS".to_string(),
+            Self::TissueLayer(..) => "CONDITION_TISSUE_LAYER".to_string(),
+            Self::TissueMinLength(..) => "TISSUE_MIN_LENGTH".to_string(),
+            Self::TissueMaxLength(..) => "TISSUE_MAX_LENGTH".to_string(),
+            Self::TissueMayHaveColor(..) => "TISSUE_MAY_HAVE_COLOR".to_string(),
+            Self::TissueMayHaveShaping(..) => "TISSUE_MAY_HAVE_SHAPING".to_string(),
+            Self::TissueNotShaped => "TISSUE_NOT_SHAPED".to_string(),
+            Self::TissueSwap(..) => "TISSUE_SWAP".to_string(),
+            Self::ItemQuality(..) => "ITEM_QUALITY".to_string(),
+            Self::UsePalette(..) => "USE_PALETTE".to_string(),
+            Self::UseStandardPalette => "USE_STANDARD_PALETTE".to_string(),
+            Self::ConditionBP(..) => "CONDITION_BP".to_string(),
+            Self::LGConditionBP(..) => "LG_CONDITION_BP".to_string(),
+            Self::BPAppearanceModifierRange(..) => "BP_APP_MOD_RANGE".to_string(),
+            Self::BPPresent => "BP_PRESENT".to_string(),
+            Self::BPScarred => "BP_SCARRED".to_string(),
+            Self::Custom(..) => "(custom)".to_string(),
         }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static CONDITIONS: [Condition; 31] = [
+            Condition::ItemWorn(ItemType::None, Vec::new()),
+            Condition::ShutOffIfItemPresent(ItemType::None, Vec::new()),
+            Condition::Dye(String::new()),
+            Condition::NotDyed,
+            Condition::MaterialFlag(Vec::new()),
+            Condition::MaterialType(Metal::None),
+            Condition::ProfessionCategory(Vec::new()),
+            Condition::RandomPartIndex(String::new(), 0, 0),
+            Condition::HaulCountMin(0),
+            Condition::HaulCountMax(0),
+            Condition::Child,
+            Condition::NotChild,
+            Condition::Caste(String::new()),
+            Condition::Ghost,
+            Condition::SynClass(SyndromeClass::Zombie),
+            Condition::TissueLayer(String::new(), String::new()),
+            Condition::TissueMinLength(0),
+            Condition::TissueMaxLength(0),
+            Condition::TissueMayHaveColor(Vec::new()),
+            Condition::TissueMayHaveShaping(Vec::new()),
+            Condition::TissueNotShaped,
+            Condition::TissueSwap(String::new(), 0, String::new(), [0,0], None),
+            Condition::ItemQuality(0),
+            Condition::UsePalette(String::new(), 0),
+            Condition::UseStandardPalette,
+            Condition::ConditionBP(BodyPartType::None),
+            Condition::LGConditionBP(BodyPartType::None),
+            Condition::BPAppearanceModifierRange(BPAppMod::None, 0, 0),
+            Condition::BPPresent,
+            Condition::BPScarred,
+            Condition::Custom(String::new()),
+        ];
+        CONDITIONS.iter()
     }
 }
 
@@ -3110,6 +3160,20 @@ impl Metal {
             metal => Metal::Custom(metal.to_string()),
         }
     }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static METALS: [Metal; 8] = [
+            Metal::None,
+            Metal::Copper,
+            Metal::Silver,
+            Metal::Bronze,
+            Metal::BlackBronze,
+            Metal::Iron,
+            Metal::Steel,
+            Metal::Adamantine,
+        ];
+        METALS.iter()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3159,7 +3223,7 @@ pub enum MaterialFlag {
     Unrotten,
     NotWeb,
     Web,
-    CanArtifact,
+    CanUseArtifact,
     OnGround,
 }
 impl MaterialFlag {
@@ -3209,7 +3273,7 @@ impl MaterialFlag {
             MaterialFlag::Unrotten => "UNROTTEN".to_string(),
             MaterialFlag::NotWeb => "NOT_WEB".to_string(),
             MaterialFlag::Web => "WEB_ONLY".to_string(),
-            MaterialFlag::CanArtifact => "CAN_USE_ARTIFACT".to_string(),
+            MaterialFlag::CanUseArtifact => "CAN_USE_ARTIFACT".to_string(),
             MaterialFlag::OnGround => "ON_GROUND".to_string(),
         }
     }
@@ -3259,10 +3323,61 @@ impl MaterialFlag {
             "UNROTTEN" => MaterialFlag::Unrotten,
             "NOT_WEB" => MaterialFlag::NotWeb,
             "WEB_ONLY" => MaterialFlag::Web,
-            "CAN_USE_ARTIFACT" => MaterialFlag::CanArtifact,
+            "CAN_USE_ARTIFACT" => MaterialFlag::CanUseArtifact,
             "ON_GROUND" => MaterialFlag::OnGround,
             _ => MaterialFlag::None,
         }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static MATERIALFLAGS: [MaterialFlag; 45] = [
+            MaterialFlag::DivineMaterial,
+            MaterialFlag::Artifact,
+            MaterialFlag::NotArtifact,
+            MaterialFlag::Leather,
+            MaterialFlag::Bone,
+            MaterialFlag::Shell,
+            MaterialFlag::Wood,
+            MaterialFlag::Woven,
+            MaterialFlag::Silk,
+            MaterialFlag::Yarn,
+            MaterialFlag::Plant,
+            MaterialFlag::NotImproved,
+            MaterialFlag::Empty,
+            MaterialFlag::Stone,
+            MaterialFlag::Gem,
+            MaterialFlag::Tooth,
+            MaterialFlag::Horn,
+            MaterialFlag::Pearl,
+            MaterialFlag::Soap,
+            MaterialFlag::HardMat,
+            MaterialFlag::Metal,
+            MaterialFlag::Glass,
+            MaterialFlag::Sand,
+            MaterialFlag::StrandTissue,
+            MaterialFlag::Lye,
+            MaterialFlag::Potashable,
+            MaterialFlag::FoodStorage,
+            MaterialFlag::EmptyBarrel,
+            MaterialFlag::NotPressed,
+            MaterialFlag::FireSafe,
+            MaterialFlag::MagmaSafe,
+            MaterialFlag::BuildMat,
+            MaterialFlag::WorthlessStone,
+            MaterialFlag::BodyComp,
+            MaterialFlag::CanUseLocation,
+            MaterialFlag::NoEdge,
+            MaterialFlag::Edge,
+            MaterialFlag::NotEngraved,
+            MaterialFlag::WritingImprovment,
+            MaterialFlag::NotAbsorb,
+            MaterialFlag::Unrotten,
+            MaterialFlag::NotWeb,
+            MaterialFlag::Web,
+            MaterialFlag::CanUseArtifact,
+            MaterialFlag::OnGround,
+        ];
+        MATERIALFLAGS.iter()
     }
 }
 
@@ -3329,6 +3444,16 @@ impl ItemType {
 
         (item_type, buffer, errors)
     }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static ITEMTYPES: [ItemType; 4] = [
+            ItemType::ByCategory(String::new(), Equipment::None),
+            ItemType::ByToken(String::new(), Equipment::None),
+            ItemType::AnyHeld(Equipment::None),
+            ItemType::Wield(Equipment::None),
+        ];
+        ITEMTYPES.iter()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3340,20 +3465,20 @@ pub enum BodyPartType {
     ByToken(String),
 }
 impl BodyPartType {
-    // fn name(&self) -> String {
-    //     match self {
-    //         BodyPartType::None => String::new(),
-    //         BodyPartType::ByType(..) => "BY_TYPE".to_string(),
-    //         BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
-    //         BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
-    //     }
-    // }
+    fn name(&self) -> String {
+        match self {
+            BodyPartType::None => String::new(),
+            BodyPartType::ByType(..) => "BY_TYPE".to_string(),
+            BodyPartType::ByCategory(..) => "BY_CATEGORY".to_string(),
+            BodyPartType::ByToken(..) => "BY_TOKEN".to_string(),
+        }
+    }
 
     fn display(&self) -> String {
         match self {
             BodyPartType::None => String::new(),
             BodyPartType::ByType(bodypart) => {
-                format!(":BY_TYPE:{}", bodypart.clone())
+                format!("BY_TYPE:{}", bodypart.clone())
             },
             BodyPartType::ByCategory(bodypart) => {
                 format!("BY_CATEGORY:{}", bodypart.clone())
@@ -3390,6 +3515,15 @@ impl BodyPartType {
 
         (bp_type, errors)
     }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static BODYPARTTYPES: [BodyPartType; 3] = [
+            BodyPartType::ByCategory(String::new()),
+            BodyPartType::ByToken(String::new()),
+            BodyPartType::ByType(String::new()),
+        ];
+        BODYPARTTYPES.iter()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3411,8 +3545,7 @@ pub enum BPAppMod {
     Gaps,
     HighCheekbones,
     BroadChin,
-    Jutting,
-    Chin,
+    JuttingChin,
     SquareChin,
     DeepVoice,
     RaspyVoice,
@@ -3436,8 +3569,7 @@ impl BPAppMod {
             BPAppMod::Gaps => "GAPS".to_string(),
             BPAppMod::HighCheekbones => "HIGH_CHEEKBONES".to_string(),
             BPAppMod::BroadChin => "BROAD_CHIN".to_string(),
-            BPAppMod::Jutting => "JUTTING".to_string(),
-            BPAppMod::Chin => "CHIN".to_string(),
+            BPAppMod::JuttingChin => "JUTTING_CHIN".to_string(),
             BPAppMod::SquareChin => "SQUARE_CHIN".to_string(),
             BPAppMod::DeepVoice => "DEEP_VOICE".to_string(),
             BPAppMod::RaspyVoice => "RASPY_VOICE".to_string(),
@@ -3461,13 +3593,37 @@ impl BPAppMod {
             "GAPS" => {BPAppMod::Gaps},
             "HIGH_CHEEKBONES" => {BPAppMod::HighCheekbones},
             "BROAD_CHIN" => {BPAppMod::BroadChin},
-            "JUTTING" => {BPAppMod::Jutting},
-            "CHIN" => {BPAppMod::Chin},
+            "JUTTING_CHIN" => {BPAppMod::JuttingChin},
             "SQUARE_CHIN" => {BPAppMod::SquareChin},
             "DEEP_VOICE" => {BPAppMod::DeepVoice},
             "RASPY_VOICE" => {BPAppMod::RaspyVoice},
             _ => BPAppMod::None
         }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static BPAPPMODS: [BPAppMod; 19] = [
+            BPAppMod::Thickness,
+            BPAppMod::Broadness,
+            BPAppMod::Length,
+            BPAppMod::Height,
+            BPAppMod::CloseSet,
+            BPAppMod::DeepSet,
+            BPAppMod::RoundVsNarrow,
+            BPAppMod::LargeIris,
+            BPAppMod::Upturned,
+            BPAppMod::Convex,
+            BPAppMod::SplayedOut,
+            BPAppMod::HangingLobes,
+            BPAppMod::Gaps,
+            BPAppMod::HighCheekbones,
+            BPAppMod::BroadChin,
+            BPAppMod::JuttingChin,
+            BPAppMod::SquareChin,
+            BPAppMod::DeepVoice,
+            BPAppMod::RaspyVoice,
+        ];
+        BPAPPMODS.iter()
     }
 }
 
@@ -3514,6 +3670,21 @@ impl Equipment {
             "ANY" => Equipment::Any,
             _ => Equipment::None,
         }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static EQUIPMENT: [Equipment; 9] = [
+            Equipment::Armor,
+            Equipment::Helm,
+            Equipment::Gloves,
+            Equipment::Shoes,
+            Equipment::Pants,
+            Equipment::Shield,
+            Equipment::Weapon,
+            Equipment::Tool,
+            Equipment::Any,
+        ];
+        EQUIPMENT.iter()
     }
 }
 
@@ -3580,6 +3751,138 @@ impl Profession {
             "NONE" => Profession::None,
             prof=> Profession::Custom(prof.to_string()),
         }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static PROFESSIONS: [Profession; 13] = [
+            Profession::Standard,
+            Profession::Stoneworker,
+            Profession::Miner,
+            Profession::Metalsmith,
+            Profession::Engineer,
+            Profession::Farmer,
+            Profession::Woodworker,
+            Profession::Jeweler,
+            Profession::Ranger,
+            Profession::Craftsman,
+            Profession::FisheryWorker,
+            Profession::Merchant,
+            Profession::None,
+        ];
+        PROFESSIONS.iter()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum SyndromeClass {
+    #[default]
+    Zombie,
+    Necromancer,
+    Vampcurse,
+    RaisedUndead,
+    DisturbedDead,
+    Ghoul,
+    Custom(String),
+}
+impl SyndromeClass {
+    fn name(&self) -> String {
+        match self {
+            Self::Zombie => "ZOMBIE".to_string(),
+            Self::Necromancer => "NECROMANCER".to_string(),
+            Self::Vampcurse => "VAMPCURSE".to_string(),
+            Self::RaisedUndead => "RAISED_UNDEAD".to_string(),
+            Self::DisturbedDead => "DISTURBED_DEAD".to_string(),
+            Self::Ghoul => "GHOUL".to_string(),
+            Self::Custom(syn_class) => {
+                syn_class.with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            },
+        }
+    }
+
+    fn from(string: String) -> Self {
+        match string.as_str() {
+            "ZOMBIE" => Self::Zombie,
+            "NECROMANCER" => Self::Necromancer,
+            "VAMPCURSE" => Self::Vampcurse,
+            "RAISED_UNDEAD" => Self::RaisedUndead,
+            "DISTURBED_DEAD" => Self::DisturbedDead,
+            "GHOUL" => Self::Ghoul,
+            syn_class=> Self::Custom(syn_class.to_string()),
+        }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static SYNDROMECLASSES: [SyndromeClass; 6] = [
+            SyndromeClass::Zombie,
+            SyndromeClass::Necromancer,
+            SyndromeClass::Vampcurse,
+            SyndromeClass::RaisedUndead,
+            SyndromeClass::DisturbedDead,
+            SyndromeClass::Ghoul,
+            //Custom
+        ];
+        SYNDROMECLASSES.iter()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Shaping {
+    #[default]
+    StandardHair,
+    StandardBeard,
+    StandardMoustache,
+    StandardSideburns,
+    CleanShaven,
+    NeatlyCombed,
+    Braided,
+    DoubleBraids,
+    PonyTails,
+}
+impl Shaping {
+    fn name(&self) -> String {
+        match self {
+            Self::StandardHair => "STANDARD_HAIR_SHAPINGS".to_string(),
+            Self::StandardBeard => "STANDARD_BEARD_SHAPINGS".to_string(),
+            Self::StandardMoustache => "STANDARD_MOUSTACHE_SHAPINGS".to_string(),
+            Self::StandardSideburns => "STANDARD_SIDEBURNS_SHAPINGS".to_string(),
+            Self::CleanShaven => "CLEAN_SHAVEN".to_string(),
+            Self::NeatlyCombed => "NEATLY_COMBED".to_string(),
+            Self::Braided => "BRAIDED".to_string(),
+            Self::DoubleBraids => "DOUBLE_BRAIDS".to_string(),
+            Self::PonyTails => "PONY_TAILS".to_string(),
+        }
+    }
+
+    fn from(string: String) -> Self {
+        match string.as_str() {
+            "STANDARD_HAIR_SHAPINGS" => Self::StandardHair,
+            "STANDARD_BEARD_SHAPINGS" => Self::StandardBeard,
+            "STANDARD_MOUSTACHE_SHAPINGS" => Self::StandardMoustache,
+            "STANDARD_SIDEBURNS_SHAPINGS" => Self::StandardSideburns,
+            "CLEAN_SHAVEN" => Self::CleanShaven,
+            "NEATLY_COMBED" => Self::NeatlyCombed,
+            "BRAIDED" => Self::Braided,
+            "DOUBLE_BRAIDS" => Self::DoubleBraids,
+            "PONY_TAILS" => Self::PonyTails,
+            _ => Self::StandardHair,
+        }
+    }
+
+    fn iterator() -> std::slice::Iter<'static, Self> {
+        static SHAPINGS: [Shaping; 9] = [
+            Shaping::StandardHair,
+            Shaping::StandardBeard,
+            Shaping::StandardMoustache,
+            Shaping::StandardSideburns,
+            Shaping::CleanShaven,
+            Shaping::NeatlyCombed,
+            Shaping::Braided,
+            Shaping::DoubleBraids,
+            Shaping::PonyTails,
+        ];
+        SHAPINGS.iter()
     }
 }
 

@@ -1,6 +1,6 @@
 use egui::{Context, Key, KeyboardShortcut, Modifiers, Sense, Stroke, TextureHandle, TextureOptions, Ui};
 use egui_plot::{GridInput, GridMark, Plot, PlotImage, PlotPoint, Polygon};
-// use convert_case::{Case, Casing};
+
 use rfd;
 use std::path::PathBuf;
 use std::path;
@@ -24,6 +24,7 @@ pub enum MainWindow {
     LayerGroupMenu,
     LayerSetMenu,
     LayerMenu,
+    ConditionMenu,
     SimpleLayerMenu,
     StatueMenu,
     PlantMenu,
@@ -99,12 +100,13 @@ impl From<MainWindow> for ContextData {
             MainWindow::TilePageFileDefaultMenu => ContextData::TilePageFile(TilePageFile::new()),
             MainWindow::TilePageFileMenu => ContextData::TilePageFile(TilePageFile::new()),
             MainWindow::TilePageMenu => ContextData::TilePage(TilePage::new()),
-            MainWindow::GraphicsFileDefaultMenu => ContextData::Creature(Creature::new()),//todo
+            MainWindow::GraphicsFileDefaultMenu => ContextData::Creature(Creature::new()),
             MainWindow::GraphicsFileMenu => ContextData::GraphicsFile(GraphicsFile::default()),
             MainWindow::CreatureMenu => ContextData::Creature(Creature::new()),
             MainWindow::LayerGroupMenu => ContextData::LayerGroup(LayerGroup::new()),
             MainWindow::LayerSetMenu => ContextData::LayerSet(LayerSet::new()),
             MainWindow::LayerMenu => ContextData::Layer(Layer::new()),
+            MainWindow::ConditionMenu => ContextData::Condition(Condition::new()),
             MainWindow::SimpleLayerMenu => ContextData::SimpleLayer(SimpleLayer::new()),
             MainWindow::StatueMenu => ContextData::Statue(Statue::new()),
             MainWindow::PlantMenu => ContextData::Plant(Plant::new()),
@@ -169,7 +171,7 @@ pub struct GraphicsIndices {
     layer_set_index: usize,
     layer_group_index: usize,
     layer_index: usize,
-    simple_layer_index: usize,
+    condition_index: usize,
 }
 impl GraphicsIndices {
     fn new() -> GraphicsIndices {
@@ -181,7 +183,7 @@ impl GraphicsIndices {
             layer_set_index: 0,
             layer_group_index: 0,
             layer_index: 0,
-            simple_layer_index: 0,
+            condition_index: 0,
         }
     }
 }
@@ -195,7 +197,7 @@ impl From<[usize; 8]> for GraphicsIndices {
             layer_set_index:        index_array[4],
             layer_group_index:      index_array[5],
             layer_index:            index_array[6],
-            simple_layer_index:     index_array[7],
+            condition_index:        index_array[7],
         }
     }
 }
@@ -208,7 +210,7 @@ pub struct DFGraphicsHelper {
     preview: bool,
     preview_name: String,
     preview_bounds: Option<egui_plot::PlotBounds>,
-    selected_region: Option<[[u32; 2]; 2]>,
+    selected_region: [Option<[u32; 2]>; 2],
     texture: Option<TextureHandle>,
     cursor_coords: Option<[u32; 2]>,
     action: Action,
@@ -227,7 +229,7 @@ impl DFGraphicsHelper {
             preview: false,
             preview_name: String::new(),
             preview_bounds: None,
-            selected_region: None,
+            selected_region: [None, None],
             texture: None,
             cursor_coords: None,
             action: Action::default(),
@@ -535,8 +537,8 @@ impl DFGraphicsHelper {
                     let sls = &mut cs.get_mut(indices.graphics_index)
                         .ok_or(DFGHError::IndexError)?
                         .simple_layers;
-                    if indices.simple_layer_index < sls.len() {
-                        sls.insert(indices.simple_layer_index, simple_layer.clone());//checked
+                    if indices.layer_index < sls.len() {
+                        sls.insert(indices.layer_index, simple_layer.clone());//checked
                     } else {
                         sls.push(simple_layer.clone());
                     }
@@ -728,10 +730,10 @@ impl DFGraphicsHelper {
                         .get_mut(indices.graphics_index)
                         .ok_or(DFGHError::IndexError)?
                         .simple_layers;
-                    if indices.simple_layer_index < sls.len() {
-                        sls.remove(indices.simple_layer_index);//checked
-                        if indices.simple_layer_index >= 1 {
-                            indices.simple_layer_index -= 1;
+                    if indices.layer_index < sls.len() {
+                        sls.remove(indices.layer_index);//checked
+                        if indices.layer_index >= 1 {
+                            indices.layer_index -= 1;
                         } else {
                             self.main_window = MainWindow::CreatureMenu;
                         }
@@ -806,7 +808,24 @@ impl DFGraphicsHelper {
                     max = [1.02*size[0], 0.02*size[1]];
                 },
                 PreviewZoom::Selected => {
-                    
+                    if let [Some(xy1), opt_xy2] = self.selected_region {
+                        let xy2 = opt_xy2.unwrap_or([0,0]);
+                        let selected = [
+                            [32.0*xy1[0] as f64, -32.0*xy1[1] as f64],
+                            [32.0*xy1[0] as f64 + 32.0*(xy2[0]+1) as f64,
+                            -32.0*xy1[1] as f64 + -32.0*(xy2[1]+1) as f64]
+                        ];
+                        let range = [
+                            (selected[0][0]-selected[0][1]).abs(),
+                            (selected[1][0]-selected[1][1]).abs()
+                        ];
+
+                        min = [-0.02*range[0]+selected[0][0], -0.02*range[1]+selected[1][1]];
+                        max = [0.02*range[0]+selected[1][0], 0.02*range[1]+selected[0][1]];
+                    } else {
+                        min = [-0.02*size[0], -1.02*size[1]];
+                        max = [1.02*size[0], 0.02*size[1]];
+                    }
                 },
                 PreviewZoom::HorizontalFit => {
                     min = [-0.02*size[0], -1.02*size[0]];
@@ -833,6 +852,7 @@ impl DFGraphicsHelper {
             .clicked()
         {
             self.main_window = MainWindow::TilePageFileDefaultMenu;
+            self.action = Action::Zoom(PreviewZoom::All);
         };
         //tile page files
         for (i_tile_page_file, tile_page_file) in graphics.tile_page_files.iter_mut().enumerate() {
@@ -851,6 +871,7 @@ impl DFGraphicsHelper {
                 if tile_page_file_response.clicked() {
                     self.indices = [i_tile_page_file, 0, 0, 0, 0, 0, 0, 0].into();
                     self.main_window = MainWindow::TilePageFileMenu;
+                    self.action = Action::Zoom(PreviewZoom::All);
                 }
                 tile_page_file_response.context_menu(|ui| {
                     self.indices = [i_tile_page_file, 0, 0, 0, 0, 0, 0, 0].into();
@@ -867,6 +888,7 @@ impl DFGraphicsHelper {
                     if tile_page_response.clicked() {
                         self.indices = [i_tile_page_file, i_tile_page, 0, 0, 0, 0, 0, 0].into();
                         self.main_window = MainWindow::TilePageMenu;
+                        self.action = Action::Zoom(PreviewZoom::All);
                     }
                     tile_page_response.context_menu(|ui| {
                         self.indices = [i_tile_page_file, i_tile_page, 0, 0, 0, 0, 0, 0].into();
@@ -902,6 +924,7 @@ impl DFGraphicsHelper {
                 if graphics_file_response.clicked() {
                     self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
                     self.main_window = MainWindow::GraphicsFileMenu;
+                    self.action = Action::Zoom(PreviewZoom::Selected);
                 }
                 graphics_file_response.context_menu(|ui| {
                     self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
@@ -929,6 +952,7 @@ impl DFGraphicsHelper {
                                 if creature_response.clicked() {
                                     self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
                                     self.main_window = MainWindow::CreatureMenu;
+                                    self.action = Action::Zoom(PreviewZoom::Selected);
                                 }
                                 creature_response.context_menu(|ui| {
                                     self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
@@ -946,6 +970,7 @@ impl DFGraphicsHelper {
                                     if simple_layer_response.clicked() {
                                         self.indices = [0, 0, i_file, i_creature, 0, 0, 0, i_simple_layer].into();
                                         self.main_window = MainWindow::SimpleLayerMenu;
+                                        self.action = Action::Zoom(PreviewZoom::Selected);
                                     }
                                     simple_layer_response.context_menu(|ui| {
                                         self.indices = [0, 0, i_file, i_creature, 0, 0, 0, i_simple_layer].into();
@@ -969,6 +994,7 @@ impl DFGraphicsHelper {
                                         if layer_set_response.clicked() {
                                             self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
                                             self.main_window = MainWindow::LayerSetMenu;
+                                            self.action = Action::Zoom(PreviewZoom::Selected);
                                         }
                                         layer_set_response.context_menu(|ui| {
                                             self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
@@ -993,6 +1019,7 @@ impl DFGraphicsHelper {
                                                 if layer_group_response.clicked() {
                                                     self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
                                                     self.main_window = MainWindow::LayerGroupMenu;
+                                                    self.action = Action::Zoom(PreviewZoom::Selected);
                                                 }
                                                 layer_group_response.context_menu(|ui| {
                                                     self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
@@ -1016,6 +1043,7 @@ impl DFGraphicsHelper {
                                                             if layer_response.clicked() {
                                                                 self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
                                                                 self.main_window = MainWindow::LayerMenu;
+                                                                self.action = Action::Zoom(PreviewZoom::Selected);
                                                             }
                                                             layer_response.context_menu(|ui| {
                                                                 self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
@@ -1024,18 +1052,19 @@ impl DFGraphicsHelper {
                                                         })
                                                         .body(|ui|
                                                         {
-                                                        //conditions (no separate menu)
-                                                        for condition in layer.conditions.iter_mut() {
+                                                        //conditions
+                                                        for (i_condition, condition) in layer.conditions.iter_mut().enumerate() {
                                                             let condition_response = ui.add(egui::Label::new(
                                                                 format!("\t{}", condition.name()))
                                                                 .wrap(false)
                                                                 .sense(Sense::click()));
                                                             if condition_response.clicked() {
-                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
-                                                                self.main_window = MainWindow::LayerMenu;
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
+                                                                self.main_window = MainWindow::ConditionMenu;
+                                                                self.action = Action::Zoom(PreviewZoom::Selected);
                                                             }
                                                             condition_response.context_menu(|ui| {
-                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
                                                                 self.action = Self::context(ui, ContextData::from(condition.clone()));
                                                             });
                                                         }
@@ -1059,6 +1088,7 @@ impl DFGraphicsHelper {
                             if statue_response.clicked() {
                                 self.indices = [0, 0, i_file, i_statue, 0, 0, 0, 0].into();
                                 self.main_window = MainWindow::StatueMenu;
+                                self.action = Action::Zoom(PreviewZoom::Selected);
                             }
                             statue_response.context_menu(|ui| {
                                 self.indices = [0, 0, i_file, i_statue, 0, 0, 0, 0].into();
@@ -1075,6 +1105,7 @@ impl DFGraphicsHelper {
                             if plant_response.clicked() {
                                 self.indices = [0, 0, i_file, i_plant, 0, 0, 0, 0].into();
                                 self.main_window = MainWindow::PlantMenu;
+                                self.action = Action::Zoom(PreviewZoom::Selected);
                             }
                             plant_response.context_menu(|ui| {
                                 self.indices = [0, 0, i_file, i_plant, 0, 0, 0, 0].into();
@@ -1091,6 +1122,7 @@ impl DFGraphicsHelper {
                             if tile_graphics_response.clicked() {
                                 self.indices = [0, 0, i_file, i_tile_graphic, 0, 0, 0, 0].into();
                                 self.main_window = MainWindow::TileGraphicMenu;
+                                self.action = Action::Zoom(PreviewZoom::Selected);
                             }
                             tile_graphics_response.context_menu(|ui| {
                                 self.indices = [0, 0, i_file, i_tile_graphic, 0, 0, 0, 0].into();
@@ -1115,7 +1147,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
-        self.selected_region = None;
+        self.selected_region = [None, None];
 
         Ok(())
     }
@@ -1130,7 +1162,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
-        self.selected_region = None;
+        self.selected_region = [None, None];
 
         Ok(())
     }
@@ -1166,7 +1198,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
-        self.selected_region = None;
+        self.selected_region = [None, None];
         
         Ok(())
     }
@@ -1203,7 +1235,7 @@ impl DFGraphicsHelper {
 
             self.preview = true;
             self.preview_name = tile_page.name.clone();
-            self.selected_region = None;
+            self.selected_region = [None, None];
         }
         Ok(())
     }
@@ -1218,7 +1250,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
-        self.selected_region = None;
+        self.selected_region = [None, None];
 
         Ok(())
     }
@@ -1332,7 +1364,7 @@ impl DFGraphicsHelper {
 
         self.preview = false;
         self.preview_name = String::new();
-        self.selected_region = None;
+        self.selected_region = [None, None];
         
         Ok(())
     }
@@ -1376,7 +1408,7 @@ impl DFGraphicsHelper {
 
                 self.preview = false;
                 self.preview_name = String::new();
-                self.selected_region = None;
+                self.selected_region = [None, None];
                 
                 return Ok(())
             },
@@ -1396,7 +1428,7 @@ impl DFGraphicsHelper {
 
                 self.preview = true;
                 self.preview_name = "Creature Preview".to_string();
-                self.selected_region = None;
+                self.selected_region = [None, None];
                 
                 return Ok(())
             },
@@ -1416,7 +1448,7 @@ impl DFGraphicsHelper {
 
                 self.preview = true;
                 self.preview_name = "Statue Preview".to_string();
-                self.selected_region = None;
+                self.selected_region = [None, None];
                 
                 return Ok(())
             },
@@ -1436,7 +1468,7 @@ impl DFGraphicsHelper {
 
                 self.preview = true;
                 self.preview_name = "Plant Preview".to_string();
-                self.selected_region = None;
+                self.selected_region = [None, None];
                 
                 return Ok(())
             },
@@ -1456,7 +1488,7 @@ impl DFGraphicsHelper {
 
                 self.preview = false;
                 self.preview_name = String::new();
-                self.selected_region = None;
+                self.selected_region = [None, None];
                 
                 return Ok(())
             },
@@ -1497,7 +1529,7 @@ impl DFGraphicsHelper {
     
                 self.preview = false;
                 self.preview_name = String::new();
-                self.selected_region = None;
+                self.selected_region = [None, None];
             }
         }
         Ok(())
@@ -1540,7 +1572,7 @@ impl DFGraphicsHelper {
     
                 self.preview = false;
                 self.preview_name = String::new();
-                self.selected_region = None;
+                self.selected_region = [None, None];
             }
         }
         Ok(())
@@ -1586,9 +1618,72 @@ impl DFGraphicsHelper {
     
                 self.preview = true;
                 self.preview_name = layer.tile_name.clone();
-                self.selected_region = Some([layer.coords, layer.large_coords.unwrap_or([0,0])]);
+                self.selected_region = [Some(layer.coords), layer.large_coords];
                 if let Some(coords) = self.cursor_coords {
                     layer.coords = coords;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn condition_menu(&mut self, ui: &mut Ui) -> Result<()> {
+        ui.horizontal(|ui| {
+            ui.label("Condition Menu");
+            if ui.button("Delete").clicked() {
+                self.action = Action::Delete(ContextData::Condition(Condition::new()));
+            }
+        });
+        
+        let indices = &mut self.indices;
+
+        if let GraphicsFile::CreatureFile(_, creatures) = &mut self
+            .loaded_graphics
+            .graphics_files
+            .get_mut(indices.graphics_file_index)
+            .ok_or(DFGHError::IndexError)? {
+            let layer = &mut creatures
+                .get_mut(indices.graphics_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_sets
+                .get_mut(indices.layer_set_index)
+                .ok_or(DFGHError::IndexError)?
+                .layer_groups
+                .get_mut(indices.layer_group_index)
+                .ok_or(DFGHError::IndexError)?
+                .layers
+                .get_mut(indices.layer_index)
+                .ok_or(DFGHError::IndexError)?;
+            let conditions = &mut layer.conditions;
+            if conditions.is_empty() {
+                if ui.small_button("Create Condition").clicked() {
+                    self.action = Action::Insert(ContextData::Condition(Condition::new()));
+                }
+            } else {
+                let condition = conditions
+                    .get_mut(indices.condition_index)
+                    .ok_or(DFGHError::IndexError)?;
+    
+                let shared = &mut self.loaded_graphics.shared;
+    
+                condition.menu(ui, shared);
+    
+                self.preview = true;
+                match condition {
+                    Condition::TissueSwap(_, _, tile_page_name, coords, large_coords) => {
+                        self.preview_name = tile_page_name.clone();
+                        self.selected_region = [Some(coords.clone()), large_coords.clone()];
+                        if let Some(cursor) = self.cursor_coords {
+                            [coords[0], coords[1]] = cursor;
+                        }
+                    },
+                    _ => {
+                        self.preview_name = layer.tile_name.clone();
+                        self.selected_region = [Some(layer.coords), layer.large_coords];
+                        if let Some(cursor) = self.cursor_coords {
+                            layer.coords = cursor;
+                        }
+                    },
                 }
             }
         }
@@ -1620,7 +1715,7 @@ impl DFGraphicsHelper {
                 }
             } else {
                 let simple_layer = simple_layers
-                    .get_mut(indices.simple_layer_index)
+                    .get_mut(indices.layer_index)
                     .ok_or(DFGHError::IndexError)?;
     
                 let shared = &mut self.loaded_graphics.shared;
@@ -1629,7 +1724,7 @@ impl DFGraphicsHelper {
     
                 self.preview = true;
                 self.preview_name = simple_layer.tile_name.clone();
-                self.selected_region = Some([simple_layer.coords, simple_layer.large_coords.unwrap_or([0,0])]);
+                self.selected_region = [Some(simple_layer.coords), simple_layer.large_coords];
                 if let Some(coords) = self.cursor_coords {
                     simple_layer.coords = coords;
                 }
@@ -1668,7 +1763,7 @@ impl DFGraphicsHelper {
     
                 self.preview = true;
                 self.preview_name = statue.tile_name.clone();
-                self.selected_region = Some([statue.coords, statue.large_coords.unwrap_or([0,0])]);
+                self.selected_region = [Some(statue.coords), statue.large_coords];
                 if let Some(coords) = self.cursor_coords {
                     statue.coords = coords;
                 }
@@ -1707,7 +1802,7 @@ impl DFGraphicsHelper {
     
                 self.preview = true;
                 self.preview_name = plant.tile_name.clone();
-                self.selected_region = None;
+                self.selected_region = [None, None];
                 if let Some(coords) = self.cursor_coords {
                     plant.coords[0] = Some(coords);
                 }
@@ -1746,7 +1841,7 @@ impl DFGraphicsHelper {
     
                 self.preview = true;
                 self.preview_name = tile_graphic.tile_name.clone();
-                self.selected_region = Some([tile_graphic.coords, [0, 0]]);
+                self.selected_region = [Some(tile_graphic.coords), None];
                 if let Some(coords) = self.cursor_coords {
                     tile_graphic.coords = coords;
                 }
@@ -1865,7 +1960,8 @@ impl DFGraphicsHelper {
 
                 plot.show(ui, |plot_ui| {
                     plot_ui.image(image.name("Image"));
-                    if let Some(rect) = self.selected_region {
+                    if let [Some(xy1), xy2] = self.selected_region {
+                        let rect = [xy1, xy2.unwrap_or([0,0])];
                         let [x1, y1] = [rect[0][0] as f64, rect[0][1] as f64];
                         let [x2, y2] = [rect[1][0] as f64 + x1, rect[1][1] as f64 + y1];
                         let points = vec![
@@ -1896,12 +1992,12 @@ impl DFGraphicsHelper {
                 });
             } else {
                 //unload texture if it doesn't match what should be loaded.
-                self.action = Action::Zoom(PreviewZoom::All);
+                self.action = Action::Zoom(PreviewZoom::Selected);
                 self.texture = None;
             }
         } else {
             //load texture based on name if not loaded
-            self.action = Action::Zoom(PreviewZoom::All);
+            self.action = Action::Zoom(PreviewZoom::Selected);
             let entry_option = self.loaded_graphics.shared.tile_page_info
                 .get_mut(&self.preview_name);
 
@@ -2008,7 +2104,8 @@ impl eframe::App for DFGraphicsHelper {
                     MainWindow::LayerSetMenu =>             result = self.layer_set_menu(ui),
                     MainWindow::LayerGroupMenu =>           result = self.layer_group_menu(ui),
                     MainWindow::LayerMenu =>                result = self.layer_menu(ui),
-                    MainWindow::SimpleLayerMenu =>          result = self.simple_layer_menu(ui),//todo
+                    MainWindow::ConditionMenu =>            result = self.condition_menu(ui),//todo
+                    MainWindow::SimpleLayerMenu =>          result = self.simple_layer_menu(ui),
                     MainWindow::StatueMenu =>               result = self.statue_menu(ui),
                     MainWindow::PlantMenu =>                result = self.plant_menu(ui),//todo
                     MainWindow::TileGraphicMenu =>          result = self.tile_graphic_menu(ui),//todo
