@@ -48,19 +48,7 @@ macro_rules! index_err {
         }
     };
 }
-//
-// macro_rules! read_err_wrap {
-//     ($rel_line:ident, $buffer_len:ident, $es_temp:ident) => {
-//         $es_temp.map
-//     };
-// }
-//
-// macro_rules! file_err_wrap {
-//     () => {
-        
-//     };
-// }
-//$prefix:expr, $name:ident, $suffix:expr, $vector:ident
+
 macro_rules! graphics_file_export {
     ($prefix:expr, $name:ident, $suffix:expr, $vector:ident, $path:ident) => {
         let bare_name = $name.clone()
@@ -114,8 +102,8 @@ impl Graphics {
     /// Generate a blank generic Graphics struct
     pub fn new() -> Graphics {
         Graphics {
-            tile_page_files: vec![TilePageFile::new()],
-            graphics_files: vec![GraphicsFile::default()],
+            tile_page_files: Vec::new(),
+            graphics_files: Vec::new(),
             shared: Shared::new(),
         }
     }
@@ -284,7 +272,7 @@ impl Graphics {
             },
         }
 
-        shared.update(&tile_page_files, &graphics_files, &folder);
+        shared.update(&tile_page_files, &mut graphics_files, &folder);
 
         (
             Graphics { tile_page_files, graphics_files, shared },
@@ -294,7 +282,7 @@ impl Graphics {
     }
 
     pub fn update_shared(&mut self, folder: &PathBuf) {
-        self.shared.update(&self.tile_page_files, &self.graphics_files, folder);
+        self.shared.update(&self.tile_page_files, &mut self.graphics_files, folder);
     }
 
     pub fn export(&self, path: &PathBuf) -> Result<()> {
@@ -1321,14 +1309,31 @@ impl RAW for LayerSet {
                     },
                     "LS_PALETTE" => {
                         if len >= 2 {
-                            layer_set.palettes.push(Palette{name: line_vec[1].clone(), file_name: "".to_string(), default_index: 0});
+                            layer_set.palettes.push(Palette{name: line_vec[1].clone(), file_name: "".to_string(), default_index: 0, ..Default::default()});
                         } else {
                             index_err!(i_rel_line, buffer_len, len, 2, errors);
                         }
                     }
                     "LS_PALETTE_FILE" => {
                         if len >= 2 {
-                            layer_set.palettes.last_mut().get_or_insert(&mut Palette::new()).file_name = line_vec[1].clone();
+                            let mut default_pal = Palette::new();
+                            let last_palette = layer_set.palettes.last_mut().unwrap_or(&mut default_pal);
+                            let file_name = line_vec[1].clone();
+
+                            //set palette max dimensions based on file if possible
+                            if file_name.ne(&String::new()) {
+                                let image_path = path
+                                    .parent().expect("This file should have a parent graphics directory if we are reading from it.")
+                                    .join("images")
+                                    .join(&file_name)
+                                    .with_extension("png");
+                                
+                                if let Ok(image_dimensions) = image::image_dimensions(image_path) {
+                                    last_palette.max_row = (image_dimensions.1 as u32).saturating_sub(1);
+                                }
+                            }
+
+                            last_palette.file_name = file_name;
                         } else {
                             index_err!(i_rel_line, buffer_len, len, 2, errors);
                         }
@@ -1794,7 +1799,7 @@ pub enum Condition {
     Default,
     ItemWorn(ItemType, Vec<String>),
     ShutOffIfItemPresent(ItemType, Vec<String>),
-    Dye(String),
+    Dye(Color),
     NotDyed,
     MaterialFlag(Vec<MaterialFlag>),
     MaterialType(Metal),
@@ -1804,18 +1809,18 @@ pub enum Condition {
     HaulCountMax(u32),
     Child,
     NotChild,
-    Caste(String),
+    Caste(Caste),
     Ghost,
     SynClass(SyndromeClass),
     TissueLayer(String, String),
     TissueMinLength(u32),
     TissueMaxLength(u32),
-    TissueMayHaveColor(Vec<String>),
+    TissueMayHaveColor(Vec<Color>),
     TissueMayHaveShaping(Vec<Shaping>),
     TissueNotShaped,
     TissueSwap(String, u32, String, [u32;2], Option<[u32;2]>),
     ItemQuality(u32),
-    UsePalette(String, u32),
+    UsePalette(Palette, u32),
     UseStandardPalette,
     ConditionBP(BodyPartType),
     LGConditionBP(BodyPartType),
@@ -1852,7 +1857,7 @@ impl RAW for Condition {
                 },
                 "CONDITION_DYE" => {
                     if len >= 2 {
-                        condition = Condition::Dye(line_vec[1].clone())
+                        condition = Condition::Dye(Color::from(line_vec[1].clone()))
                     } else {
                         index_err!(i_line, buffer_len, len, 2, errors);
                     }
@@ -1925,7 +1930,7 @@ impl RAW for Condition {
                 "CONDITION_CASTE" => {
                     if len >= 2 {
                         condition = Condition::Caste(
-                            line_vec[1].clone()
+                            Caste::from(line_vec[1].clone())
                         )
                     } else {
                         index_err!(i_line, buffer_len, len, 2, errors);
@@ -1972,7 +1977,7 @@ impl RAW for Condition {
                 "TISSUE_MAY_HAVE_COLOR" => {
                     if len >= 2 {
                         condition = Condition::TissueMayHaveColor(
-                            line_vec.drain(1..).collect()
+                            line_vec.drain(1..).map(|c| Color::from(c)).collect()
                         )
                     } else {
                         index_err!(i_line, buffer_len, len, 2, errors);
@@ -2033,7 +2038,7 @@ impl RAW for Condition {
                 "USE_PALETTE" => {
                     if len >= 3 {
                         condition = Condition::UsePalette(
-                            line_vec[1].clone(),
+                            Palette { name: line_vec[1].clone(), ..Default::default() },
                             buffer_err_wrap!(line_vec[2].parse::<u32>(), i_line, buffer_len, 2..=2, 0, errors)
                         )
                     } else {
@@ -2166,7 +2171,7 @@ impl RAW for Condition {
             Condition::Dye(color) => {
                 out = format!(
                     "\t\t\t\t[CONDITION_DYE:{}]\n",
-                    color.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                    color.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
                 );
             },
             Condition::NotDyed => {
@@ -2221,7 +2226,7 @@ impl RAW for Condition {
             Condition::Caste(caste) => {
                 out = format!(
                     "\t\t\t\t[CONDITION_CASTE:{}]\n",
-                    caste.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                    caste.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
                 );
             },
             Condition::Ghost => {
@@ -2248,7 +2253,7 @@ impl RAW for Condition {
                 for color in colors {
                     out.push_str(&format!(
                         ":{}",
-                        color.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
+                        color.name().with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake)
                     ));
                 }
                 out.push_str("]\n");
@@ -2292,8 +2297,8 @@ impl RAW for Condition {
             Condition::ItemQuality(index) => {
                 out = format!("\t\t\t\t[ITEM_QUALITY:{}]\n", index);
             },
-            Condition::UsePalette(palette_name, row) => {
-                out = format!("\t\t\t\t[USE_PALETTE:{}:{}]\n", palette_name.clone(), row);
+            Condition::UsePalette(palette, row) => {
+                out = format!("\t\t\t\t[USE_PALETTE:{}:{}]\n", palette.name.clone(), row);
             },
             Condition::UseStandardPalette => {
                 out = format!("\t\t\t\t[USE_STANDARD_PALETTE_FROM_ITEM]\n");
@@ -2370,9 +2375,44 @@ impl Menu for Condition {
                             ui.text_edit_singleline(item);
                         }
 
+                        let shared_items_iter = shared.creature_shared.items.iter();
+                        let shared_item_groups_iter = shared.creature_shared.item_groups.iter();
+                        let mut shared_items = Vec::new();
+
                         ui.horizontal(|ui| {
                             if ui.button("Add item").clicked() {
                                 items.push("".into());
+                            }
+                            egui::ComboBox::from_label("")
+                                .selected_text("Add Existing Items")
+                                .show_ui(ui, |ui| {
+                                for item_name in shared_items_iter {
+                                    match item_name.0.clone(){
+                                        ItemType::Wield(equip) => {
+                                            if equip.eq(&equipment) {
+                                                ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                for item_names in shared_item_groups_iter {
+                                    match item_names.0.clone(){
+                                        ItemType::ByCategory(cat, equip) => {
+                                            if cat.eq(&category.clone()) && equip.eq(&equipment) {
+                                                let mut names = item_names.1.clone();
+                                                names.truncate(2);
+                                                let mut name = names.join(", ");
+                                                name.push_str(", ...");
+                                                ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            });
+                            if !shared_items.is_empty() {
+                                items.append(&mut shared_items);
                             }
                             if ui.button("Remove item").clicked() && items.len() > 1
                             {
@@ -2399,9 +2439,44 @@ impl Menu for Condition {
                             ui.text_edit_singleline(item);
                         }
 
+                        let shared_items_iter = shared.creature_shared.items.iter();
+                        let shared_item_groups_iter = shared.creature_shared.item_groups.iter();
+                        let mut shared_items = Vec::new();
+
                         ui.horizontal(|ui| {
                             if ui.button("Add item").clicked() {
                                 items.push("".into());
+                            }
+                            egui::ComboBox::from_label("")
+                                .selected_text("Add Existing Items")
+                                .show_ui(ui, |ui| {
+                                for item_name in shared_items_iter {
+                                    match item_name.0.clone(){
+                                        ItemType::Wield(equip) => {
+                                            if equip.eq(&equipment) {
+                                                ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                for item_names in shared_item_groups_iter {
+                                    match item_names.0.clone(){
+                                        ItemType::ByToken(tok, equip) => {
+                                            if tok.eq(&token.clone()) && equip.eq(&equipment) {
+                                                let mut names = item_names.1.clone();
+                                                names.truncate(2);
+                                                let mut name = names.join(", ");
+                                                name.push_str(", ...");
+                                                ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            });
+                            if !shared_items.is_empty() {
+                                items.append(&mut shared_items);
                             }
                             if ui.button("Remove item").clicked() && items.len() > 1
                             {
@@ -2425,9 +2500,44 @@ impl Menu for Condition {
                             ui.text_edit_singleline(item);
                         }
 
+                        let shared_items_iter = shared.creature_shared.items.iter();
+                        let shared_item_groups_iter = shared.creature_shared.item_groups.iter();
+                        let mut shared_items = Vec::new();
+
                         ui.horizontal(|ui| {
                             if ui.button("Add item").clicked() {
                                 items.push("".into());
+                            }
+                            egui::ComboBox::from_label("")
+                                .selected_text("Add Existing Items")
+                                .show_ui(ui, |ui| {
+                                for item_name in shared_items_iter {
+                                    match item_name.0.clone(){
+                                        ItemType::AnyHeld(equip) => {
+                                            if equip.eq(&equipment) {
+                                                ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                for item_names in shared_item_groups_iter {
+                                    match item_names.0.clone(){
+                                        ItemType::Wield(equip) => {
+                                            if equip.eq(&equipment) {
+                                                let mut names = item_names.1.clone();
+                                                names.truncate(2);
+                                                let mut name = names.join(", ");
+                                                name.push_str(", ...");
+                                                ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            });
+                            if !shared_items.is_empty() {
+                                items.append(&mut shared_items);
                             }
                             if ui.button("Remove item").clicked() && items.len() > 1
                             {
@@ -2448,15 +2558,50 @@ impl Menu for Condition {
                         if equipment == &Equipment::Any {
                             items.clear();
                         } else {
-                            ui.label("Item: (e.g. ITEM_WEAPON_PICK)");
+                            ui.label("Item: (e.g. ITEM_WEAPON_PICK or ANY)");
     
                             for item in items.iter_mut() {
                                 ui.text_edit_singleline(item);
                             }
+
+                            let shared_items_iter = shared.creature_shared.items.iter();
+                            let shared_item_groups_iter = shared.creature_shared.item_groups.iter();
+                            let mut shared_items = Vec::new();
     
                             ui.horizontal(|ui| {
                                 if ui.button("Add item").clicked() {
                                     items.push("".into());
+                                }
+                                egui::ComboBox::from_label("")
+                                    .selected_text("Add Existing Items")
+                                    .show_ui(ui, |ui| {
+                                    for item_name in shared_items_iter {
+                                        match item_name.0.clone(){
+                                            ItemType::Wield(equip) => {
+                                                if equip.eq(&equipment) {
+                                                    ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    for item_names in shared_item_groups_iter {
+                                        match item_names.0.clone(){
+                                            ItemType::Wield(equip) => {
+                                                if equip.eq(&equipment) {
+                                                    let mut names = item_names.1.clone();
+                                                    names.truncate(2);
+                                                    let mut name = names.join(", ");
+                                                    name.push_str(", ...");
+                                                    ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                });
+                                if !shared_items.is_empty() {
+                                    items.append(&mut shared_items);
                                 }
                                 if ui.button("Remove item").clicked() && items.len() > 1
                                 {
@@ -2467,12 +2612,19 @@ impl Menu for Condition {
                     }
                 }
             }
-            Condition::Dye(dye) => {
+            Condition::Dye(dye_color) => {
                 ui.hyperlink_to(
                     "Dye color token:",
                     "http://dwarffortresswiki.org/index.php/Color#Color_tokens",
                 );
-                ui.text_edit_singleline(dye);
+                ui.text_edit_singleline(&mut dye_color.name());
+                egui::ComboBox::from_label("")
+                    .selected_text("Existing Colors")
+                    .show_ui(ui, |ui| {
+                    for color in &shared.creature_shared.colors {
+                        ui.selectable_value(dye_color, color.clone(), color.name());
+                    }
+                });
                 ui.label("Not functional in v50.05");
             }
             Condition::NotDyed => {
@@ -2513,6 +2665,9 @@ impl Menu for Condition {
                     for metal_type in Metal::iterator() {
                         ui.selectable_value(metal, metal_type.clone(), metal_type.name());
                     }
+                    for shared_metal in &shared.creature_shared.metals {
+                        ui.selectable_value(metal, shared_metal.clone(), shared_metal.name());
+                    }
                     ui.selectable_value(metal, Metal::Custom(String::new()), "(custom)");
                 });
 
@@ -2538,6 +2693,7 @@ impl Menu for Condition {
                         }
                     });
                 }
+
                 ui.horizontal(|ui| {
                     if ui.button("Add profession").clicked() {
                         professions.push(Profession::Empty);
@@ -2556,19 +2712,29 @@ impl Menu for Condition {
             Condition::RandomPartIndex(id, index, max) => {
                 ui.label("Random part identifier: (e.g. HEAD):");
                 ui.text_edit_singleline(id);
+                egui::ComboBox::from_label("")
+                    .selected_text("Existing RPI")
+                    .show_ui(ui, |ui| {
+                    for rpi in &shared.creature_shared.random_part_groups {
+                        ui.selectable_value(id, rpi.0.clone(), rpi.0.clone());
+                    }
+                });
 
-                ui.add(
-                    egui::DragValue::new(max)
-                        .speed(1)
-                        .prefix("Total parts: ")
-                        .clamp_range(1..=u32::MAX),
-                );
+                if let Some(pos) = shared.creature_shared.random_part_groups.iter().map(|rpi| rpi.0.clone()).position(|i| i.eq(&id.clone())) {
+                    max.clone_from(&shared.creature_shared.random_part_groups[pos].1);
+                }
 
                 ui.add(
                     egui::DragValue::new(index)
                         .speed(1)
                         .prefix("Part index: ")
                         .clamp_range(1..=*max),
+                );
+                ui.add(
+                    egui::DragValue::new(max)
+                        .speed(1)
+                        .prefix("Total parts: ")
+                        .clamp_range(1..=256),
                 );
 
                 ui.add_space(PADDING);
@@ -2606,15 +2772,18 @@ impl Menu for Condition {
             }
             Condition::Caste(caste) => {
                 egui::ComboBox::from_label("Caste token: ")
-                    .selected_text(caste.clone())
+                    .selected_text(caste.name())
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(caste, String::from("MALE"), "MALE");
-                        ui.selectable_value(caste, String::from("FEMALE"), "FEMALE");
-                        ui.selectable_value(caste, String::new(), "(custom)");
+                        ui.selectable_value(caste, Caste::from("MALE".to_string()), "MALE");
+                        ui.selectable_value(caste, Caste::from("FEMALE".to_string()), "FEMALE");
+                        for shared_class in &shared.creature_shared.castes {
+                            ui.selectable_value(caste, shared_class.clone(), shared_class.name());
+                        }
+                        ui.selectable_value(caste, Caste::Custom(String::new()), "(custom)");
                     });
 
-                if "MALE".ne(caste) && "FEMALE".ne(caste) {
-                    ui.text_edit_singleline(caste);
+                if let Caste::Custom(caste_name) = caste {
+                    ui.text_edit_singleline(caste_name);
                 }
 
                 ui.add_space(PADDING);
@@ -2656,20 +2825,33 @@ impl Menu for Condition {
                 ui.add_space(PADDING);
                 ui.label("requires a CONDITION_TISSUE_LAYER above.");
             }
-            Condition::TissueMayHaveColor(colors) => {
+            Condition::TissueMayHaveColor(tissue_colors) => {
                 ui.hyperlink_to(
                     "Color: (e.g. GRAY, RUST, MAROON)",
                     "https://dwarffortresswiki.org/index.php/Color#Color_tokens",
                 );
-                for color in colors.iter_mut() {
-                    ui.text_edit_singleline(color);
+                for tissue_color in tissue_colors.iter_mut() {
+                    ui.text_edit_singleline(&mut tissue_color.name());
                 }
+
+                let mut shared_color = Color::None;
+
                 ui.horizontal(|ui| {
                     if ui.button("Add color").clicked() {
-                        colors.push(String::new());
+                        tissue_colors.push(Color::default());
                     }
-                    if ui.button("Remove color").clicked() && colors.len() > 1 {
-                        colors.pop();
+                    egui::ComboBox::from_label("")
+                        .selected_text("Add Existing Colors")
+                        .show_ui(ui, |ui| {
+                        for color in &shared.creature_shared.colors {
+                            ui.selectable_value(&mut shared_color, color.clone(), color.name());
+                        }
+                    });
+                    if !matches!(shared_color, Color::None) {
+                        tissue_colors.push(shared_color);
+                    }
+                    if ui.button("Remove color").clicked() && tissue_colors.len() > 1 {
+                        tissue_colors.pop();
                     }
                 });
 
@@ -2728,7 +2910,6 @@ impl Menu for Condition {
                 egui::ComboBox::from_label("TilePage for swapped layer: ")
                     .selected_text(tile_page.clone())
                     .show_ui(ui, |ui| {
-                    ui.selectable_value(tile_page, String::from(""), "(select)");
                     for tile_page_name in tile_page_names.clone() {
                         ui.selectable_value(tile_page, tile_page_name.to_string(), tile_page_name);
                     }
@@ -2784,8 +2965,21 @@ impl Menu for Condition {
                 ui.add_space(PADDING);
                 ui.label("Adds the layer based on how item quality: 0 is base quality, 5 is masterwork. See [CONDITION_MATERIAL_FLAG:IS_CRAFTED_ARTIFACT] for artifact-quality items.");
             }
-            Condition::UsePalette(palette, index) => {
-                //todo shared palette
+            Condition::UsePalette(c_palette, row) => {
+                egui::ComboBox::from_label("Palette: ")
+                    .selected_text(c_palette.name.clone())
+                    .show_ui(ui, |ui| {
+                    for palette in &shared.creature_shared.palettes {
+                        ui.selectable_value(c_palette, palette.clone(), palette.name.clone());
+                    }
+                });
+
+                ui.add(
+                    egui::DragValue::new(row)
+                        .speed(1)
+                        .clamp_range(0..=c_palette.max_row)
+                        .prefix("Row: "),
+                );
             }
             Condition::UseStandardPalette => {
                 ui.label("No additional input needed.");
@@ -2877,6 +3071,15 @@ impl Menu for Condition {
                 );
                 ui.add_space(PADDING);
                 ui.text_edit_singleline(string);
+                egui::ComboBox::from_label("Unknown conditions used in this mod (for reference): ")
+                    .selected_text(string.clone())
+                    .show_ui(ui, |ui| {
+                    for cust_condition in &shared.creature_shared.conditions {
+                        let condition_name = cust_condition.display().replace('\t', "").replace('[', "").replace(']', "").replace('\n', "");
+                        ui.selectable_value(string, condition_name.clone(), condition_name);
+                    }
+                });
+
             }
             Condition::Default => {
                 ui.label("Select a condition type.");
@@ -2929,7 +3132,7 @@ impl Condition {
         static CONDITIONS: [Condition; 31] = [
             Condition::ItemWorn(ItemType::None, Vec::new()),
             Condition::ShutOffIfItemPresent(ItemType::None, Vec::new()),
-            Condition::Dye(String::new()),
+            Condition::Dye(Color::None),
             Condition::NotDyed,
             Condition::MaterialFlag(Vec::new()),
             Condition::MaterialType(Metal::None),
@@ -2939,7 +3142,7 @@ impl Condition {
             Condition::HaulCountMax(0),
             Condition::Child,
             Condition::NotChild,
-            Condition::Caste(String::new()),
+            Condition::Caste(Caste::Female),
             Condition::Ghost,
             Condition::SynClass(SyndromeClass::Zombie),
             Condition::TissueLayer(String::new(), String::new()),
@@ -2950,7 +3153,7 @@ impl Condition {
             Condition::TissueNotShaped,
             Condition::TissueSwap(String::new(), 0, String::new(), [0,0], None),
             Condition::ItemQuality(0),
-            Condition::UsePalette(String::new(), 0),
+            Condition::UsePalette(Palette {name: String::new(), file_name: String::new(), default_index: 0, max_row: 255}, 0),
             Condition::UseStandardPalette,
             Condition::ConditionBP(BodyPartType::None),
             Condition::LGConditionBP(BodyPartType::None),
@@ -2963,7 +3166,7 @@ impl Condition {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum State {
     #[default]
     Empty,
@@ -3084,6 +3287,16 @@ impl State {
             State::LightSwarmLarge,
         ];
         STATES.iter()
+    }
+}
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.name().cmp(&other.name()))
+    }
+}
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name().cmp(&other.name())
     }
 }
 
@@ -3399,6 +3612,17 @@ impl ItemType {
             ItemType::AnyHeld(..) => "ANY_HELD".to_string(),
             ItemType::Wield(..) => "WIELD".to_string(),
         }
+    }
+
+    fn equipment_name(&self) -> String {
+        match self {
+            ItemType::None => String::new(),
+            ItemType::ByCategory(_, equipment) |
+            ItemType::ByToken(_, equipment) |
+            ItemType::AnyHeld(equipment) |
+            ItemType::Wield(equipment) => equipment.name().to_string(),
+        }
+
     }
 
     fn from(line_vec: Vec<String>) -> (ItemType, Vec<String>, Vec<DFGHError>) {
@@ -3887,6 +4111,35 @@ impl Shaping {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+pub enum Color {
+    #[default]
+    None,
+    Custom(String),
+}
+impl Color {
+    fn name(&self) -> String {
+        match self {
+            Self::None => "(none)".to_string(),
+            Self::Custom(color) => {
+                color
+                    .with_boundaries(&[Boundary::Space])
+                    .to_case(Case::UpperSnake)
+                    .to_string()
+            }
+        }
+    }
+
+    fn from(string: String) -> Self {
+        match string.as_str() {
+            string => Self::Custom(string
+                .with_boundaries(&[Boundary::Space])
+                .to_case(Case::UpperSnake)
+                .to_string())
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Statue {
     pub name: String,
     pub state: State,
@@ -4138,6 +4391,7 @@ pub struct Palette {
     name: String,
     file_name: String,
     default_index: u32,
+    max_row: u32,
 }
 impl RAW for Palette {
     fn new() -> Self {
@@ -4145,6 +4399,7 @@ impl RAW for Palette {
             name: "(new)".to_string(),
             file_name: String::new(),
             default_index: 0,
+            max_row: 255,
         }
     }
 
@@ -4185,12 +4440,24 @@ impl Shared {
         self.creature_shared = CreatureShared::new();
     }
 
-    fn update(&mut self, tp_files: &Vec<TilePageFile>, _g_files: &Vec<GraphicsFile>, folder: &PathBuf) {
+    fn update(&mut self, tp_files: &Vec<TilePageFile>, g_files: &mut Vec<GraphicsFile>, folder: &PathBuf) {
         for tp_file in tp_files.iter() {
             for tp in tp_file.tile_pages.iter() {
                 self.tile_page_info.entry(tp.name.clone())
                     .or_insert_with(|| {Self::tile_page_info(tp, folder)}
                 );
+            }
+        }
+        self.creature_shared = CreatureShared::new();
+        for g_file in g_files.iter_mut() {
+            match g_file {
+                GraphicsFile::CreatureFile(_, creatures) => {
+                    for creature in creatures {
+                        creature.creature_shared.update(creature.clone());
+                        self.creature_shared.append(&creature.creature_shared);
+                    }
+                }
+                _ => {/* do nothing */}
             }
         }
     }
@@ -4232,20 +4499,20 @@ impl Debug for TilePageInfo {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatureShared {
     palettes: Vec<Palette>,
-    tile_page_names: Vec<String>,
-    items: Vec<ItemType>,//must be custom item
-    item_groups: Vec<Vec<ItemType>>,
+    colors: Vec<Color>,
+    items: Vec<(ItemType, String)>,
+    item_groups: Vec<(ItemType, Vec<String>)>,
     castes: Vec<Caste>,
     states: Vec<State>,
     conditions: Vec<Condition>,
-    random_part_groups: Vec<Condition>,//must be a random part index condition
-    metals: Vec<Vec<Metal>>,
+    random_part_groups: Vec<(String, u32)>,
+    metals: Vec<Metal>,
 }
 impl CreatureShared {
     fn new() -> Self {
         Self {
             palettes: Vec::new(),
-            tile_page_names: Vec::new(),
+            colors: Vec::new(),
             items: Vec::new(),
             item_groups: Vec::new(),
             castes: Vec::new(),
@@ -4254,5 +4521,135 @@ impl CreatureShared {
             random_part_groups: Vec::new(),
             metals: Vec::new(),
         }
+    }
+
+    fn append(&mut self, creature_shared: &CreatureShared) {
+        self.palettes.append(&mut creature_shared.palettes.clone());
+        self.colors.append(&mut creature_shared.colors.clone());
+        self.items.append(&mut creature_shared.items.clone());
+        self.item_groups.append(&mut creature_shared.item_groups.clone());
+        self.castes.append(&mut creature_shared.castes.clone());
+        self.states.append(&mut creature_shared.states.clone());
+        self.conditions.append(&mut creature_shared.conditions.clone());
+        self.random_part_groups.append(&mut creature_shared.random_part_groups.clone());
+        self.metals.append(&mut creature_shared.metals.clone());
+    }
+
+    fn update(&mut self, creature: Creature) {
+        let palettes = &mut self.palettes;
+        let colors = &mut self.colors;
+        let items = &mut self.items;
+        let item_groups = &mut self.item_groups;
+        let castes = &mut self.castes;
+        let states = &mut self.states;
+        let conditions = &mut self.conditions;
+        let random_part_groups = &mut self.random_part_groups;
+        let metals = &mut self.metals;
+
+        //clear existing vectors
+        palettes.clear();
+        colors.clear();
+        items.clear();
+        item_groups.clear();
+        castes.clear();
+        states.clear();
+        conditions.clear();
+        random_part_groups.clear();
+        metals.clear();
+
+        //loop through creature to gather vectors of relevant categories
+        if let Some(Caste::Custom(caste_name)) = &creature.caste {
+            castes.push(Caste::Custom(caste_name.clone()));
+        }
+        for simple_layer in &creature.simple_layers {
+            if matches!(simple_layer.state, State::Custom(..)) {
+                states.push(simple_layer.state.clone());
+            }
+            if let Some(sub_state) = simple_layer.sub_state.clone() {
+                if matches!(&sub_state, State::Custom(..)) {
+                    states.push(sub_state);
+                }
+            }
+        }
+        for layer_set in &creature.layer_sets {
+            if matches!(layer_set.state, State::Custom(..)) {
+                states.push(layer_set.state.clone());
+            }
+            palettes.append(&mut layer_set.palettes.clone());
+
+            for layer_group in &layer_set.layer_groups {
+                for layer in &layer_group.layers {
+                    for condition in &layer.conditions {
+                        match condition {
+                            Condition::ShutOffIfItemPresent(item_type, c_items) |
+                            Condition::ItemWorn(item_type, c_items) => {
+                                let mut c_items_sort = c_items.clone();
+                                c_items_sort.sort();
+                                c_items_sort.dedup();
+                                for item in &c_items_sort {
+                                    items.push((item_type.clone(), item.clone()));
+                                }
+                                if c_items_sort.len() >= 3 {
+                                    item_groups.push((item_type.clone(), c_items_sort));
+                                }
+                            }
+                            Condition::Caste(caste) => {
+                                if let Caste::Custom(caste_name) = caste {
+                                    castes.push(Caste::Custom(caste_name.clone()));
+                                }
+                            }
+                            Condition::MaterialType(metal) => {
+                                if let Metal::Custom(metal_name) = metal {
+                                    metals.push(Metal::Custom(metal_name.clone()));
+                                }
+                            }
+                            Condition::RandomPartIndex(name, _, range) => {
+                                random_part_groups.push((name.clone(), *range));
+                            }
+                            Condition::TissueMayHaveColor(tissue_colors) => {
+                                colors.append(&mut tissue_colors.clone());
+                            }
+                            Condition::Dye(color) => {
+                                colors.push(color.clone());
+                            }
+                            Condition::Custom(..) => {
+                                conditions.push(condition.clone());
+                            }
+                            _ => {/* Do nothing */}
+                        }
+                    }
+                }
+            }
+        }
+
+        //sort and remove duplicates
+        palettes.sort_by(|a, b| a.name.cmp(&b.name));
+        palettes.dedup_by(|a, b| a.name.eq(&b.name));
+        colors.sort_by(|a, b| a.name().cmp(&b.name()));
+        colors.dedup_by(|a, b| a.name().eq(&b.name()));
+        items.sort_by(|a, b| 
+            format!("{}:{}", a.0.equipment_name(), a.1)
+            .cmp(&format!("{}:{}",b.0.equipment_name(), b.1)));
+        items.dedup_by(|a, b| 
+            format!("{}:{}",a.0.equipment_name(),a.1)
+            .eq(&format!("{}:{}",b.0.equipment_name(),b.1)));
+        item_groups.sort_by(|a, b| 
+            format!("{}:{}", a.0.equipment_name(), a.1.concat())
+            .cmp(&format!("{}:{}", b.0.equipment_name(), b.1.concat())));
+        item_groups.dedup_by(|a, b| 
+            format!("{}:{}", a.0.equipment_name(), a.1.concat())
+            .eq(&format!("{}:{}", b.0.equipment_name(), b.1.concat())));
+        castes.sort_by(|a, b| a.name().cmp(&b.name()));
+        castes.dedup_by(|a, b| a.name().eq(&b.name()));
+        states.sort();
+        states.dedup();
+        conditions.sort_by(|a, b| a.display().cmp(&b.display()));
+        conditions.dedup_by(|a, b| a.display().eq(&b.display()));
+        random_part_groups.sort_by(|a, b| 
+            format!("{}{}", a.0, a.1).cmp(&format!("{}{}", b.0, b.1)));
+        random_part_groups.dedup_by(|a, b| 
+            format!("{}{}", a.0, a.1).eq(&format!("{}{}", b.0, b.1)));
+        metals.sort_by(|a, b| a.name().cmp(&b.name()));
+        metals.dedup_by(|a, b| a.name().eq(&b.name()));
     }
 }
