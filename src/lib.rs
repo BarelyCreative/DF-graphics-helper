@@ -51,33 +51,25 @@ macro_rules! index_err {
 
 macro_rules! graphics_file_export {
     ($prefix:expr, $name:ident, $suffix:expr, $vector:ident, $path:ident) => {
-        let bare_name = $name.clone()
-            .replace($prefix, "")
-            .replace($suffix, "")
-            .with_boundaries(&[Boundary::Space])
-            .to_case(Case::Snake);
+        {
+            let bare_name = $name.clone()
+                .replace(".txt", "")
+                .replace($prefix, "")
+                .replace($suffix, "")
+                .with_boundaries(&[Boundary::Space])
+                .to_case(Case::Snake);
 
-        let gf_name = format!("{0}{1}{2}.txt", $prefix, bare_name, $suffix);
+            let gf_name = format!("{0}{1}{2}.txt", $prefix, bare_name, $suffix);
 
-        let graphics_file = fs::File::create(
-            $path
-            .join("graphics")
-            .join(gf_name.clone()))?;
-        
-        let mut graphics_file_writer = io::LineWriter::new(graphics_file);
-        
-        graphics_file_writer.write_all(
-            format!("{}\n\n[OBJECT:GRAPHICS]\n\n", gf_name.clone())
-            .as_bytes()
-        )?;
+            let graphics_file = fs::File::create(
+                $path
+                .join("graphics")
+                .join(gf_name.clone()))?;
+            
+            let graphics_file_writer = io::LineWriter::new(graphics_file);
 
-        for elem in $vector {
-            graphics_file_writer.write_all(elem.display().as_bytes())?;
+            graphics_file_writer
         }
-        
-        graphics_file_writer.flush()?;
-
-        return Ok(())  
     };
 }
 
@@ -362,9 +354,11 @@ impl RAW for TilePageFile {
     fn display(&self) -> String {
         let mut output = format!(
             "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-            self.name
+            self.name.clone()
             .with_boundaries(&[Boundary::Space])
             .to_case(Case::Snake)
+            .replace("tile_page_", "")
+            .replace(".txt", "")
         );
     
         for tile_page in self.tile_pages.iter() {
@@ -420,13 +414,7 @@ impl TilePageFile {
         
         let mut tile_page_writer = io::LineWriter::new(tile_page_file);
         
-        tile_page_writer.write_all(format!(
-            "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-            self.name
-            .with_boundaries(&[Boundary::Space])
-            .to_case(Case::Snake)
-            ).as_bytes()
-        )?;
+        tile_page_writer.write_all(self.display().as_bytes())?;
 
         for tile_page in self.tile_pages.iter() {
             tile_page_writer.write_all(tile_page.display()
@@ -796,6 +784,7 @@ impl RAW for GraphicsFile {
                     .to_case(Case::Snake)
                     .replace("graphics_", "")
                     .replace("creatures_", "")
+                    .replace(".txt", "")
                 );
 
                 for creature in creatures {
@@ -803,13 +792,14 @@ impl RAW for GraphicsFile {
                 }
             },
             GraphicsFile::StatueCreatureFile(file_name, statues) => {
-                out = format!("creatures_{}_statue\n\n[OBJECT:GRAPHICS]\n\n",
+                out = format!("graphics_creatures_{}_statue\n\n[OBJECT:GRAPHICS]\n\n",
                     file_name
                     .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                     .to_case(Case::Snake)
                     .replace("graphics_", "")
                     .replace("creatures_", "")
                     .replace("_statue", "")
+                    .replace(".txt", "")
                 );
 
                 for statue in statues {
@@ -822,6 +812,7 @@ impl RAW for GraphicsFile {
                     .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                     .to_case(Case::Snake)
                     .replace("graphics_", "")
+                    .replace(".txt", "")
                 );
 
                 for plant in plants {
@@ -834,6 +825,7 @@ impl RAW for GraphicsFile {
                     .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                     .to_case(Case::Snake)
                     .replace("graphics_", "")
+                    .replace(".txt", "")
                 );
 
                 for tile_graphic in tile_graphics {
@@ -843,30 +835,6 @@ impl RAW for GraphicsFile {
         }
 
         out
-        // let creature_file = fs::File::create(
-        //     path
-        //     .join("graphics")
-        //     .join(format!("graphics_creatures_{}.txt",
-        //     self.name.with_boundaries(&[Boundary::Space])
-        //     .to_case(Case::Snake)))
-        // )?;
-
-        // let mut creature_writer = io::LineWriter::new(creature_file);
-        
-        // creature_writer.write_all(format!(
-        //     "graphics_creatures_{}\n\n[OBJECT:GRAPHICS]\n\n",
-        //     self.name.with_boundaries(&[Boundary::Space])
-        //     .to_case(Case::Snake))
-        //     .as_bytes()
-        // )?;
-
-        // for creature in self.creatures.iter() {
-        //     creature_writer.write_all(creature.display().as_bytes())?;
-        // }
-        
-        // creature_writer.flush()?;
-
-        // Ok(())
     }
 }
 impl GraphicsFile {
@@ -883,17 +851,43 @@ impl GraphicsFile {
     fn export(&self, path: &PathBuf) -> Result<()> {
         match self {
             GraphicsFile::DefaultFile => return Ok(()),
-            GraphicsFile::CreatureFile(name, creatures) => {
-                graphics_file_export!("graphics_creatures_", name, "", creatures, path);
+            GraphicsFile::CreatureFile(name, _) => {
+                let mut graphics_file_writer = graphics_file_export!("graphics_creatures_", name, "", creatures, path);
+                
+                graphics_file_writer.write_all(self.display().as_bytes())?;
+                
+                graphics_file_writer.flush()?;
+
+                return Ok(())
             },
-            GraphicsFile::StatueCreatureFile(name, statues) => {
-                graphics_file_export!("graphics_creatures_", name, "_statue", statues, path);
+            GraphicsFile::StatueCreatureFile(name, _) => {
+                let mut graphics_file_writer = graphics_file_export!("graphics_creatures_", name, "_statue", statues, path);
+                
+                graphics_file_writer.write_all(self.display().as_bytes())?;
+                
+                graphics_file_writer.flush()?;
+
+                return Ok(())
             },
-            GraphicsFile::PlantFile(name, plants) => {
-                graphics_file_export!("graphics_", name, "", plants, path);
+            GraphicsFile::PlantFile(_name, _) => {
+                // let mut graphics_file_writer = graphics_file_export!("graphics_", name, "", plants, path);
+                
+                // graphics_file_writer.write_all(self.display().as_bytes())?;
+                
+                // graphics_file_writer.flush()?;
+
+                return Ok(())
+                //todo plant import/export
             },
-            GraphicsFile::TileGraphicsFile(name, tile_graphics) => {
-                graphics_file_export!("graphics_", name, "", tile_graphics, path);
+            GraphicsFile::TileGraphicsFile(_name, _) => {
+                // let mut graphics_file_writer = graphics_file_export!("graphics_", name, "", tile_graphics, path);
+                
+                // graphics_file_writer.write_all(self.display().as_bytes())?;
+                
+                // graphics_file_writer.flush()?;
+
+                return Ok(())
+                //todo tile graphics import/export
             },
         }
     }
@@ -1368,7 +1362,7 @@ impl RAW for LayerSet {
     fn display(&self) -> String {
         let mut out = String::new();
 
-        out.push_str(&format!("\t[LAYER_SET:{}]\n\n", self.state.name()));
+        out.push_str(&format!("\n\t[LAYER_SET:{}]\n", self.state.name()));
 
         for palette in &self.palettes {
             out.push_str(&palette.display());
@@ -1382,40 +1376,56 @@ impl RAW for LayerSet {
     }
 }
 impl Menu for LayerSet {
-    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
         ui.separator();
 
-        // match self {
-        //     LayerSet::Layered(state, layer_groups) => {
-        //         egui::ComboBox::from_label("State")
-        //             .selected_text(state.name())
-        //             .show_ui(ui, |ui| {
-        //             for s in State::iterator() {
-        //                 ui.selectable_value(state, s.clone(), s.name());
-        //             }
-        //             ui.selectable_value(state, State::Custom(String::new()), "Custom");
-        //         });
-        //         if let State::Custom(s) = state {
-        //             ui.text_edit_singleline(s);
-        //         }
-        //         ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
+        egui::ComboBox::from_label("State")
+            .selected_text(self.state.name())
+            .show_ui(ui, |ui| {
+            for s in State::iterator() {
+                ui.selectable_value(&mut self.state, s.clone(), s.name());
+            }
+            for s in &shared.creature_shared.states {
+                ui.selectable_value(&mut self.state, s.clone(), s.name());
+            }
+            ui.selectable_value(&mut self.state, State::Custom(String::new()), "Custom");
+        });
+        if let State::Custom(s) = &mut self.state {
+            ui.text_edit_singleline(s);
+        }
+        ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
 
-        //         ui.add_space(PADDING);
-        //         if ui.button("Add layer group").clicked() {
-        //             layer_groups.push(LayerGroup::new());
-        //         }
-        //     },
-        //     LayerSet::Empty => {
-        //         egui::ComboBox::from_label("Graphics Type")
-        //             .selected_text("(none)")
-        //             .show_ui(ui, |ui| {
-        //             ui.selectable_value(self, LayerSet::Layered(State::Default, Vec::new()), "Layered");
-        //             ui.selectable_value(self, LayerSet::Simple(vec![SimpleLayer::new()]), "Simple");
-        //             // ui.selectable_value(self, LayerSet::Statue(vec![SimpleLayer::new()]), "Statue");
-        //         });
-        //     }
-        //     _ => {},
-        // }
+        ui.add_space(PADDING);
+        if ui.button("New Layer Group").clicked() {
+            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new()});
+        }
+
+        ui.add_space(PADDING);
+        if ui.button("New Palette").clicked() {
+            self.palettes.push(Palette {name: "(new)".to_string(), file_name: String::new(), default_index: 0, max_row: 100});
+        }
+
+        let mut delete = None;
+        
+        egui::ScrollArea::vertical()
+            .id_source("Palette scroll")
+            .show(ui, |ui| {
+            for (i_palette, palette) in self.palettes.iter_mut().enumerate() {
+                ui.push_id(i_palette, |ui| {
+                    ui.group(|ui| {
+                        palette.menu(ui, shared);
+                        ui.add_space(PADDING);
+                        if ui.button("Remove Palette").clicked() {
+                            delete = Some(i_palette);
+                        }
+                    });
+                });
+            }
+        });
+
+        if let Some(i_palette) = delete {
+            self.palettes.remove(i_palette);//checked
+        }
     }
 }
 impl LayerSet {
@@ -4141,7 +4151,7 @@ impl Color {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Statue {
-    pub name: String,
+    pub creature_name: String,
     pub state: State,
     pub tile_name: String,
     pub coords: [u32; 2],
@@ -4151,7 +4161,7 @@ pub struct Statue {
 impl RAW for Statue {
     fn new() -> Self {
         Self {
-            name: "(new)".to_string(),
+            creature_name: "(new)".to_string(),
             state: State::Default,
             tile_name: String::new(),
             coords: [0, 0],
@@ -4171,14 +4181,14 @@ impl RAW for Statue {
             match line_vec[0].as_str() {
                 "STATUE_CREATURE_GRAPHICS" => {
                     if len >= 2 {
-                        statue.name = line_vec[1].clone();
+                        statue.creature_name = line_vec[1].clone();
                     } else {
                         index_err!(i_line, buffer_len, len, 2, errors);
                     }
                 },
                 "STATUE_CREATURE_CASTE_GRAPHICS" => {
                     if len >= 3 {
-                        statue.name = line_vec[1].clone();
+                        statue.creature_name = line_vec[1].clone();
                         statue.caste = Some(Caste::from(line_vec[2].clone()));
                     } else {
                         index_err!(i_line, buffer_len, len, 3, errors);
@@ -4218,8 +4228,26 @@ impl RAW for Statue {
     }
 
     fn display(&self) -> String {
+        let mut out;
         let [x2, y2] = self.large_coords.unwrap_or([0, 1]);
-        format!(
+
+        if let Some(caste) = &self.caste {
+            out = format!("[STATUE_CREATURE_CASTE_GRAPHICS:{}:{}]\n",
+                self.creature_name
+                .with_boundaries(&[Boundary::Space])
+                .to_case(Case::UpperSnake)
+                .to_string(),
+                caste.name()
+            );
+        } else {
+            out = format!("\n[STATUE_CREATURE_GRAPHICS:{}]\n",
+                self.creature_name
+                .with_boundaries(&[Boundary::Space])
+                .to_case(Case::UpperSnake)
+                .to_string()
+            );
+        }
+        out.push_str(format!(
             "\t[{}:{}:{}:{}:{}:{}]\n",
             self.state.name(),
             self.tile_name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
@@ -4228,7 +4256,13 @@ impl RAW for Statue {
             self.coords[1],
             self.coords[0] + x2,
             self.coords[1] + y2,
-        )
+        ).as_str());
+
+        if self.caste.is_none() {
+            out.push('\n');
+        }
+
+        out
     }
 }
 impl Menu for Statue {
@@ -4244,7 +4278,10 @@ impl Menu for Statue {
             for s in State::iterator() {
                 ui.selectable_value(state,  s.clone(), s.name());
             }
-            ui.selectable_value(state, State::Custom(String::new()), "Custom");
+            for s in &shared.creature_shared.states {
+                ui.selectable_value(state,  s.clone(), s.name());
+            }
+            ui.selectable_value(state, State::Custom(String::new()), "(custom)");
         });
         if let State::Custom(cust_state) = state {
             ui.label("Custom state:");
@@ -4253,18 +4290,31 @@ impl Menu for Statue {
         }
         ui.label("Note: only DEFAULT is known to work v50.05");
 
+        let mut caste_bool = caste_opt.is_some();
+
+        ui.checkbox(&mut caste_bool, "Caste?");
+
         if let Some(caste) = caste_opt {
-            egui::ComboBox::from_label("Caste")
+            egui::ComboBox::from_label("")
                 .selected_text(caste.name())
                 .show_ui(ui, |ui| {
                 ui.selectable_value(caste, Caste::Female, "FEMALE");
                 ui.selectable_value(caste, Caste::Male, "MALE");
+                for c in &shared.creature_shared.castes {
+                    ui.selectable_value(caste, c.clone(), c.name());
+                }
                 ui.selectable_value(caste, Caste::Custom(String::new()), "(custom)");
             });
             if let Caste::Custom(cust_caste) = caste {
                 ui.label("Custom caste:");
                 ui.text_edit_singleline(cust_caste);
             }
+        }
+
+        if caste_bool {
+            caste_opt.get_or_insert(Caste::Female);
+        } else {
+            caste_opt.take();
         }
 
         ui.add_space(PADDING);
@@ -4411,13 +4461,40 @@ impl RAW for Palette {
 
     fn display(&self) -> String {
         format!(
-            "\t\t[LS_PALETTE:{}]\n
-            \t\t\t[LS_PALETTE_FILE:{}]\n
+            "\t\t[LS_PALETTE:{}]
+            \t\t\t[LS_PALETTE_FILE:{}]
             \t\t\t[LS_PALETTE_DEFAULT:{}]\n\n",
-            self.name.clone(),
-            self.file_name.clone(),
+            self.name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                .to_case(Case::UpperSnake),
+            self.file_name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                .to_case(Case::UpperSnake),
             self.default_index
         )
+    }
+}
+impl Menu for Palette {
+    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
+        ui.horizontal(|ui| {
+            ui.label("Palette name:");
+            ui.text_edit_singleline(&mut self.name);
+        });
+        ui.horizontal(|ui| {
+            ui.label("File name:");
+            ui.text_edit_singleline(&mut self.file_name);
+        });
+
+        ui.add_space(PADDING);
+
+        ui.label("Palette Rows:");
+        ui.horizontal(|ui| {
+            ui.add(egui::Slider::new(&mut self.default_index, 0..=self.max_row).prefix("Default Row: "));
+            ui.add(egui::Slider::new(&mut self.max_row, 0..=255).prefix("Max Row: "));
+        });
+
+        ui.add_space(PADDING);
+        
+        ui.label("Preview:");
+        ui.label(self.display());
     }
 }
 

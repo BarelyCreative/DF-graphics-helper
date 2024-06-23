@@ -1,0 +1,192 @@
+scratch
+
+-rpi CLOTH_*WEAR (HEAD, UPPERBODY, LOWERBODY, ARM, HAND, LEG, FOOT)
+    0       main classy wear
+    1       scraps1
+    2       scraps2
+    3       tatters
+-rpi METAL_*WEAR (HEAD, UPPERBODY, LOWERBODY, ARM, HAND, LEG, FOOT)
+    0       main classy based on vanilla
+    1       scraps1
+    2       scraps2
+    3       cans
+
+fiddler
+-palette FIDDLER:
+    0       mred & brown
+    1       mred & yellow
+    2       mred & orange
+    3       mred & white
+    4       dred & brown
+    5       dred & lred
+    6       dred & orange
+    7       dred & yellow
+    8       lred & dred
+    9       lred & yellow
+    10      lred & white
+    11      blue & mred
+    12      yellow-brown & brown
+    13      brown & yellow
+    14      brown & white
+    15      brown & black/grey
+    16-22   syndrome
+-rpi FIDDLER_MAIN:
+    0       solid
+    1       mottled
+    2       spot1
+    3       spot2
+    4       claw spot
+    5       claw solid
+    6       stripe1
+    7       spiky
+-rpi FIDDLER_EYE:
+    0       round
+    1       squint
+    2       eyebrows
+    3       tall
+
+hermit
+-palette HERMIT:
+    0       orange & white
+    1       orange & yellow
+    2       orange & yellow-brown
+    3       orange & brown
+    4       dred & brown
+    5       dred & yellow
+    6       dred & white
+    7       mred & brown
+    8       mred & yellow
+    9       mred & orange
+    10      mred & white
+    11      yellow-brown & brown
+    12      yellow-brown & white
+    13      purple & black
+    14      purple & blue
+    15      purple & yellow
+    16      blue & purple
+    17      blue & lblue
+    18      blue & white
+    19      brown & white
+    20      brown & black/grey
+    21      brown & yellow
+    22      brown & purple
+    23-29   syndrome
+-palette HERMIT_SHELL:
+    0       tan & yellow-browm
+    1       tan & red-brown
+    2       tan & orange
+    3       eggshell & yellow-brown
+    4       eggshell & yellow
+    5       eggshell & orange
+    6       eggshell & black
+    7       brown & white
+    8       orange & brown
+    9       white & blue
+-rpi HERMIT_MAIN:
+    0       solid
+    2       spot
+    4       claw spot
+    5       claw solid
+-rpi HERMIT_SHELL:
+    0       spiral
+    1       spiral stripe
+    2       spiral spot
+    3       conch
+    4       conch stripe
+    5       conch spike highlight
+    6       snail
+    7       clam
+    8       clam stripe
+    9       clam thin stripe
+    10      clam spot
+
+sand crab
+-palette SAND
+    0       yellow & white
+    1       lred & white
+    2       mblue & yellow
+    3       grey-blue & white
+    4       white & yellow (legs)
+    5       red-brown & yellow
+    6       yellow-brown & purple
+    7       brown & white
+    8       green & white
+    9       white & red-violet
+    10      eggshell & dbrown/black
+    11      yellow & clear & white
+    12-18   syndrome
+-rpi SAND_MAIN
+    0       solid
+    1       claws
+    2       claws & belly
+    3       mottled & claws
+    4       joints
+-rpi SAND_EYE:
+    0       round
+    1       squint
+    2       eyebrows
+    3       tall
+
+lobster
+-palette LOBSTER
+    0       dred & lred
+    1       dred & orange
+    2       dred & yellow
+    3       dred & brown
+    4       mred & orange
+    5       mred & yellow
+    6       mred & white
+    7       mred & brown
+    8       lred & yellow
+    9       lred & brown
+    10      red-brown & tan
+    11      brown & dgreen
+    12      dblue & lblue
+    13      dblue & yellow
+    14      dblue & black
+    15      dblue & white
+    16      lblue & orange
+    17      lblue & yellow
+    18      lblue & black
+    19      lblue & dblue
+    20      mblue & red-violet
+    21      grey-blue & white
+    22      blue-purple & black
+    23      red-violet & tan
+    24      red-violet & blue
+    25-31   syndrome            
+-rpi LOBSTER_MAIN
+    0       solid
+    1       spot1
+    2       spot2
+    3       mottled
+    4       tail
+
+shrimp
+-palette SHRIMP     include transparency on light colors
+    0       pink & dred
+    1       mred & lred
+    2       mred & clear
+    3       dred & mred
+    4       pink & tan
+    5       pink & yellow-brown
+    6       pink & clear
+    7       yellow-brown & dbrown
+    8       yellow-brown & clear
+    9       lorange & dorange
+    10      blue-grey & pink
+    11      grey & mred
+    12      blue-grey & dgrey
+    13      tan & pink
+    14      green-blue & white
+    15      green-blue & lblue
+    16      tan & mblue
+    17      organs & clear (rpi organs only)
+    18-24   syndrome
+-rpi SHRIMP_MAIN
+    0       solid
+    1       stripe thin
+    2       stripe thick
+    3       body segment
+    4       legs & tail
+    5       organs & clear

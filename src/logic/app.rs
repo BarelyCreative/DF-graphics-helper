@@ -1,4 +1,4 @@
-use egui::{Context, Key, KeyboardShortcut, Modifiers, Sense, Stroke, TextureHandle, TextureOptions, Ui};
+use egui::{Context, Key, /*KeyboardShortcut,*/ Modifiers, Sense, Stroke, TextureHandle, TextureOptions, Ui};
 use egui_plot::{GridInput, GridMark, Plot, PlotImage, PlotPoint, Polygon};
 
 use rfd;
@@ -93,6 +93,24 @@ impl From<Condition> for ContextData {
         ContextData::Condition(value)
     }
 }
+impl From<Statue> for ContextData {
+    fn from(value: Statue) -> Self {
+        let _x = value;
+        todo!()
+    }
+}
+impl From<Plant> for ContextData {
+    fn from(value: Plant) -> Self {
+        let _x = value;
+        todo!()
+    }
+}
+impl From<TileGraphic> for ContextData {
+    fn from(value: TileGraphic) -> Self {
+        let _x = value;
+        todo!()
+    }
+}
 impl From<MainWindow> for ContextData {
     fn from(main_window: MainWindow) -> Self {
         match main_window {
@@ -112,24 +130,6 @@ impl From<MainWindow> for ContextData {
             MainWindow::PlantMenu => ContextData::Plant(Plant::new()),
             MainWindow::TileGraphicMenu => ContextData::TileGraphic(TileGraphic::new()),
         }
-    }
-}
-impl From<Statue> for ContextData {
-    fn from(value: Statue) -> Self {
-        let _x = value;
-        todo!()
-    }
-}
-impl From<Plant> for ContextData {
-    fn from(value: Plant) -> Self {
-        let _x = value;
-        todo!()
-    }
-}
-impl From<TileGraphic> for ContextData {
-    fn from(value: TileGraphic) -> Self {
-        let _x = value;
-        todo!()
     }
 }
 
@@ -215,6 +215,7 @@ pub struct DFGraphicsHelper {
     cursor_coords: Option<[u32; 2]>,
     action: Action,
     copied: ContextData,
+    selected: ContextData,
     undo_buffer: Vec<(Vec<TilePageFile>, Vec<GraphicsFile>, GraphicsIndices)>,
     redo_buffer: Vec<(Vec<TilePageFile>, Vec<GraphicsFile>, GraphicsIndices)>,
     pub errors: Vec<DFGHError>,
@@ -234,6 +235,7 @@ impl DFGraphicsHelper {
             cursor_coords: None,
             action: Action::default(),
             copied: ContextData::default(),
+            selected: ContextData::default(),
             undo_buffer: Vec::with_capacity(1000),
             redo_buffer: Vec::with_capacity(100),
             errors: Vec::new(),
@@ -870,6 +872,7 @@ impl DFGraphicsHelper {
                     .sense(Sense::click()));
                 if tile_page_file_response.clicked() {
                     self.indices = [i_tile_page_file, 0, 0, 0, 0, 0, 0, 0].into();
+                    self.selected = ContextData::from(tile_page_file.clone());
                     self.main_window = MainWindow::TilePageFileMenu;
                     self.action = Action::Zoom(PreviewZoom::All);
                 }
@@ -887,6 +890,7 @@ impl DFGraphicsHelper {
                         .sense(Sense::click()));
                     if tile_page_response.clicked() {
                         self.indices = [i_tile_page_file, i_tile_page, 0, 0, 0, 0, 0, 0].into();
+                        self.selected = ContextData::from(tile_page.clone());
                         self.main_window = MainWindow::TilePageMenu;
                         self.action = Action::Zoom(PreviewZoom::All);
                     }
@@ -923,6 +927,7 @@ impl DFGraphicsHelper {
                     .sense(Sense::click()));
                 if graphics_file_response.clicked() {
                     self.indices = [0, 0, i_file, 0, 0, 0, 0, 0].into();
+                    self.selected = ContextData::GraphicsFile(GraphicsFile::new());
                     self.main_window = MainWindow::GraphicsFileMenu;
                     self.action = Action::Zoom(PreviewZoom::Selected);
                 }
@@ -951,6 +956,7 @@ impl DFGraphicsHelper {
                                     .sense(Sense::click()));
                                 if creature_response.clicked() {
                                     self.indices = [0, 0, i_file, i_creature, 0, 0, 0, 0].into();
+                                    self.selected = ContextData::Creature(Creature::new());
                                     self.main_window = MainWindow::CreatureMenu;
                                     self.action = Action::Zoom(PreviewZoom::Selected);
                                 }
@@ -968,12 +974,13 @@ impl DFGraphicsHelper {
                                         .sense(Sense::click())
                                     );
                                     if simple_layer_response.clicked() {
-                                        self.indices = [0, 0, i_file, i_creature, 0, 0, 0, i_simple_layer].into();
+                                        self.indices = [0, 0, i_file, i_creature, 0, 0, i_simple_layer, 0].into();
+                                        self.selected = ContextData::SimpleLayer(SimpleLayer::new());
                                         self.main_window = MainWindow::SimpleLayerMenu;
                                         self.action = Action::Zoom(PreviewZoom::Selected);
                                     }
                                     simple_layer_response.context_menu(|ui| {
-                                        self.indices = [0, 0, i_file, i_creature, 0, 0, 0, i_simple_layer].into();
+                                        self.indices = [0, 0, i_file, i_creature, 0, 0, i_simple_layer, 0].into();
                                         self.action = Self::context(ui, ContextData::from(simple_layer.clone()));
                                     });
                                 }
@@ -993,6 +1000,7 @@ impl DFGraphicsHelper {
                                             .sense(Sense::click()));
                                         if layer_set_response.clicked() {
                                             self.indices = [0, 0, i_file, i_creature, i_layer_set, 0, 0, 0].into();
+                                            self.selected = ContextData::LayerSet(LayerSet::new());
                                             self.main_window = MainWindow::LayerSetMenu;
                                             self.action = Action::Zoom(PreviewZoom::Selected);
                                         }
@@ -1018,6 +1026,7 @@ impl DFGraphicsHelper {
                                                     .sense(Sense::click()));
                                                 if layer_group_response.clicked() {
                                                     self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, 0, 0].into();
+                                                    self.selected = ContextData::LayerGroup(LayerGroup::new());
                                                     self.main_window = MainWindow::LayerGroupMenu;
                                                     self.action = Action::Zoom(PreviewZoom::Selected);
                                                 }
@@ -1042,6 +1051,7 @@ impl DFGraphicsHelper {
                                                                 .sense(Sense::click()));
                                                             if layer_response.clicked() {
                                                                 self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, 0].into();
+                                                                self.selected = ContextData::Layer(Layer::new());
                                                                 self.main_window = MainWindow::LayerMenu;
                                                                 self.action = Action::Zoom(PreviewZoom::Selected);
                                                             }
@@ -1060,6 +1070,7 @@ impl DFGraphicsHelper {
                                                                 .sense(Sense::click()));
                                                             if condition_response.clicked() {
                                                                 self.indices = [0, 0, i_file, i_creature, i_layer_set, i_layer_group, i_layer, i_condition].into();
+                                                                self.selected = ContextData::Condition(Condition::new());
                                                                 self.main_window = MainWindow::ConditionMenu;
                                                                 self.action = Action::Zoom(PreviewZoom::Selected);
                                                             }
@@ -1081,12 +1092,13 @@ impl DFGraphicsHelper {
                         for (i_statue, statue) in statues.iter_mut().enumerate() {
                             let statue_response = ui.add(egui::Label::new(
                                 format!("{} {}",
-                                statue.name,
+                                statue.creature_name,
                                 statue.caste.clone().map_or("".to_string(), |c| c.name())))
                                 .sense(Sense::click())
                             );
                             if statue_response.clicked() {
                                 self.indices = [0, 0, i_file, i_statue, 0, 0, 0, 0].into();
+                                self.selected = ContextData::Statue(Statue::new());
                                 self.main_window = MainWindow::StatueMenu;
                                 self.action = Action::Zoom(PreviewZoom::Selected);
                             }
@@ -1104,6 +1116,7 @@ impl DFGraphicsHelper {
                             );
                             if plant_response.clicked() {
                                 self.indices = [0, 0, i_file, i_plant, 0, 0, 0, 0].into();
+                                self.selected = ContextData::Plant(Plant::new());
                                 self.main_window = MainWindow::PlantMenu;
                                 self.action = Action::Zoom(PreviewZoom::Selected);
                             }
@@ -1121,6 +1134,7 @@ impl DFGraphicsHelper {
                             );
                             if tile_graphics_response.clicked() {
                                 self.indices = [0, 0, i_file, i_tile_graphic, 0, 0, 0, 0].into();
+                                self.selected = ContextData::TileGraphic(TileGraphic::new());
                                 self.main_window = MainWindow::TileGraphicMenu;
                                 self.action = Action::Zoom(PreviewZoom::Selected);
                             }
@@ -1431,7 +1445,7 @@ impl DFGraphicsHelper {
                 self.selected_region = [None, None];
                 
                 return Ok(())
-            },
+            }
             GraphicsFile::StatueCreatureFile(_, statues) => {
                 ui.horizontal(|ui| {
                     ui.label("Statue Menu");
@@ -1451,7 +1465,7 @@ impl DFGraphicsHelper {
                 self.selected_region = [None, None];
                 
                 return Ok(())
-            },
+            }
             GraphicsFile::PlantFile(_, plants) => {
                 ui.horizontal(|ui| {
                     ui.label("Plant Menu");
@@ -1471,7 +1485,7 @@ impl DFGraphicsHelper {
                 self.selected_region = [None, None];
                 
                 return Ok(())
-            },
+            }
             GraphicsFile::TileGraphicsFile(_, tile_graphics) => {
                 ui.horizontal(|ui| {
                     ui.label("Tile Graphic Menu");
@@ -1491,7 +1505,7 @@ impl DFGraphicsHelper {
                 self.selected_region = [None, None];
                 
                 return Ok(())
-            },
+            }
         }
     }
 
@@ -2119,48 +2133,80 @@ impl eframe::App for DFGraphicsHelper {
 
         //Hotkey Handler
         if !ctx.wants_keyboard_input() {
-            let redo = &KeyboardShortcut {
-                modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
-                logical_key: Key::Z
-            };
-            if ctx.input_mut(|i| i.consume_shortcut(redo)) {
-                self.action = Action::Redo;
-            }
-            let undo = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::Z,
-            };
-            if ctx.input_mut(|i| i.consume_shortcut(undo)) {
-                self.action = Action::Undo;
-            }
-            let import = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::I
-            };
-            if ctx.input_mut(|i| i.consume_shortcut(import)) {
-                self.action = Action::Import;
-            }
-            let open = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::O
-            };
-            if ctx.input_mut(|i| i.consume_shortcut(open)) {
-                self.action = Action::Import;
-            }
-            let export = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::E
-            };
-            if ctx.input_mut(|i| i.consume_shortcut(export)) {
-                self.action = Action::Export;
-            }
-            let debug = &KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::P
-            };
-            if ctx.input_mut(|i| i.consume_shortcut(debug)) {
-                self.action = Action::Debug;
-            }
+            // let redo = &KeyboardShortcut {
+            //     modifiers: Modifiers::SHIFT.plus(Modifiers::COMMAND),
+            //     logical_key: Key::Z
+            // };
+            // let undo = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::Z,
+            // };
+            // let import = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::I
+            // };
+            // let open = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::O
+            // };
+            // let export = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::E
+            // };
+            // let debug = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::P
+            // };
+            // let cut = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::X
+            // };
+            // let copy = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::C
+            // };
+            // let paste = &KeyboardShortcut {
+            //     modifiers: Modifiers::COMMAND,
+            //     logical_key: Key::V
+            // };
+            
+            // if ctx.input(|m| m.modifiers).matches_logically(Modifiers::CTRL) {
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)) {
+                    self.action = Action::Redo;
+                    dbg!("Redo");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Z)) {
+                    self.action = Action::Undo;
+                    dbg!("Undo");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::I)) {
+                    self.action = Action::Import;
+                    dbg!("Import");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::O)) {
+                    self.action = Action::Import;
+                    dbg!("Import");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::E)) {
+                    self.action = Action::Export;
+                    dbg!("Export");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::X)) {
+                    self.action = Action::Cut(self.selected.clone());
+                    dbg!("Cut");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::C)) {
+                    self.action = Action::Copy(self.selected.clone());
+                    dbg!("Copy");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::V)) {
+                    self.action = Action::Paste;
+                    dbg!("Paste");
+                }
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Q)) {
+                    self.action = Action::Debug;
+                }
+            // }
         }
 
         //Action handler
@@ -2169,41 +2215,41 @@ impl eframe::App for DFGraphicsHelper {
             match &self.action { //respond to the context menus
                 Action::Delete(selected) => {
                     result = self.delete(selected.clone());
-                },
+                }
                 Action::Copy(selected) => {
                     self.copy(selected.clone());
-                },
+                }
                 Action::Cut(selected) => {
                     result = self.cut(selected.clone());
-                },
+                }
                 Action::Paste => {
                     result = self.paste();
-                },
+                }
                 Action::Duplicate(selected) => {
                     self.copy(selected.clone());
                     result = self.paste();
-                },
+                }
                 Action::Insert(kind) => {
                     result = self.insert(kind.clone());
-                },
+                }
                 Action::Undo => {
                     self.undo();
-                },
+                }
                 Action::Redo => {
                     self.redo();
-                },
+                }
                 Action::Import => {
                     self.import();
-                },
+                }
                 Action::Export => {
                     self.export();
-                },
+                }
                 Action::Update => {
                     self.update();
-                },
+                }
                 Action::Zoom(zoom) => {
                     self.zoom(zoom.clone());
-                },
+                }
                 Action::Debug => {
                     self.debug();
                 }
