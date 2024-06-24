@@ -145,9 +145,9 @@ impl Graphics {
     /// 
     /// ```
     /// # use df_texture_helper::*;
-    /// let mut folder = std::path::PathBuf::from("C:\\Users\\Riley\\Desktop\\DwarfFortress\\Mod Dev Files\\DF Graphics Helper\\df_graphics_helper");
+    /// let mut folder = std::path::PathBuf::from(std::path::Path::new("./debug_RAWs/Mod"));
     ///
-    /// Graphics::import(&mut folder);
+    /// assert!(Graphics::import(&mut folder).2.is_empty());
     /// ```
     pub fn import(folder: &mut PathBuf) -> (Graphics, PathBuf, Vec<DFGHError>) {
         let mut tile_page_files = Vec::new();
@@ -171,6 +171,8 @@ impl Graphics {
                 errors
             );
         }
+
+        
 
         //read graphics directory from mod folder.
         match fs::read_dir(&folder.join("graphics")) {

@@ -2,9 +2,12 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "rust: cargo run",
-			"type": "cargo",
-			"command": "run",
+			"label": "Cargo Run",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"run"
+			],
 			"problemMatcher": [
 				"$rustc"
 			],
@@ -22,21 +25,38 @@
 			}
 		},
 		{
-			"label": "rust: cargo test",
-			"type": "cargo",
-			"command": "test",
-			"args": ["--doc", "--no-fail-fast"],
+			"label": "Cargo Test",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"test",
+				"--doc",
+				"--no-fail-fast"
+			],
 			"problemMatcher": [
 				"$rustc"
 			],
-			"group": "test"
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			},
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"showReuseMessage": true,
+				"clear": true
+			}
 		},
 		{
-			"label": "rust: doctest",
-			"type": "shell",	
+			"label": "Doctest",
+			"type": "process",	
 			"command": "rustdoc",
-			"args": ["src/lib.rs"],
-			"group": "test"
+			"args": [
+				"src/lib.rs"
+			],
+			"group": "test",
 		}
 	]
 }
