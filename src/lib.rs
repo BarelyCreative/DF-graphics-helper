@@ -417,11 +417,6 @@ impl TilePageFile {
         let mut tile_page_writer = io::LineWriter::new(tile_page_file);
         
         tile_page_writer.write_all(self.display().as_bytes())?;
-
-        for tile_page in self.tile_pages.iter() {
-            tile_page_writer.write_all(tile_page.display()
-                .as_bytes())?;
-        }
         
         tile_page_writer.flush()?;
 
