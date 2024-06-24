@@ -161,8 +161,7 @@ impl Graphics {
         } else if folder.ends_with("images") && folder.parent().get_or_insert(Path::new("")).ends_with("graphics") {
             folder.pop();
             folder.pop();
-        } else if !folder.read_dir().expect("should always read dir sucessfully")
-            .any(|f| f.is_ok_and(|f| f.path().ends_with("graphics"))) {
+        } else if !folder.read_dir().is_ok_and(|mut f| f.any(|f| f.is_ok_and(|f| f.path().ends_with("graphics")))) {
             //if no graphics directory in mod folder throw error.
             errors.push(DFGHError::NoGraphicsDirectory(folder.clone()));
             return (

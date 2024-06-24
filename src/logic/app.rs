@@ -2171,7 +2171,7 @@ impl eframe::App for DFGraphicsHelper {
             // };
             
             // if ctx.input(|m| m.modifiers).matches_logically(Modifiers::CTRL) {
-                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)) {
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z)) {
                     self.action = Action::Redo;
                     dbg!("Redo");
                 }

@@ -39,7 +39,7 @@ pub enum DFGHError {
     #[error("File name includes unsupported characters(non UTF-8):\n\t{0}")]
     UnsupportedFileName(std::path::PathBuf),
 
-    #[error("No valid directory found at:\n\t{0}\n\nFormat is mod_name (numeric version)/graphics/")]
+    #[error("No valid directory found at:\n\t\"{0}\"\n\nFormat is \"mod_name (numeric version)/graphics/\"")]
     NoGraphicsDirectory(std::path::PathBuf),
 
     #[error("Should not be displayed. Error String: {3}")]
