@@ -894,7 +894,7 @@ pub struct Creature {
     pub name: String,
     pub caste: Option<Caste>,
     pub simple_layers: Vec<SimpleLayer>,
-    pub layer_sets: Vec<LayerSet>, 
+    pub layer_sets: Vec<LayerSet>,
     pub creature_shared: CreatureShared,
 }
 impl RAW for Creature {
@@ -1016,27 +1016,118 @@ impl RAW for Creature {
     }
 }
 impl Menu for Creature {
-    fn menu(&mut self, ui: &mut Ui, _shared: &mut Shared) {
+    fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        let caste_opt: &mut Option<Caste> = &mut self.caste;
+        let simple_layers = &mut self.simple_layers;
+        let layer_sets = &mut self.layer_sets;
+
         ui.separator();
         ui.text_edit_singleline(&mut self.name);
 
+        if layer_sets.is_empty() {
+            ui.add_space(PADDING);
+
+            let mut caste_bool = caste_opt.is_some();
+
+            ui.checkbox(&mut caste_bool, "Caste:");
+
+            if caste_bool { 
+                let caste = caste_opt.get_or_insert(Caste::Female);
+
+                egui::ComboBox::from_label("Caste?")
+                    .selected_text(caste.name())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(caste, Caste::Male, "MALE");
+                        ui.selectable_value(caste, Caste::Female, "FEMALE");
+                        for shared_caste in &shared.creature_shared.castes {
+                            ui.selectable_value(caste, shared_caste.clone(), shared_caste.name());
+                        }
+                        ui.selectable_value(caste, Caste::Custom(String::new()), "(custom)");
+                    });
+    
+                if let Caste::Custom(caste_name) = caste {
+                    ui.text_edit_singleline(caste_name);
+                }
+            } else {
+                caste_opt.take();
+            }
+        }
+
         ui.add_space(PADDING);
-        // if ui.button("Add simple layer").clicked() {
-        //     if self.graphics_type.iter().any(|ls| match ls { LayerSet::Layered(..) => true, _ => false}) {
-        //         self.graphics_type.insert(0, LayerSet::Simple(vec![SimpleLayer::empty()]));
-        //     } else {
-        //         self.graphics_type.push(LayerSet::Simple(vec![SimpleLayer::empty()]));
-        //     }
-        // }
+
+        if ui.button("Add Simple Layer").clicked() {
+            simple_layers.push(SimpleLayer::default());
+        }
+
+        let mut delete_sl = None;
+        
+        egui::ScrollArea::both()
+            .id_source("Simple layer scroll")
+            .show(ui, |ui| {
+            for (i_sl, simple_layer) in simple_layers.iter_mut().enumerate() {
+                ui.push_id(format!("simple_layer{}",i_sl), |ui| {
+                    ui.group(|ui| {
+                        simple_layer.menu(ui, shared);
+                        if ui.button("Remove Simple Layer").clicked() {
+                            delete_sl = Some(i_sl);
+                        }
+                    });
+                    
+                    ui.add_space(PADDING);
+                });
+            }
+        });
+
+        if let Some(i_sl) = delete_sl {
+            simple_layers.remove(i_sl);//checked
+        }
+
+        ui.add_space(PADDING);
+
+        if ui.button("Add Layer Set").clicked() {
+            layer_sets.push(LayerSet::default());
+        }
+
+        let mut delete_ls = None;
+        
+        egui::ScrollArea::both()
+            .id_source("layer set scroll")
+            .show(ui, |ui| {
+            for (i_ls, layer_set) in layer_sets.iter_mut().enumerate() {
+                ui.push_id(format!("layer_set{}",i_ls), |ui| {
+                    ui.group(|ui| {
+                        egui::ComboBox::from_label("State")
+                        .selected_text(layer_set.state.name())
+                        .show_ui(ui, |ui| {
+                        for s in &shared.creature_shared.states {
+                            ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
+                        }
+                        for s in State::iterator() {
+                            ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
+                        }
+                        ui.selectable_value(&mut layer_set.state, State::Custom(String::new()), "Custom");
+                    });
+                    if let State::Custom(s) = &mut layer_set.state {
+                        ui.text_edit_singleline(s);
+                    }
+                    ui.label("Only DEFAULT, PORTRAIT, and CORPSE known to work (v50.05)");
+
+
+                        if ui.button("Remove Layer Set").clicked() {
+                            delete_ls = Some(i_ls);
+                        }
+                    });
+                    
+                    ui.add_space(PADDING);
+                });
+            }
+        });
+
+        if let Some(i_ls) = delete_ls {
+            layer_sets.remove(i_ls);//checked
+        }
         // if ui.button("Add layer set").clicked() {
         //     self.graphics_type.push(LayerSet::Layered(State::Default, Vec::new()));
-        // }
-        // if self.graphics_type.is_empty() {
-        //     if ui.button("Add statue graphics (requires empty creature)").clicked() {
-        //         // self.graphics_type.push(LayerSet::Statue(vec![SimpleLayer::empty()]));
-        //     }
-        // } else {
-        //     ui.label("Statue graphics require an empty creature.");
         // }
     }
 }
@@ -1378,10 +1469,10 @@ impl Menu for LayerSet {
         egui::ComboBox::from_label("State")
             .selected_text(self.state.name())
             .show_ui(ui, |ui| {
-            for s in State::iterator() {
+            for s in &shared.creature_shared.states {
                 ui.selectable_value(&mut self.state, s.clone(), s.name());
             }
-            for s in &shared.creature_shared.states {
+            for s in State::iterator() {
                 ui.selectable_value(&mut self.state, s.clone(), s.name());
             }
             ui.selectable_value(&mut self.state, State::Custom(String::new()), "Custom");
@@ -1389,7 +1480,7 @@ impl Menu for LayerSet {
         if let State::Custom(s) = &mut self.state {
             ui.text_edit_singleline(s);
         }
-        ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT and CORPSE appear to work properly (v50.05)");
+        ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, and CORPSE appear to work properly (v50.13)");
 
         ui.add_space(PADDING);
         if ui.button("New Layer Group").clicked() {
@@ -2782,8 +2873,8 @@ impl Menu for Condition {
                     .show_ui(ui, |ui| {
                         ui.selectable_value(caste, Caste::from("MALE".to_string()), "MALE");
                         ui.selectable_value(caste, Caste::from("FEMALE".to_string()), "FEMALE");
-                        for shared_class in &shared.creature_shared.castes {
-                            ui.selectable_value(caste, shared_class.clone(), shared_class.name());
+                        for shared_caste in &shared.creature_shared.castes {
+                            ui.selectable_value(caste, shared_caste.clone(), shared_caste.name());
                         }
                         ui.selectable_value(caste, Caste::Custom(String::new()), "(custom)");
                     });
@@ -4458,12 +4549,13 @@ impl RAW for Palette {
     fn display(&self) -> String {
         format!(
             "\t\t[LS_PALETTE:{}]
-            \t\t\t[LS_PALETTE_FILE:{}]
+            \t\t\t[LS_PALETTE_FILE:{}.png]
             \t\t\t[LS_PALETTE_DEFAULT:{}]\n\n",
             self.name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::UpperSnake),
-            self.file_name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
-                .to_case(Case::UpperSnake),
+            self.file_name.replace(".png", "")
+                .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
+                .to_case(Case::Snake),
             self.default_index
         )
     }

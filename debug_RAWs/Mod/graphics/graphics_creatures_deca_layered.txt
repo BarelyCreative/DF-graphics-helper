@@ -1,4 +1,4 @@
-graphics_creatures_decapod
+graphics_creatures_decapod_layered
 
 [OBJECT:GRAPHICS]
 

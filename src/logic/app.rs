@@ -2092,7 +2092,7 @@ impl eframe::App for DFGraphicsHelper {
         if self.preview {
             egui::SidePanel::right("preview panel")
                 .default_width(600.0)
-                .width_range(80.0..=1000.0)
+                .width_range(80.0..=10000.0)
                 .resizable(true)
                 .show(ctx, |ui| {
                 match self.preview_image(ui) {
@@ -2173,35 +2173,30 @@ impl eframe::App for DFGraphicsHelper {
             // if ctx.input(|m| m.modifiers).matches_logically(Modifiers::CTRL) {
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z)) {
                     self.action = Action::Redo;
-                    dbg!("Redo");
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Z)) {
                     self.action = Action::Undo;
-                    dbg!("Undo");
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::I)) {
                     self.action = Action::Import;
-                    dbg!("Import");
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::O)) {
                     self.action = Action::Import;
-                    dbg!("Import");
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::E)) {
                     self.action = Action::Export;
-                    dbg!("Export");
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::X)) {
-                    self.action = Action::Cut(self.selected.clone());
                     dbg!("Cut");
+                    self.action = Action::Cut(self.selected.clone());
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::C)) {
-                    self.action = Action::Copy(self.selected.clone());
                     dbg!("Copy");
+                    self.action = Action::Copy(self.selected.clone());
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::V)) {
-                    self.action = Action::Paste;
                     dbg!("Paste");
+                    self.action = Action::Paste;
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Q)) {
                     self.action = Action::Debug;

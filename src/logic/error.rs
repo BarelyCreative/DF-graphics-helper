@@ -176,7 +176,8 @@ pub fn error_window(state: &mut DFGraphicsHelper, ctx: &Context) {
             ui.add_space(PADDING);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
                 if ui.button("      Ok      ").clicked() {
-                    state.errors.remove(0);
+                    let first = state.errors.remove(0);
+                    state.errors.retain(|e| e.to_string().ne(&first.to_string()))
                 }
             });
         });
