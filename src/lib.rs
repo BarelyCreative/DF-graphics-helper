@@ -1058,12 +1058,15 @@ impl Menu for Creature {
         if ui.button("Add Simple Layer").clicked() {
             simple_layers.push(SimpleLayer::default());
         }
-
-        let mut delete_sl = None;
         
         egui::ScrollArea::both()
-            .id_source("Simple layer scroll")
+            .id_source("layer scroll")
+            .auto_shrink([false, true])
+            .stick_to_right(true)
             .show(ui, |ui| {
+
+            let mut delete_sl = None;
+
             for (i_sl, simple_layer) in simple_layers.iter_mut().enumerate() {
                 ui.push_id(format!("simple_layer{}",i_sl), |ui| {
                     ui.group(|ui| {
@@ -1076,42 +1079,41 @@ impl Menu for Creature {
                     ui.add_space(PADDING);
                 });
             }
-        });
 
-        if let Some(i_sl) = delete_sl {
-            simple_layers.remove(i_sl);//checked
-        }
+            ui.add_space(PADDING);
 
-        ui.add_space(PADDING);
+            if ui.button("Add Layer Set").clicked() {
+                layer_sets.push(LayerSet::default());
+            }
 
-        if ui.button("Add Layer Set").clicked() {
-            layer_sets.push(LayerSet::default());
-        }
+            let mut delete_ls = None;
 
-        let mut delete_ls = None;
-        
-        egui::ScrollArea::both()
-            .id_source("layer set scroll")
-            .show(ui, |ui| {
             for (i_ls, layer_set) in layer_sets.iter_mut().enumerate() {
                 ui.push_id(format!("layer_set{}",i_ls), |ui| {
                     ui.group(|ui| {
                         egui::ComboBox::from_label("State")
-                        .selected_text(layer_set.state.name())
-                        .show_ui(ui, |ui| {
-                        for s in &shared.creature_shared.states {
-                            ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
-                        }
-                        for s in State::iterator() {
-                            ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
-                        }
-                        ui.selectable_value(&mut layer_set.state, State::Custom(String::new()), "Custom");
-                    });
-                    if let State::Custom(s) = &mut layer_set.state {
-                        ui.text_edit_singleline(s);
-                    }
-                    ui.label("Only DEFAULT, PORTRAIT, and CORPSE known to work (v50.05)");
+                            .selected_text(layer_set.state.name())
+                            .show_ui(ui, |ui| {
+                            for s in &shared.creature_shared.states {
+                                ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
+                            }
+                            for s in State::iterator() {
+                                ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
+                            }
+                            ui.selectable_value(&mut layer_set.state, State::Custom(String::new()), "Custom");
+                        });
 
+                        if let State::Custom(s) = &mut layer_set.state {
+                            ui.text_edit_singleline(s);
+                        }
+                        
+                        if matches!(layer_set.state, State::Animated) {
+                            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, and CORPSE appear to work properly (v50.13)");
+                        } else if !matches!(layer_set.state, State::Default | State::Corpse | State::Portrait) {
+                            ui.label("Only DEFAULT, PORTRAIT, and CORPSE known to work (v50.13)");
+                        }
+
+                        ui.separator();
 
                         if ui.button("Remove Layer Set").clicked() {
                             delete_ls = Some(i_ls);
@@ -1121,14 +1123,15 @@ impl Menu for Creature {
                     ui.add_space(PADDING);
                 });
             }
-        });
 
-        if let Some(i_ls) = delete_ls {
-            layer_sets.remove(i_ls);//checked
-        }
-        // if ui.button("Add layer set").clicked() {
-        //     self.graphics_type.push(LayerSet::Layered(State::Default, Vec::new()));
-        // }
+            if let Some(i_sl) = delete_sl {
+                simple_layers.remove(i_sl);//checked
+            }
+            
+            if let Some(i_ls) = delete_ls {
+                layer_sets.remove(i_ls);//checked
+            }
+        });
     }
 }
 
@@ -1260,36 +1263,40 @@ impl Menu for SimpleLayer {
         let state = &mut self.state;
         let sub_state = &mut self.sub_state;
         let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
-        
-        egui::ComboBox::from_label("State")
-            .selected_text(state.name())
-            .show_ui(ui, |ui| {
-            for s in State::iterator() {
-                ui.selectable_value(state, s.clone(), s.name());
-            }
-            ui.selectable_value(state, State::Custom(String::new()), "Custom");
-        });
-        if let State::Custom(cust_state) = state {
-            ui.label("Custom state:");
-            ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
-        }
 
-        ui.add_space(PADDING);
-        egui::ComboBox::from_label("Second state (optional)")
-            .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
-            .show_ui(ui, |ui| {
-            ui.selectable_value(sub_state, None, State::Empty.name());
-            for s in State::iterator() {
-                ui.selectable_value(sub_state, Some(s.clone()), s.name());
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_label("State")
+                .selected_text(state.name())
+                .show_ui(ui, |ui| {
+                for s in State::iterator() {
+                    ui.selectable_value(state, s.clone(), s.name());
+                }
+                ui.selectable_value(state, State::Custom(String::new()), "Custom");
+            });
+            if let State::Custom(cust_state) = state {
+                ui.label("Custom state:");
+                ui.text_edit_singleline(cust_state);
+                ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
             }
-            ui.selectable_value(sub_state, Some(State::Custom(String::new())), "Custom");
+
+            ui.add_space(PADDING);
+            egui::ComboBox::from_label("Second state (optional)")
+                .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
+                .show_ui(ui, |ui| {
+                ui.selectable_value(sub_state, None, State::Empty.name());
+                for s in State::iterator() {
+                    ui.selectable_value(sub_state, Some(s.clone()), s.name());
+                }
+                ui.selectable_value(sub_state, Some(State::Custom(String::new())), "Custom");
+            });
+            if let Some(State::Custom(cust_state)) = sub_state {
+                ui.label("Custom state:");
+                ui.text_edit_singleline(cust_state);
+                ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+            }
         });
-        if let Some(State::Custom(cust_state)) = sub_state {
-            ui.label("Custom state:");
-            ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
-        }
+        
+        ui.separator();
 
         ui.add_space(PADDING);
         egui::ComboBox::from_label("TilePage")
@@ -1480,7 +1487,12 @@ impl Menu for LayerSet {
         if let State::Custom(s) = &mut self.state {
             ui.text_edit_singleline(s);
         }
-        ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, and CORPSE appear to work properly (v50.13)");
+        
+        if matches!(self.state, State::Animated) {
+            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, and CORPSE appear to work properly (v50.13)");
+        } else if !matches!(self.state, State::Default | State::Corpse | State::Portrait) {
+            ui.label("Only DEFAULT, PORTRAIT, and CORPSE known to work (v50.13)");
+        }
 
         ui.add_space(PADDING);
         if ui.button("New Layer Group").clicked() {
@@ -1496,6 +1508,8 @@ impl Menu for LayerSet {
         
         egui::ScrollArea::vertical()
             .id_source("Palette scroll")
+            .auto_shrink([false, true])
+            .stick_to_right(true)
             .show(ui, |ui| {
             for (i_palette, palette) in self.palettes.iter_mut().enumerate() {
                 ui.push_id(i_palette, |ui| {
@@ -1869,6 +1883,8 @@ impl Menu for Layer {
         
         egui::ScrollArea::both()
             .id_source("Condition scroll")
+            .auto_shrink([false, true])
+            .stick_to_right(true)
             .show(ui, |ui| {
             for (i_cond, condition) in conditions.iter_mut().enumerate() {
                 ui.push_id(i_cond, |ui| {
@@ -4566,6 +4582,9 @@ impl Menu for Palette {
             ui.label("Palette name:");
             ui.text_edit_singleline(&mut self.name);
         });
+
+        ui.separator();
+
         ui.horizontal(|ui| {
             ui.label("File name:");
             ui.text_edit_singleline(&mut self.file_name);
