@@ -1569,11 +1569,15 @@ impl RAW for LayerGroup {
         }
     }
     
-    fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, path: &PathBuf) -> (Self, Vec<DFGHError>) {
+    fn read(buffer: Vec<Vec<String>>, raw_buffer: Vec<String>, path: &PathBuf) -> (Self, Vec<DFGHError>) {
         let mut layer_group = LayerGroup::new();
         let mut errors: Vec<DFGHError> = Vec::new();
         let mut block_buffer = Vec::with_capacity(100);
         let buffer_len = buffer.len();
+
+        if let Some(lg_name) = raw_buffer[0].contains("---").then(|| *raw_buffer[0].split("---").collect::<Vec<&str>>().get(1).unwrap_or(&"(new)")) {
+            layer_group.name = lg_name.to_string();
+        }
 
         for (i_rel_line, line_vec) in buffer.iter().enumerate() {
             let len = line_vec.len();
