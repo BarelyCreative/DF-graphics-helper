@@ -1673,42 +1673,101 @@ impl Menu for LayerGroup {
             if ui.button("Save").clicked() {
                 CreatureShared::save_lg_shared(self);
             }
+            if ui.button("Refresh").clicked() {
+                CreatureShared::update_lg_shared(self);
+            }
         });
         for att in self.lg_shared[0].fields() {
             match att.as_str() {
                 "Caste" => {
-                    for c in self.lg_shared[1].castes.iter_mut() {
-                        let mut caste_name = c.name();
-                        ui.horizontal(|ui| {
-                            ui.label("Custom Caste Name:");
+                    ui.collapsing("Castes", |ui| {
+                        let shared_castes = self.lg_shared[1].castes.clone();
 
-                            ui.text_edit_singleline(&mut caste_name);
-                        });
-                        c.clone_from(&Caste::Custom(caste_name));
-                    }
+                        for (i_caste, c) in self.lg_shared[1].castes.iter_mut().enumerate() {
+                            ui.push_id(format!("caste{}", i_caste), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("Caste: ")
+                                        .selected_text(c.name())
+                                        .show_ui(ui, |ui| {
+                                        ui.selectable_value(c, Caste::Male, "MALE");
+                                        ui.selectable_value(c, Caste::Female, "FEMALE");
+                                        for shared_caste in shared_castes.iter() {
+                                            ui.selectable_value(c, shared_caste.clone(), shared_caste.name());
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    });
                 }
-                "State" => {/* do nothing */}
                 "Palette" => {
-                    
+                    ui.collapsing("Palettes", |ui| {
+                        let shared_palettes = self.lg_shared[1].palettes.clone();
+
+                        for (i_palette, p) in self.lg_shared[1].palettes.iter_mut().enumerate() {
+                            ui.push_id(format!("palette{}", i_palette), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("Palette: ")
+                                        .selected_text(p.name.clone())
+                                        .show_ui(ui, |ui| {
+                                        for shared_palette in shared_palettes.iter() {
+                                            ui.selectable_value(p, shared_palette.clone(), shared_palette.name.clone());
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    });
                 }
                 "Random Part Group" => {
+                    ui.collapsing("Random Part Groups", |ui| {
+                        let shared_rpgs = self.lg_shared[0].random_part_groups.clone();
 
+                        for (i_rpg, rpg) in self.lg_shared[1].random_part_groups.iter_mut().enumerate() {
+                            ui.push_id(format!("rpg{}", i_rpg), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("Palette: ")
+                                        .selected_text(rpg.0.clone())
+                                        .show_ui(ui, |ui| {
+                                        for shared_rpg in shared_rpgs.iter() {
+                                            ui.selectable_value(rpg, shared_rpg.clone(), shared_rpg.0.clone());
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    });
                 }
                 "Item" => {
+                    ui.collapsing("Items", |ui| {
+                        let shared_items = self.lg_shared[0].items.clone();
 
+                        for (i_item, i) in self.lg_shared[1].items.iter_mut().enumerate() {
+                            ui.push_id(format!("item{}", i_item), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("Item: ")
+                                        .selected_text(i.1.clone())
+                                        .show_ui(ui, |ui| {
+                                        for shared_item in shared_items.iter() {
+                                            ui.selectable_value(i, shared_item.clone(), shared_item.1.clone());
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    });
                 }
                 "Item Group" => {
 
                 }
                 "Metal" => {
-
+ 
                 }
                 "Color" => {
 
                 }
-                "Condition" => {
-
-                }
+                "State" |
+                "Condition" |
                 _ => {/* do nothing */}
             }
         }
@@ -2941,8 +3000,8 @@ impl Menu for Condition {
                 egui::ComboBox::from_label("Caste token: ")
                     .selected_text(caste.name())
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(caste, Caste::from("MALE".to_string()), "MALE");
-                        ui.selectable_value(caste, Caste::from("FEMALE".to_string()), "FEMALE");
+                        ui.selectable_value(caste, Caste::Male, "MALE");
+                        ui.selectable_value(caste, Caste::Female, "FEMALE");
                         for shared_caste in &shared.creature_shared.castes {
                             ui.selectable_value(caste, shared_caste.clone(), shared_caste.name());
                         }
@@ -4878,7 +4937,7 @@ impl CreatureShared {
     }
 
     fn save_c_shared(creature: &mut Creature) {
-        let mut difference = CreatureShared::difference(&creature.creature_shared);
+        let difference = CreatureShared::difference(&creature.creature_shared);
 
         if let Some(caste) = &mut creature.caste {
             if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
