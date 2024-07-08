@@ -895,7 +895,7 @@ pub struct Creature {
     pub caste: Option<Caste>,
     pub simple_layers: Vec<SimpleLayer>,
     pub layer_sets: Vec<LayerSet>,
-    pub creature_shared: CreatureShared,
+    pub creature_shared: [CreatureShared; 2],
 }
 impl RAW for Creature {
     fn new() -> Creature {
@@ -904,7 +904,7 @@ impl RAW for Creature {
             caste: None,
             simple_layers: Vec::new(),
             layer_sets: Vec::new(),
-            creature_shared: CreatureShared::new(),
+            creature_shared: [CreatureShared::new(), CreatureShared::new()],
         }
     }
 
@@ -1355,6 +1355,7 @@ pub struct LayerSet {
     state: State,
     layer_groups: Vec<LayerGroup>,
     palettes: Vec<Palette>,
+    ls_shared: [CreatureShared; 2],
 }
 impl RAW for LayerSet {
     fn new() -> Self {
@@ -1362,6 +1363,7 @@ impl RAW for LayerSet {
             state: State::default(),
             layer_groups: Vec::new(),
             palettes: Vec::new(),
+            ls_shared: [CreatureShared::new(), CreatureShared::new()],
         }
     }
 
@@ -1496,7 +1498,7 @@ impl Menu for LayerSet {
 
         ui.add_space(PADDING);
         if ui.button("New Layer Group").clicked() {
-            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new()});
+            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new(), lg_shared: [CreatureShared::new(), CreatureShared::new()]});
         }
 
         ui.add_space(PADDING);
@@ -1560,12 +1562,14 @@ impl LayerSet {
 pub struct LayerGroup {
     pub name: String,       //internal layer group name
     pub layers: Vec<Layer>, //set of layers to display for creature
+    lg_shared: [CreatureShared; 2],
 }
 impl RAW for LayerGroup {
     fn new() -> LayerGroup {
         LayerGroup {
             name: "(new)".to_string(),
             layers: Vec::new(),
+            lg_shared: [CreatureShared::new(), CreatureShared::new()],
         }
     }
     
@@ -1575,7 +1579,7 @@ impl RAW for LayerGroup {
         let mut block_buffer = Vec::with_capacity(100);
         let buffer_len = buffer.len();
 
-        if let Some(lg_name) = raw_buffer[0].contains("---").then(|| *raw_buffer[0].split("---").collect::<Vec<&str>>().get(1).unwrap_or(&"(new)")) {
+        if let Some(lg_name) = raw_buffer.get(0).unwrap_or(&String::new()).contains("---").then(|| *raw_buffer[0].split("---").collect::<Vec<&str>>().get(1).unwrap_or(&"(new)")) {
             layer_group.name = lg_name.to_string();
         }
 
@@ -1661,6 +1665,52 @@ impl Menu for LayerGroup {
         ui.add_space(PADDING);
         if ui.button("New Layer").clicked() {
             self.layers.push(Layer { name: self.name.clone(), ..Layer::new() });
+        }
+
+        ui.add_space(PADDING);
+        ui.horizontal(|ui| {
+            ui.label("Shared Attribute Editing:");
+            if ui.button("Save").clicked() {
+                CreatureShared::save_lg_shared(self);
+            }
+        });
+        for att in self.lg_shared[0].fields() {
+            match att.as_str() {
+                "Caste" => {
+                    for c in self.lg_shared[1].castes.iter_mut() {
+                        let mut caste_name = c.name();
+                        ui.horizontal(|ui| {
+                            ui.label("Custom Caste Name:");
+
+                            ui.text_edit_singleline(&mut caste_name);
+                        });
+                        c.clone_from(&Caste::Custom(caste_name));
+                    }
+                }
+                "State" => {/* do nothing */}
+                "Palette" => {
+                    
+                }
+                "Random Part Group" => {
+
+                }
+                "Item" => {
+
+                }
+                "Item Group" => {
+
+                }
+                "Metal" => {
+
+                }
+                "Color" => {
+
+                }
+                "Condition" => {
+
+                }
+                _ => {/* do nothing */}
+            }
         }
 
         ui.add_space(PADDING);
@@ -4641,9 +4691,11 @@ impl Shared {
             match g_file {
                 GraphicsFile::CreatureFile(_, creatures) => {
                     for creature in creatures {
-                        creature.creature_shared.update(creature.clone());
-                        self.creature_shared.append(&creature.creature_shared);
+                        CreatureShared::update_c_shared(creature);
+
+                        self.creature_shared.append(&creature.creature_shared[0]);
                     }
+                    self.creature_shared.sort_and_dedup();
                 }
                 _ => {/* do nothing */}
             }
@@ -4723,121 +4775,342 @@ impl CreatureShared {
         self.metals.append(&mut creature_shared.metals.clone());
     }
 
-    fn update(&mut self, creature: Creature) {
-        let palettes = &mut self.palettes;
-        let colors = &mut self.colors;
-        let items = &mut self.items;
-        let item_groups = &mut self.item_groups;
-        let castes = &mut self.castes;
-        let states = &mut self.states;
-        let conditions = &mut self.conditions;
-        let random_part_groups = &mut self.random_part_groups;
-        let metals = &mut self.metals;
-
-        //clear existing vectors
-        palettes.clear();
-        colors.clear();
-        items.clear();
-        item_groups.clear();
-        castes.clear();
-        states.clear();
-        conditions.clear();
-        random_part_groups.clear();
-        metals.clear();
-
-        //loop through creature to gather vectors of relevant categories
-        if let Some(Caste::Custom(caste_name)) = &creature.caste {
-            castes.push(Caste::Custom(caste_name.clone()));
+    fn fields(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if !self.castes.is_empty() {
+            out.push("Caste".to_string());
         }
-        for simple_layer in &creature.simple_layers {
+        if !self.states.is_empty() {
+            out.push("State".to_string());
+        }
+        if !self.palettes.is_empty() {
+            out.push("Palette".to_string());
+        }
+        if !self.random_part_groups.is_empty() {
+            out.push("Random Part Group".to_string());
+        }
+        if !self.items.is_empty() {
+            out.push("Item".to_string());
+        }
+        if !self.item_groups.is_empty() {
+            out.push("Item Group".to_string());
+        }
+        if !self.metals.is_empty() {
+            out.push("Metal".to_string());
+        }
+        if !self.colors.is_empty() {
+            out.push("Color".to_string());
+        }
+        if !self.conditions.is_empty() {
+            out.push("Condition".to_string());
+        }
+
+        out
+    }
+
+    fn difference(shared: &[CreatureShared; 2]) -> [CreatureShared; 2] {
+        let mut difference = [CreatureShared::new(), CreatureShared::new()];
+
+        for (i_p, p) in shared[0].palettes.iter().enumerate() {
+            if !p.name.eq_ignore_ascii_case(&shared[1].palettes.get(i_p).unwrap_or(&Palette::new()).name) {
+                difference[0].palettes.push(p.clone());
+                difference[1].palettes.push(shared[1].palettes.get(i_p).unwrap_or(&Palette::new()).clone());
+            }
+        }
+        for (i_c, c) in shared[0].colors.iter().enumerate() {
+            if !c.name().eq_ignore_ascii_case(&shared[1].colors.get(i_c).unwrap_or(&Color::default()).name()) {
+                difference[0].colors.push(c.clone());
+                difference[1].colors.push(shared[1].colors.get(i_c).unwrap_or(&Color::default()).clone());
+            }
+        }
+        for (i_i, i) in shared[0].items.iter().enumerate() {
+            let default = &(ItemType::default(), String::new());
+            let other = shared[1].items.get(i_i).unwrap_or(default);
+            if !format!("{}{}",i.0.equipment_name(),i.1)
+                .eq_ignore_ascii_case(&format!("{}{}", other.0.equipment_name(), other.1)) {
+                difference[0].items.push(i.clone());
+                difference[1].items.push(other.clone());
+            }
+        }
+        for (i_ig, i) in shared[0].item_groups.iter().enumerate() {
+            let default = &(ItemType::default(), Vec::new());
+            let other = shared[1].item_groups.get(i_ig).unwrap_or(default);
+            if !format!("{}{}",i.0.equipment_name(),i.1.concat())
+                .eq_ignore_ascii_case(&format!("{}{}", other.0.equipment_name(), other.1.concat())) {
+                difference[0].item_groups.push(i.clone());
+                difference[1].item_groups.push(other.clone());
+            }
+        }
+        for (i_c, c) in shared[0].castes.iter().enumerate() {
+            if !c.name().eq_ignore_ascii_case(&shared[1].castes.get(i_c).unwrap_or(&Caste::default()).name()) {
+                difference[0].castes.push(c.clone());
+                difference[1].castes.push(shared[1].castes.get(i_c).unwrap_or(&Caste::default()).clone());
+            }
+        }
+        for (i_s, s) in shared[0].states.iter().enumerate() {
+            if !s.name().eq_ignore_ascii_case(&shared[1].states.get(i_s).unwrap_or(&State::default()).name()) {
+                difference[0].states.push(s.clone());
+                difference[1].states.push(shared[1].states.get(i_s).unwrap_or(&State::default()).clone());
+            }
+        }
+        for (i_c, c) in shared[0].conditions.iter().enumerate() {
+            if !c.display().eq_ignore_ascii_case(&shared[1].conditions.get(i_c).unwrap_or(&Condition::default()).display()) {
+                difference[0].conditions.push(c.clone());
+                difference[1].conditions.push(shared[1].conditions.get(i_c).unwrap_or(&Condition::default()).clone());
+            }
+        }
+        for (i_rp, rp) in shared[0].random_part_groups.iter().enumerate() {
+            let default = &(String::new(), 0);
+            let other = shared[1].random_part_groups.get(i_rp).unwrap_or(default);
+            if !format!("{}{}", rp.0, rp.1).eq_ignore_ascii_case(&format!("{}{}", other.0, other.1)) {
+                difference[0].random_part_groups.push(rp.clone());
+                difference[1].random_part_groups.push(other.clone());
+            }
+        }
+        for (i_m, m) in shared[0].metals.iter().enumerate() {
+            if !m.name().eq_ignore_ascii_case(&shared[1].metals.get(i_m).unwrap_or(&Metal::default()).name()) {
+                difference[0].metals.push(m.clone());
+                difference[1].metals.push(shared[1].metals.get(i_m).unwrap_or(&Metal::default()).clone());
+            }
+        }
+
+        difference
+    }
+
+    fn save_c_shared(creature: &mut Creature) {
+        let mut difference = CreatureShared::difference(&creature.creature_shared);
+
+        if let Some(caste) = &mut creature.caste {
+            if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
+                creature.caste.replace(difference[1].castes[i_shared].clone());
+            }
+        }
+
+        for simple_layer in &mut creature.simple_layers {
+            if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&simple_layer.state.name())) {
+                simple_layer.state.clone_from(&difference[1].states[i_shared]);
+            }
+            if let Some(state) = &mut simple_layer.sub_state {
+                if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&state.name())) {
+                    state.clone_from(&difference[1].states[i_shared]);
+                }
+            }
+        }
+
+        for layer_set in &mut creature.layer_sets {
+            layer_set.ls_shared.clone_from(&difference);
+
+            CreatureShared::save_ls_shared(layer_set);
+        }
+    }
+
+    fn save_ls_shared(layer_set: &mut LayerSet) {
+        let difference = CreatureShared::difference(&layer_set.ls_shared);
+
+        if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&layer_set.state.name())) {
+            layer_set.state.clone_from(&difference[1].states[i_shared]);
+        }
+
+        for palette in &mut layer_set.palettes {
+            if let Some(i_shared) = difference[0].palettes.iter().position(|p| p.name.eq_ignore_ascii_case(&palette.name)) {
+                palette.clone_from(&difference[1].palettes[i_shared]);
+            }
+        }
+
+        for layer_group in &mut layer_set.layer_groups {
+            layer_group.lg_shared.clone_from(&difference);
+
+            CreatureShared::save_lg_shared(layer_group);
+        }
+    }
+
+    fn save_lg_shared(layer_group: &mut LayerGroup) {
+        let mut difference = CreatureShared::difference(&layer_group.lg_shared);
+
+        for layer in &mut layer_group.layers {
+            for condition in &mut layer.conditions {
+                match condition {
+                    Condition::ShutOffIfItemPresent(item_type, item_names) |
+                    Condition::ItemWorn(item_type, item_names) => {
+                        let mut item_names_sort = item_names.clone();
+                        item_names_sort.sort();
+                        item_names_sort.dedup();
+
+                        for (i_replace, item_name) in item_names_sort.iter_mut().enumerate() {
+                            if let Some(i_shared) = difference[0].items.iter().position(|i| format!("{}{}",i.0.equipment_name(),i.1).eq_ignore_ascii_case(&format!("{}{}", item_type.equipment_name(), item_name))) {
+                                item_type.clone_from(&difference[1].items[i_shared].0);
+                                item_names.get_mut(i_replace).replace(&mut difference[1].items[i_shared].1);
+                            }
+                        }
+
+                        if item_names_sort.len() >= 3 {
+                            if let Some(i_shared) = difference[0].item_groups.iter().position(|ig| format!("{}{}", ig.0.equipment_name(), ig.1.concat()).eq_ignore_ascii_case(&format!("{}{}", item_type.equipment_name(), item_names_sort.concat()))) {
+                                item_type.clone_from(&difference[1].item_groups[i_shared].0);
+                                item_names.clone_from(&difference[1].item_groups[i_shared].1);
+                            }
+                        }
+                    }
+                    Condition::Caste(caste) => {
+                        if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
+                            caste.clone_from(&difference[1].castes[i_shared]);
+                        }
+                    }
+                    Condition::MaterialType(metal) => {
+                        if let Some(i_shared) = difference[0].metals.iter().position(|c| c.name().eq_ignore_ascii_case(&metal.name())) {
+                            metal.clone_from(&difference[1].metals[i_shared]);
+                        }
+                    }
+                    Condition::RandomPartIndex(name, _, range) => {
+                        if let Some(i_shared) = difference[0].random_part_groups.iter().position(|rpg| rpg.0.eq_ignore_ascii_case(name)) {
+                            name.clone_from(&difference[1].random_part_groups[i_shared].0);
+                            range.clone_from(&difference[1].random_part_groups[i_shared].1);
+                        }
+                    }
+                    Condition::TissueMayHaveColor(tissue_colors) => {
+                        for color in tissue_colors {
+                            if let Some(i_shared) = difference[0].colors.iter().position(|c| c.name().eq_ignore_ascii_case(&color.name())) {
+                                color.clone_from(&difference[1].colors[i_shared]);
+                            }
+                        }
+                    }
+                    Condition::Dye(color) => {
+                        if let Some(i_shared) = difference[0].colors.iter().position(|c| c.name().eq_ignore_ascii_case(&color.name())) {
+                            color.clone_from(&difference[1].colors[i_shared]);
+                        }
+                    }
+                    Condition::Custom(..) => {
+                        if let Some(i_shared) = difference[0].conditions.iter().position(|c| c.display().eq_ignore_ascii_case(&condition.display())) {
+                            condition.clone_from(&difference[1].conditions[i_shared]);
+                        }
+                    }
+                    _ => {/* Do nothing */}
+                }
+            }
+        }
+
+        CreatureShared::update_lg_shared(layer_group);
+    }
+
+    fn update_c_shared(creature: &mut Creature) {
+        let mut creature_shared = CreatureShared::new();
+
+        if let Some(Caste::Custom(caste_name)) = &creature.caste {
+            creature.creature_shared[0].castes.push(Caste::Custom(caste_name.clone()));
+        }
+        for simple_layer in &mut creature.simple_layers {
             if matches!(simple_layer.state, State::Custom(..)) {
-                states.push(simple_layer.state.clone());
+                creature_shared.states.push(simple_layer.state.clone());
             }
             if let Some(sub_state) = simple_layer.sub_state.clone() {
                 if matches!(&sub_state, State::Custom(..)) {
-                    states.push(sub_state);
+                    creature_shared.states.push(sub_state);
                 }
             }
         }
-        for layer_set in &creature.layer_sets {
-            if matches!(layer_set.state, State::Custom(..)) {
-                states.push(layer_set.state.clone());
-            }
-            palettes.append(&mut layer_set.palettes.clone());
+        for layer_set in &mut creature.layer_sets {
+            CreatureShared::update_ls_shared(layer_set);
 
-            for layer_group in &layer_set.layer_groups {
-                for layer in &layer_group.layers {
-                    for condition in &layer.conditions {
-                        match condition {
-                            Condition::ShutOffIfItemPresent(item_type, c_items) |
-                            Condition::ItemWorn(item_type, c_items) => {
-                                let mut c_items_sort = c_items.clone();
-                                c_items_sort.sort();
-                                c_items_sort.dedup();
-                                for item in &c_items_sort {
-                                    items.push((item_type.clone(), item.clone()));
-                                }
-                                if c_items_sort.len() >= 3 {
-                                    item_groups.push((item_type.clone(), c_items_sort));
-                                }
-                            }
-                            Condition::Caste(caste) => {
-                                if let Caste::Custom(caste_name) = caste {
-                                    castes.push(Caste::Custom(caste_name.clone()));
-                                }
-                            }
-                            Condition::MaterialType(metal) => {
-                                if let Metal::Custom(metal_name) = metal {
-                                    metals.push(Metal::Custom(metal_name.clone()));
-                                }
-                            }
-                            Condition::RandomPartIndex(name, _, range) => {
-                                random_part_groups.push((name.clone(), *range));
-                            }
-                            Condition::TissueMayHaveColor(tissue_colors) => {
-                                colors.append(&mut tissue_colors.clone());
-                            }
-                            Condition::Dye(color) => {
-                                colors.push(color.clone());
-                            }
-                            Condition::Custom(..) => {
-                                conditions.push(condition.clone());
-                            }
-                            _ => {/* Do nothing */}
+            creature_shared.append(&layer_set.ls_shared[0]);
+        }
+        creature_shared.sort_and_dedup();
+        creature.creature_shared = [creature_shared.clone(), creature_shared];
+    }
+
+    fn update_ls_shared(layer_set: &mut LayerSet) {
+        let mut layer_set_shared = CreatureShared::new();
+
+        if matches!(layer_set.state, State::Custom(..)) {
+            layer_set_shared.states.push(layer_set.state.clone());
+        }
+        layer_set_shared.palettes.append(&mut layer_set.palettes.clone());
+
+        for layer_group in &mut layer_set.layer_groups {
+            CreatureShared::update_lg_shared(layer_group);
+
+            layer_set_shared.append(&layer_group.lg_shared[0]);
+        }
+        layer_set_shared.sort_and_dedup();
+        layer_set.ls_shared = [layer_set_shared.clone(), layer_set_shared];
+    }
+    
+    fn update_lg_shared(layer_group: &mut LayerGroup) {
+        let mut layer_group_shared = CreatureShared::new();
+
+        for layer in &layer_group.layers {
+            for condition in &layer.conditions {
+                match condition {
+                    Condition::ShutOffIfItemPresent(item_type, c_items) |
+                    Condition::ItemWorn(item_type, c_items) => {
+                        let mut c_items_sort = c_items.clone();
+                        c_items_sort.sort();
+                        c_items_sort.dedup();
+                        for item in &c_items_sort {
+                            layer_group_shared.items.push((item_type.clone(), item.clone()));
+                        }
+                        if c_items_sort.len() >= 3 {
+                            layer_group_shared.item_groups.push((item_type.clone(), c_items_sort));
                         }
                     }
+                    Condition::Caste(caste) => {
+                        if let Caste::Custom(caste_name) = caste {
+                            layer_group_shared.castes.push(Caste::Custom(caste_name.clone()));
+                        }
+                    }
+                    Condition::MaterialType(metal) => {
+                        if let Metal::Custom(metal_name) = metal {
+                            layer_group_shared.metals.push(Metal::Custom(metal_name.clone()));
+                        }
+                    }
+                    Condition::RandomPartIndex(name, _, range) => {
+                        layer_group_shared.random_part_groups.push((name.clone(), *range));
+                    }
+                    Condition::TissueMayHaveColor(tissue_colors) => {
+                        layer_group_shared.colors.append(&mut tissue_colors.clone());
+                    }
+                    Condition::Dye(color) => {
+                        layer_group_shared.colors.push(color.clone());
+                    }
+                    Condition::Custom(..) => {
+                        layer_group_shared.conditions.push(condition.clone());
+                    }
+                    _ => {/* Do nothing */}
                 }
             }
         }
 
+        layer_group_shared.sort_and_dedup();
+        layer_group.lg_shared = [layer_group_shared.clone(), layer_group_shared];
+    }
+
+    fn sort_and_dedup(&mut self) {
         //sort and remove duplicates
-        palettes.sort_by(|a, b| a.name.cmp(&b.name));
-        palettes.dedup_by(|a, b| a.name.eq(&b.name));
-        colors.sort_by(|a, b| a.name().cmp(&b.name()));
-        colors.dedup_by(|a, b| a.name().eq(&b.name()));
-        items.sort_by(|a, b| 
-            format!("{}:{}", a.0.equipment_name(), a.1)
-            .cmp(&format!("{}:{}",b.0.equipment_name(), b.1)));
-        items.dedup_by(|a, b| 
-            format!("{}:{}",a.0.equipment_name(),a.1)
-            .eq(&format!("{}:{}",b.0.equipment_name(),b.1)));
-        item_groups.sort_by(|a, b| 
-            format!("{}:{}", a.0.equipment_name(), a.1.concat())
-            .cmp(&format!("{}:{}", b.0.equipment_name(), b.1.concat())));
-        item_groups.dedup_by(|a, b| 
-            format!("{}:{}", a.0.equipment_name(), a.1.concat())
-            .eq(&format!("{}:{}", b.0.equipment_name(), b.1.concat())));
-        castes.sort_by(|a, b| a.name().cmp(&b.name()));
-        castes.dedup_by(|a, b| a.name().eq(&b.name()));
-        states.sort();
-        states.dedup();
-        conditions.sort_by(|a, b| a.display().cmp(&b.display()));
-        conditions.dedup_by(|a, b| a.display().eq(&b.display()));
-        random_part_groups.sort_by(|a, b| 
+        self.palettes.sort_by(|a, b| a.name.cmp(&b.name));
+        self.palettes.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
+        self.colors.sort_by(|a, b| a.name().cmp(&b.name()));
+        self.colors.dedup_by(|a, b| a.name().eq_ignore_ascii_case(&b.name()));
+        self.items.sort_by(|a, b| 
+            format!("{}{}", a.0.equipment_name(), a.1)
+            .cmp(&format!("{}{}",b.0.equipment_name(), b.1)));
+        self.items.dedup_by(|a, b| 
+            format!("{}{}",a.0.equipment_name(),a.1)
+            .eq_ignore_ascii_case(&format!("{}{}",b.0.equipment_name(),b.1)));
+        self.item_groups.sort_by(|a, b| 
+            format!("{}{}", a.0.equipment_name(), a.1.concat())
+            .cmp(&format!("{}{}", b.0.equipment_name(), b.1.concat())));
+        self.item_groups.dedup_by(|a, b| 
+            format!("{}{}", a.0.equipment_name(), a.1.concat())
+            .eq_ignore_ascii_case(&format!("{}{}", b.0.equipment_name(), b.1.concat())));
+        self.castes.sort_by(|a, b| a.name().cmp(&b.name()));
+        self.castes.dedup_by(|a, b| a.name().eq_ignore_ascii_case(&b.name()));
+        self.states.sort();
+        self.states.dedup();
+        self.conditions.sort_by(|a, b| a.display().cmp(&b.display()));
+        self.conditions.dedup_by(|a, b| a.display().eq_ignore_ascii_case(&b.display()));
+        self.random_part_groups.sort_by(|a, b| 
             format!("{}{}", a.0, a.1).cmp(&format!("{}{}", b.0, b.1)));
-        random_part_groups.dedup_by(|a, b| 
-            format!("{}{}", a.0, a.1).eq(&format!("{}{}", b.0, b.1)));
-        metals.sort_by(|a, b| a.name().cmp(&b.name()));
-        metals.dedup_by(|a, b| a.name().eq(&b.name()));
+        self.random_part_groups.dedup_by(|a, b| 
+            format!("{}{}", a.0, a.1).eq_ignore_ascii_case(&format!("{}{}", b.0, b.1)));
+        self.metals.sort_by(|a, b| a.name().cmp(&b.name()));
+        self.metals.dedup_by(|a, b| a.name().eq_ignore_ascii_case(&b.name()));
     }
 }
