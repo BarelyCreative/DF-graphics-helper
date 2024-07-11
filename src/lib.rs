@@ -1709,7 +1709,8 @@ impl Menu for LayerGroup {
             match att.as_str() {
                 "Caste" => {
                     ui.collapsing("Castes", |ui| {
-                        let shared_castes = self.lg_shared[1].castes.clone();
+                        let old_shared_castes = self.lg_shared[0].castes.clone();
+                        let new_shared_castes = self.lg_shared[1].castes.clone();
 
                         for (i_caste, c) in self.lg_shared[1].castes.iter_mut().enumerate() {
                             ui.push_id(format!("caste{}", i_caste), |ui| {
@@ -1719,10 +1720,16 @@ impl Menu for LayerGroup {
                                         .show_ui(ui, |ui| {
                                         ui.selectable_value(c, Caste::Male, "MALE");
                                         ui.selectable_value(c, Caste::Female, "FEMALE");
-                                        for shared_caste in shared_castes.iter() {
+                                        for shared_caste in new_shared_castes.iter() {
                                             ui.selectable_value(c, shared_caste.clone(), shared_caste.name());
                                         }
+                                        ui.selectable_value(c, Caste::Custom("(new)".to_string()), "(custom)");
                                     });
+                                    if let Caste::Custom(caste_name) = c {
+                                        if !old_shared_castes.contains(&Caste::Custom(caste_name.to_string())) {
+                                            ui.text_edit_singleline(caste_name);
+                                        }
+                                    }
                                 });
                             });
                         }
@@ -1730,7 +1737,8 @@ impl Menu for LayerGroup {
                 }
                 "Palette" => {
                     ui.collapsing("Palettes", |ui| {
-                        let shared_palettes = self.lg_shared[1].palettes.clone();
+                        let old_shared_palettes = self.lg_shared[0].palettes.clone();
+                        let new_shared_palettes = self.lg_shared[1].palettes.clone();
 
                         for (i_palette, p) in self.lg_shared[1].palettes.iter_mut().enumerate() {
                             ui.push_id(format!("palette{}", i_palette), |ui| {
@@ -1738,10 +1746,15 @@ impl Menu for LayerGroup {
                                     egui::ComboBox::from_label("")
                                         .selected_text(p.name.clone())
                                         .show_ui(ui, |ui| {
-                                        for shared_palette in shared_palettes.iter() {
+                                        for shared_palette in new_shared_palettes.iter() {
                                             ui.selectable_value(p, shared_palette.clone(), shared_palette.name.clone());
                                         }
+                                        ui.selectable_value(p, Palette::new(), "(custom)");
                                     });
+
+                                    if !old_shared_palettes.iter().any(|palette| p.name.ne(&palette.name)) {
+                                        ui.text_edit_singleline(&mut p.name);
+                                    }
                                 });
                             });
                         }
@@ -1749,7 +1762,8 @@ impl Menu for LayerGroup {
                 }
                 "Random Part Group" => {
                     ui.collapsing("Random Part Groups", |ui| {
-                        let shared_rpgs = self.lg_shared[0].random_part_groups.clone();
+                        let old_shared_rpgs = self.lg_shared[0].random_part_groups.clone();
+                        let new_shared_rpgs = self.lg_shared[1].random_part_groups.clone();
 
                         for (i_rpg, rpg) in self.lg_shared[1].random_part_groups.iter_mut().enumerate() {
                             ui.push_id(format!("rpg{}", i_rpg), |ui| {
@@ -1757,10 +1771,15 @@ impl Menu for LayerGroup {
                                     egui::ComboBox::from_label("")
                                         .selected_text(rpg.0.clone())
                                         .show_ui(ui, |ui| {
-                                        for shared_rpg in shared_rpgs.iter() {
+                                        for shared_rpg in new_shared_rpgs.iter() {
                                             ui.selectable_value(rpg, shared_rpg.clone(), shared_rpg.0.clone());
                                         }
+                                        ui.selectable_value(rpg, ("(new)".to_string(), 8), "(custom)");
                                     });
+
+                                    if !old_shared_rpgs.iter().any(|old_rpg| rpg.0.eq_ignore_ascii_case(&old_rpg.0)) {
+                                        ui.text_edit_singleline(&mut rpg.0);
+                                    }
                                 });
                             });
                         }
@@ -1768,7 +1787,8 @@ impl Menu for LayerGroup {
                 }
                 "Item" => {
                     ui.collapsing("Items", |ui| {
-                        let shared_items = self.lg_shared[0].items.clone();
+                        let old_shared_items = self.lg_shared[0].items.clone();
+                        let new_shared_items = self.lg_shared[1].items.clone();
 
                         for (i_item, i) in self.lg_shared[1].items.iter_mut().enumerate() {
                             ui.push_id(format!("item{}", i_item), |ui| {
@@ -1776,23 +1796,122 @@ impl Menu for LayerGroup {
                                     egui::ComboBox::from_label("")
                                         .selected_text(i.1.clone())
                                         .show_ui(ui, |ui| {
-                                        for shared_item in shared_items.iter() {
+                                        for shared_item in new_shared_items.iter() {
                                             ui.selectable_value(i, shared_item.clone(), shared_item.1.clone());
                                         }
+                                        ui.selectable_value(i, (ItemType::None, "(new)".to_string()), "(custom)");
                                     });
+
+                                    if !old_shared_items.iter().any(|old_item| i.0.eq(&old_item.0) && i.1.eq_ignore_ascii_case(&old_item.1)) {
+                                        egui::ComboBox::from_id_source("new item type")
+                                            .selected_text(i.0.name())
+                                            .show_ui(ui, |ui| {
+                                            for it in ItemType::iterator() {
+                                                ui.selectable_value(&mut i.0, it.clone(), it.name());
+                                            }
+                                        });
+                                        ui.text_edit_singleline(&mut i.1);
+                                    }
                                 });
                             });
                         }
                     });
                 }
                 "Item Group" => {
+                    ui.collapsing("Items Groups", |ui| {
+                        let old_shared_item_groups = self.lg_shared[0].item_groups.clone();
+                        let new_shared_item_groups = self.lg_shared[1].item_groups.clone();
 
+                        for (i_item_group, ig) in self.lg_shared[1].item_groups.iter_mut().enumerate() {
+                            ui.push_id(format!("item_group{}", i_item_group), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("")
+                                        .selected_text(format!("{}, {}, ...",
+                                            ig.1.get(0).unwrap_or(&String::default()),
+                                            ig.1.get(1).unwrap_or(&String::default())
+                                        ))
+                                        .show_ui(ui, |ui| {
+                                        for shared_item_group in new_shared_item_groups.iter() {
+                                            ui.selectable_value(ig,
+                                                shared_item_group.clone(),
+                                                format!("{}, {}, ...",
+                                                shared_item_group.1.get(0).unwrap_or(&String::default()),
+                                                shared_item_group.1.get(1).unwrap_or(&String::default())
+                                            ));
+                                        }
+                                        ui.selectable_value(ig, (ItemType::None, vec!["(new)".to_string(),"(new)".to_string(),"(new)".to_string()]), "(custom)");
+                                    });
+
+                                    if !old_shared_item_groups.iter().any(|old_item| ig.0.eq(&old_item.0) && ig.1.concat().eq_ignore_ascii_case(&old_item.1.concat())) {
+                                        egui::ComboBox::from_id_source("new item group type")
+                                            .selected_text(ig.0.name())
+                                            .show_ui(ui, |ui| {
+                                            for it in ItemType::iterator() {
+                                                ui.selectable_value(&mut ig.0, it.clone(), it.name());
+                                            }
+                                        });
+                                        for item_name in &mut ig.1 {
+                                            ui.text_edit_singleline(item_name);
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    });
                 }
                 "Metal" => {
- 
+                    ui.collapsing("Metals", |ui| {
+                        let old_shared_metals = self.lg_shared[0].metals.clone();
+                        let new_shared_metals = self.lg_shared[1].metals.clone();
+
+                        for (i_metal, metal) in self.lg_shared[1].metals.iter_mut().enumerate() {
+                            ui.push_id(format!("metal{}", i_metal), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("")
+                                        .selected_text(metal.name())
+                                        .show_ui(ui, |ui| {
+                                        for shared_metal in new_shared_metals.iter() {
+                                            ui.selectable_value(metal, shared_metal.clone(), shared_metal.name());
+                                        }
+                                        ui.selectable_value(metal, Metal::Custom("(new)".to_string()), "(custom)");
+                                    });
+
+                                    if let Metal::Custom(metal_name) = metal {
+                                        if !old_shared_metals.iter().any(|old_metal| old_metal.name().eq_ignore_ascii_case(&metal_name)) {
+                                            ui.text_edit_singleline(metal_name);
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    });
                 }
                 "Color" => {
+                    ui.collapsing("Colors", |ui| {
+                        let old_shared_colors = self.lg_shared[0].colors.clone();
+                        let new_shared_colors = self.lg_shared[1].colors.clone();
 
+                        for (i_color, color) in self.lg_shared[1].colors.iter_mut().enumerate() {
+                            ui.push_id(format!("color{}", i_color), |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_label("")
+                                        .selected_text(color.name())
+                                        .show_ui(ui, |ui| {
+                                        for shared_color in new_shared_colors.iter() {
+                                            ui.selectable_value(color, shared_color.clone(), shared_color.name());
+                                        }
+                                        ui.selectable_value(color, Color::Custom("(new)".to_string()), "(custom)");
+                                    });
+
+                                    if let Color::Custom(color_name) = color {
+                                        if !old_shared_colors.iter().any(|old_color| old_color.name().eq_ignore_ascii_case(&color_name)) {
+                                            ui.text_edit_singleline(color_name);
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    });
                 }
                 "State" |
                 "Condition" |
@@ -4964,52 +5083,52 @@ impl CreatureShared {
         difference
     }
 
-    fn save_c_shared(creature: &mut Creature) {
-        let difference = CreatureShared::difference(&creature.creature_shared);
+    // fn save_c_shared(creature: &mut Creature) {
+    //     let difference = CreatureShared::difference(&creature.creature_shared);
 
-        if let Some(caste) = &mut creature.caste {
-            if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
-                creature.caste.replace(difference[1].castes[i_shared].clone());
-            }
-        }
+    //     if let Some(caste) = &mut creature.caste {
+    //         if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
+    //             creature.caste.replace(difference[1].castes[i_shared].clone());
+    //         }
+    //     }
 
-        for simple_layer in &mut creature.simple_layers {
-            if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&simple_layer.state.name())) {
-                simple_layer.state.clone_from(&difference[1].states[i_shared]);
-            }
-            if let Some(state) = &mut simple_layer.sub_state {
-                if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&state.name())) {
-                    state.clone_from(&difference[1].states[i_shared]);
-                }
-            }
-        }
+    //     for simple_layer in &mut creature.simple_layers {
+    //         if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&simple_layer.state.name())) {
+    //             simple_layer.state.clone_from(&difference[1].states[i_shared]);
+    //         }
+    //         if let Some(state) = &mut simple_layer.sub_state {
+    //             if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&state.name())) {
+    //                 state.clone_from(&difference[1].states[i_shared]);
+    //             }
+    //         }
+    //     }
 
-        for layer_set in &mut creature.layer_sets {
-            layer_set.ls_shared.clone_from(&difference);
+    //     for layer_set in &mut creature.layer_sets {
+    //         layer_set.ls_shared.clone_from(&difference);
 
-            CreatureShared::save_ls_shared(layer_set);
-        }
-    }
+    //         CreatureShared::save_ls_shared(layer_set);
+    //     }
+    // }
 
-    fn save_ls_shared(layer_set: &mut LayerSet) {
-        let difference = CreatureShared::difference(&layer_set.ls_shared);
+    // fn save_ls_shared(layer_set: &mut LayerSet) {
+    //     let difference = CreatureShared::difference(&layer_set.ls_shared);
 
-        if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&layer_set.state.name())) {
-            layer_set.state.clone_from(&difference[1].states[i_shared]);
-        }
+    //     if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&layer_set.state.name())) {
+    //         layer_set.state.clone_from(&difference[1].states[i_shared]);
+    //     }
 
-        for palette in &mut layer_set.palettes {
-            if let Some(i_shared) = difference[0].palettes.iter().position(|p| p.name.eq_ignore_ascii_case(&palette.name)) {
-                palette.clone_from(&difference[1].palettes[i_shared]);
-            }
-        }
+    //     for palette in &mut layer_set.palettes {
+    //         if let Some(i_shared) = difference[0].palettes.iter().position(|p| p.name.eq_ignore_ascii_case(&palette.name)) {
+    //             palette.clone_from(&difference[1].palettes[i_shared]);
+    //         }
+    //     }
 
-        for layer_group in &mut layer_set.layer_groups {
-            layer_group.lg_shared.clone_from(&difference);
+    //     for layer_group in &mut layer_set.layer_groups {
+    //         layer_group.lg_shared.clone_from(&difference);
 
-            CreatureShared::save_lg_shared(layer_group);
-        }
-    }
+    //         CreatureShared::save_lg_shared(layer_group);
+    //     }
+    // }
 
     fn save_lg_shared(layer_group: &mut LayerGroup) {
         let mut difference = CreatureShared::difference(&layer_group.lg_shared);
