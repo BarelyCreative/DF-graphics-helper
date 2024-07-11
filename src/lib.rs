@@ -1497,11 +1497,8 @@ impl Menu for LayerSet {
         }
 
         ui.add_space(PADDING);
-        if ui.button("New Layer Group").clicked() {
-            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new(), lg_shared: [CreatureShared::new(), CreatureShared::new()]});
-        }
+        ui.separator();
 
-        ui.add_space(PADDING);
         if ui.button("New Palette").clicked() {
             self.palettes.push(Palette {name: "(new)".to_string(), file_name: String::new(), default_index: 0, max_row: 100});
         }
@@ -1527,7 +1524,38 @@ impl Menu for LayerSet {
         });
 
         if let Some(i_palette) = delete {
-            self.palettes.remove(i_palette);//checked
+            self.palettes.remove(i_palette);
+        }
+
+        ui.add_space(PADDING);
+        ui.separator();
+
+        if ui.button("New Layer Group").clicked() {
+            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new(), lg_shared: [CreatureShared::new(), CreatureShared::new()]});
+        }
+
+        let mut delete = None;
+        
+        egui::ScrollArea::vertical()
+            .id_source("layer group scroll")
+            .auto_shrink([false, true])
+            .stick_to_right(true)
+            .show(ui, |ui| {
+            for (i_layer_group, layer_group) in self.layer_groups.iter_mut().enumerate() {
+                ui.push_id(i_layer_group, |ui| {
+                    ui.group(|ui| {
+                        ui.text_edit_singleline(&mut layer_group.name);
+                        ui.add_space(PADDING);
+                        if ui.button("Remove Layer Group").clicked() {
+                            delete = Some(i_layer_group);
+                        }
+                    });
+                });
+            }
+        });
+
+        if let Some(i_layer_group) = delete {
+            self.layer_groups.remove(i_layer_group);
         }
     }
 }
