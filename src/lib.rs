@@ -454,6 +454,10 @@ impl RAW for TilePage {
                         tile_page.name = line_vec[1].clone();
                     },
                     "FILE" => {
+                        if line_vec[1].contains("egg") {
+                            dbg!(line_vec.clone());
+
+                        }
                         tile_page.file_name = line_vec[1].clone()
                             .replace(".png", "")
                             .replace("images", "")
@@ -1091,26 +1095,47 @@ impl Menu for Creature {
             for (i_ls, layer_set) in layer_sets.iter_mut().enumerate() {
                 ui.push_id(format!("layer_set{}",i_ls), |ui| {
                     ui.group(|ui| {
-                        egui::ComboBox::from_label("State")
-                            .selected_text(layer_set.state.name())
-                            .show_ui(ui, |ui| {
-                            for s in &shared.creature_shared.states {
-                                ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
-                            }
-                            for s in State::iterator() {
-                                ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
-                            }
-                            ui.selectable_value(&mut layer_set.state, State::Custom(String::new()), "Custom");
+                        ui.horizontal(|ui| {
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_label("State")
+                                    .selected_text(layer_set.state.name())
+                                    .show_ui(ui, |ui| {
+                                    for s in &shared.creature_shared.states {
+                                        ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
+                                    }
+                                    for s in State::iterator() {
+                                        ui.selectable_value(&mut layer_set.state, s.clone(), s.name());
+                                    }
+                                    ui.selectable_value(&mut layer_set.state, State::Custom(String::new()), "Custom");
+                                });
+        
+                                if let State::Custom(s) = &mut layer_set.state {
+                                    ui.text_edit_singleline(s);
+                                }
+                            });
+    
+                            
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_label("Sub-State (optional)")
+                                    .selected_text(layer_set.sub_state.clone().unwrap_or(State::Empty).name())
+                                    .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut layer_set.sub_state, None, State::Empty.name());
+                                    for s in State::iterator() {
+                                        ui.selectable_value(&mut layer_set.sub_state, Some(s.clone()), s.name());
+                                    }
+                                    ui.selectable_value(&mut layer_set.sub_state, Some(State::Custom(String::new())), "Custom");
+                                });
+                                if let Some(State::Custom(cust_state)) = &mut layer_set.sub_state {
+                                    ui.label("Custom state:");
+                                    ui.text_edit_singleline(cust_state);
+                                }
+                            });
                         });
-
-                        if let State::Custom(s) = &mut layer_set.state {
-                            ui.text_edit_singleline(s);
-                        }
                         
                         if matches!(layer_set.state, State::Animated) {
-                            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, and CORPSE appear to work properly (v50.13)");
-                        } else if !matches!(layer_set.state, State::Default | State::Corpse | State::Portrait) {
-                            ui.label("Only DEFAULT, PORTRAIT, and CORPSE known to work (v50.13)");
+                            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, CORPSE, BABY:DEFAULT, and CHILD:DEFAULT appear to work properly (v51.01beta20)");
+                        } else if !(matches!(layer_set.state, State::Default | State::Corpse | State::Portrait) && layer_set.sub_state.is_none()) && !(matches!(layer_set.state, State::Baby | State::Child) && matches!(layer_set.sub_state, Some(State::Default))) {
+                            ui.label("Note: Only DEFAULT, PORTRAIT, CORPSE, BABY:DEFAULT, and CHILD:DEFAULT are known to work (v51.01beta20)");
                         }
 
                         ui.separator();
@@ -1131,6 +1156,117 @@ impl Menu for Creature {
             if let Some(i_ls) = delete_ls {
                 layer_sets.remove(i_ls);//checked
             }
+
+            // ui.add_space(PADDING);
+            // ui.horizontal(|ui| {
+            //     ui.label("Shared Attribute Editing:");
+            //     if ui.button("Save").clicked() {
+            //         CreatureShared::save_lg_shared(self);
+            //     }
+            //     if ui.button("Refresh").clicked() {
+            //         CreatureShared::update_lg_shared(self);
+            //     }
+            // });
+            // for att in self.lg_shared[0].fields() {
+            //     match att.as_str() {
+            //         "Caste" => {
+            //             ui.collapsing("Castes", |ui| {
+            //                 let shared_castes = self.lg_shared[1].castes.clone();
+    
+            //                 for (i_caste, c) in self.lg_shared[1].castes.iter_mut().enumerate() {
+            //                     ui.push_id(format!("caste{}", i_caste), |ui| {
+            //                         ui.horizontal(|ui| {
+            //                             egui::ComboBox::from_label("Caste: ")
+            //                                 .selected_text(c.name())
+            //                                 .show_ui(ui, |ui| {
+            //                                 ui.selectable_value(c, Caste::Male, "MALE");
+            //                                 ui.selectable_value(c, Caste::Female, "FEMALE");
+            //                                 for shared_caste in shared_castes.iter() {
+            //                                     ui.selectable_value(c, shared_caste.clone(), shared_caste.name());
+            //                                 }
+            //                             });
+            //                         });
+            //                     });
+            //                 }
+            //             });
+            //         }
+            //         "Palette" => {
+            //             ui.collapsing("Palettes", |ui| {
+            //                 let shared_palettes = self.lg_shared[1].palettes.clone();
+    
+            //                 for (i_palette, p) in self.lg_shared[1].palettes.iter_mut().enumerate() {
+            //                     ui.push_id(format!("palette{}", i_palette), |ui| {
+            //                         ui.horizontal(|ui| {
+            //                             egui::ComboBox::from_label("Palette: ")
+            //                                 .selected_text(p.name.clone())
+            //                                 .show_ui(ui, |ui| {
+            //                                 for shared_palette in shared_palettes.iter() {
+            //                                     ui.selectable_value(p, shared_palette.clone(), shared_palette.name.clone());
+            //                                 }
+            //                             });
+            //                         });
+            //                     });
+            //                 }
+            //             });
+            //         }
+            //         "Random Part Group" => {
+            //             ui.collapsing("Random Part Groups", |ui| {
+            //                 let shared_rpgs = self.lg_shared[0].random_part_groups.clone();
+    
+            //                 for (i_rpg, rpg) in self.lg_shared[1].random_part_groups.iter_mut().enumerate() {
+            //                     ui.push_id(format!("rpg{}", i_rpg), |ui| {
+            //                         ui.horizontal(|ui| {
+            //                             egui::ComboBox::from_label("Palette: ")
+            //                                 .selected_text(rpg.0.clone())
+            //                                 .show_ui(ui, |ui| {
+            //                                 for shared_rpg in shared_rpgs.iter() {
+            //                                     ui.selectable_value(rpg, shared_rpg.clone(), shared_rpg.0.clone());
+            //                                 }
+            //                             });
+            //                         });
+            //                     });
+            //                 }
+            //             });
+            //         }
+            //         "Item" => {
+            //             ui.collapsing("Items", |ui| {
+            //                 let shared_items = self.lg_shared[0].items.clone();
+    
+            //                 for (i_item, i) in self.lg_shared[1].items.iter_mut().enumerate() {
+            //                     ui.push_id(format!("item{}", i_item), |ui| {
+            //                         ui.horizontal(|ui| {
+            //                             egui::ComboBox::from_label("Item: ")
+            //                                 .selected_text(i.1.clone())
+            //                                 .show_ui(ui, |ui| {
+            //                                 for shared_item in shared_items.iter() {
+            //                                     ui.selectable_value(i, shared_item.clone(), shared_item.1.clone());
+            //                                 }
+            //                             });
+            //                         });
+            //                     });
+            //                 }
+            //             });
+            //         }
+            //         "Item Group" => {
+    
+            //         }
+            //         "MaterialType" => {
+     
+            //         }
+            //         "Color" => {
+    
+            //         }
+            //         "State" |
+            //         "Condition" |
+            //         _ => {/* do nothing */}
+            //     }
+            // }
+    
+            // ui.add_space(PADDING);
+            // ui.label("Preview:");
+            // egui::ScrollArea::horizontal().show(ui, |ui| {
+            //     ui.add(egui::Label::new(self.display()).wrap(false));
+            // });
         });
     }
 }
@@ -1276,11 +1412,11 @@ impl Menu for SimpleLayer {
             if let State::Custom(cust_state) = state {
                 ui.label("Custom state:");
                 ui.text_edit_singleline(cust_state);
-                ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+                ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Layered_Conditions");
             }
 
             ui.add_space(PADDING);
-            egui::ComboBox::from_label("Second state (optional)")
+            egui::ComboBox::from_label("Sub-State (optional)")
                 .selected_text(sub_state.clone().unwrap_or(State::Empty).name())
                 .show_ui(ui, |ui| {
                 ui.selectable_value(sub_state, None, State::Empty.name());
@@ -1292,7 +1428,7 @@ impl Menu for SimpleLayer {
             if let Some(State::Custom(cust_state)) = sub_state {
                 ui.label("Custom state:");
                 ui.text_edit_singleline(cust_state);
-                ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+                ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Layered_Conditions");
             }
         });
         
@@ -1353,6 +1489,7 @@ impl Menu for SimpleLayer {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LayerSet {
     state: State,
+    sub_state: Option<State>,
     layer_groups: Vec<LayerGroup>,
     palettes: Vec<Palette>,
     ls_shared: [CreatureShared; 2],
@@ -1361,6 +1498,7 @@ impl RAW for LayerSet {
     fn new() -> Self {
         Self {
             state: State::default(),
+            sub_state: None,
             layer_groups: Vec::new(),
             palettes: Vec::new(),
             ls_shared: [CreatureShared::new(), CreatureShared::new()],
@@ -1381,6 +1519,9 @@ impl RAW for LayerSet {
                     "LAYER_SET" => {
                         if len >= 2 {
                             layer_set.state = State::from(line_vec[1].clone());
+                            if len >= 3 {
+                                layer_set.sub_state = Some(State::from(line_vec[2].clone()));
+                            }
                         } else {
                             index_err!(i_rel_line, buffer_len, len, 2, errors);
                         }
@@ -1458,7 +1599,11 @@ impl RAW for LayerSet {
     fn display(&self) -> String {
         let mut out = String::new();
 
-        out.push_str(&format!("\n\t[LAYER_SET:{}]\n", self.state.name()));
+        if let Some(sub_state) = &self.sub_state {
+            out.push_str(&format!("\n\t[LAYER_SET:{}:{}]\n", self.state.name(), sub_state.name()));
+        } else {
+            out.push_str(&format!("\n\t[LAYER_SET:{}]\n", self.state.name()));
+        }
 
         for palette in &self.palettes {
             out.push_str(&palette.display());
@@ -1489,18 +1634,37 @@ impl Menu for LayerSet {
         if let State::Custom(s) = &mut self.state {
             ui.text_edit_singleline(s);
         }
+
+        ui.add_space(PADDING);
+        egui::ComboBox::from_label("Sub-State (optional)")
+            .selected_text(self.sub_state.clone().unwrap_or(State::Empty).name())
+            .show_ui(ui, |ui| {
+            ui.selectable_value(&mut self.sub_state, None, State::Empty.name());
+            for s in State::iterator() {
+                ui.selectable_value(&mut self.sub_state, Some(s.clone()), s.name());
+            }
+            ui.selectable_value(&mut self.sub_state, Some(State::Custom(String::new())), "Custom");
+        });
+        if let Some(State::Custom(cust_state)) = &mut self.sub_state {
+            ui.label("Custom state:");
+            ui.text_edit_singleline(cust_state);
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Layered_Conditions");
+        }
         
         if matches!(self.state, State::Animated) {
-            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, and CORPSE appear to work properly (v50.13)");
-        } else if !matches!(self.state, State::Default | State::Corpse | State::Portrait) {
-            ui.label("Only DEFAULT, PORTRAIT, and CORPSE known to work (v50.13)");
+            ui.label("Note: Although ANIMATED is used in vanilla, only DEFAULT, PORTRAIT, CORPSE, BABY:DEFAULT, and CHILD:DEFAULT appear to work properly (v51.01beta20)");
+        } else if !(matches!(self.state, State::Default | State::Corpse | State::Portrait) && self.sub_state.is_none()) && !(matches!(self.state, State::Baby | State::Child) && matches!(self.sub_state, Some(State::Default))) {
+            ui.label("Note: Only DEFAULT, PORTRAIT, CORPSE, BABY:DEFAULT, and CHILD:DEFAULT are known to work (v51.01beta20)");
         }
 
         ui.add_space(PADDING);
-        ui.separator();
+        if ui.button("New Layer Group").clicked() {
+            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new(), lg_shared: [CreatureShared::new(), CreatureShared::new()]});
+        }
 
+        ui.add_space(PADDING);
         if ui.button("New Palette").clicked() {
-            self.palettes.push(Palette {name: "(new)".to_string(), file_name: String::new(), default_index: 0, max_row: 100});
+            self.palettes.push(Palette {name: "(new)".to_string(), file_name: String::new(), default_index: 0, max_row: 63});
         }
 
         let mut delete = None;
@@ -1524,38 +1688,7 @@ impl Menu for LayerSet {
         });
 
         if let Some(i_palette) = delete {
-            self.palettes.remove(i_palette);
-        }
-
-        ui.add_space(PADDING);
-        ui.separator();
-
-        if ui.button("New Layer Group").clicked() {
-            self.layer_groups.push(LayerGroup {name: "(new)".to_string(), layers: Vec::new(), lg_shared: [CreatureShared::new(), CreatureShared::new()]});
-        }
-
-        let mut delete = None;
-        
-        egui::ScrollArea::vertical()
-            .id_source("layer group scroll")
-            .auto_shrink([false, true])
-            .stick_to_right(true)
-            .show(ui, |ui| {
-            for (i_layer_group, layer_group) in self.layer_groups.iter_mut().enumerate() {
-                ui.push_id(i_layer_group, |ui| {
-                    ui.group(|ui| {
-                        ui.text_edit_singleline(&mut layer_group.name);
-                        ui.add_space(PADDING);
-                        if ui.button("Remove Layer Group").clicked() {
-                            delete = Some(i_layer_group);
-                        }
-                    });
-                });
-            }
-        });
-
-        if let Some(i_layer_group) = delete {
-            self.layer_groups.remove(i_layer_group);
+            self.palettes.remove(i_palette);//checked
         }
     }
 }
@@ -1709,27 +1842,20 @@ impl Menu for LayerGroup {
             match att.as_str() {
                 "Caste" => {
                     ui.collapsing("Castes", |ui| {
-                        let old_shared_castes = self.lg_shared[0].castes.clone();
-                        let new_shared_castes = self.lg_shared[1].castes.clone();
+                        let shared_castes = self.lg_shared[1].castes.clone();
 
                         for (i_caste, c) in self.lg_shared[1].castes.iter_mut().enumerate() {
                             ui.push_id(format!("caste{}", i_caste), |ui| {
                                 ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
+                                    egui::ComboBox::from_label("Caste: ")
                                         .selected_text(c.name())
                                         .show_ui(ui, |ui| {
                                         ui.selectable_value(c, Caste::Male, "MALE");
                                         ui.selectable_value(c, Caste::Female, "FEMALE");
-                                        for shared_caste in new_shared_castes.iter() {
+                                        for shared_caste in shared_castes.iter() {
                                             ui.selectable_value(c, shared_caste.clone(), shared_caste.name());
                                         }
-                                        ui.selectable_value(c, Caste::Custom("(new)".to_string()), "(custom)");
                                     });
-                                    if let Caste::Custom(caste_name) = c {
-                                        if !old_shared_castes.contains(&Caste::Custom(caste_name.to_string())) {
-                                            ui.text_edit_singleline(caste_name);
-                                        }
-                                    }
                                 });
                             });
                         }
@@ -1737,24 +1863,18 @@ impl Menu for LayerGroup {
                 }
                 "Palette" => {
                     ui.collapsing("Palettes", |ui| {
-                        let old_shared_palettes = self.lg_shared[0].palettes.clone();
-                        let new_shared_palettes = self.lg_shared[1].palettes.clone();
+                        let shared_palettes = self.lg_shared[1].palettes.clone();
 
                         for (i_palette, p) in self.lg_shared[1].palettes.iter_mut().enumerate() {
                             ui.push_id(format!("palette{}", i_palette), |ui| {
                                 ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
+                                    egui::ComboBox::from_label("Palette: ")
                                         .selected_text(p.name.clone())
                                         .show_ui(ui, |ui| {
-                                        for shared_palette in new_shared_palettes.iter() {
+                                        for shared_palette in shared_palettes.iter() {
                                             ui.selectable_value(p, shared_palette.clone(), shared_palette.name.clone());
                                         }
-                                        ui.selectable_value(p, Palette::new(), "(custom)");
                                     });
-
-                                    if !old_shared_palettes.iter().any(|palette| p.name.ne(&palette.name)) {
-                                        ui.text_edit_singleline(&mut p.name);
-                                    }
                                 });
                             });
                         }
@@ -1762,24 +1882,18 @@ impl Menu for LayerGroup {
                 }
                 "Random Part Group" => {
                     ui.collapsing("Random Part Groups", |ui| {
-                        let old_shared_rpgs = self.lg_shared[0].random_part_groups.clone();
-                        let new_shared_rpgs = self.lg_shared[1].random_part_groups.clone();
+                        let shared_rpgs = self.lg_shared[0].random_part_groups.clone();
 
                         for (i_rpg, rpg) in self.lg_shared[1].random_part_groups.iter_mut().enumerate() {
                             ui.push_id(format!("rpg{}", i_rpg), |ui| {
                                 ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
+                                    egui::ComboBox::from_label("Palette: ")
                                         .selected_text(rpg.0.clone())
                                         .show_ui(ui, |ui| {
-                                        for shared_rpg in new_shared_rpgs.iter() {
+                                        for shared_rpg in shared_rpgs.iter() {
                                             ui.selectable_value(rpg, shared_rpg.clone(), shared_rpg.0.clone());
                                         }
-                                        ui.selectable_value(rpg, ("(new)".to_string(), 8), "(custom)");
                                     });
-
-                                    if !old_shared_rpgs.iter().any(|old_rpg| rpg.0.eq_ignore_ascii_case(&old_rpg.0)) {
-                                        ui.text_edit_singleline(&mut rpg.0);
-                                    }
                                 });
                             });
                         }
@@ -1787,131 +1901,31 @@ impl Menu for LayerGroup {
                 }
                 "Item" => {
                     ui.collapsing("Items", |ui| {
-                        let old_shared_items = self.lg_shared[0].items.clone();
-                        let new_shared_items = self.lg_shared[1].items.clone();
+                        let shared_items = self.lg_shared[0].items.clone();
 
                         for (i_item, i) in self.lg_shared[1].items.iter_mut().enumerate() {
                             ui.push_id(format!("item{}", i_item), |ui| {
                                 ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
+                                    egui::ComboBox::from_label("Item: ")
                                         .selected_text(i.1.clone())
                                         .show_ui(ui, |ui| {
-                                        for shared_item in new_shared_items.iter() {
+                                        for shared_item in shared_items.iter() {
                                             ui.selectable_value(i, shared_item.clone(), shared_item.1.clone());
                                         }
-                                        ui.selectable_value(i, (ItemType::None, "(new)".to_string()), "(custom)");
                                     });
-
-                                    if !old_shared_items.iter().any(|old_item| i.0.eq(&old_item.0) && i.1.eq_ignore_ascii_case(&old_item.1)) {
-                                        egui::ComboBox::from_id_source("new item type")
-                                            .selected_text(i.0.name())
-                                            .show_ui(ui, |ui| {
-                                            for it in ItemType::iterator() {
-                                                ui.selectable_value(&mut i.0, it.clone(), it.name());
-                                            }
-                                        });
-                                        ui.text_edit_singleline(&mut i.1);
-                                    }
                                 });
                             });
                         }
                     });
                 }
                 "Item Group" => {
-                    ui.collapsing("Items Groups", |ui| {
-                        let old_shared_item_groups = self.lg_shared[0].item_groups.clone();
-                        let new_shared_item_groups = self.lg_shared[1].item_groups.clone();
 
-                        for (i_item_group, ig) in self.lg_shared[1].item_groups.iter_mut().enumerate() {
-                            ui.push_id(format!("item_group{}", i_item_group), |ui| {
-                                ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
-                                        .selected_text(format!("{}, {}, ...",
-                                            ig.1.get(0).unwrap_or(&String::default()),
-                                            ig.1.get(1).unwrap_or(&String::default())
-                                        ))
-                                        .show_ui(ui, |ui| {
-                                        for shared_item_group in new_shared_item_groups.iter() {
-                                            ui.selectable_value(ig,
-                                                shared_item_group.clone(),
-                                                format!("{}, {}, ...",
-                                                shared_item_group.1.get(0).unwrap_or(&String::default()),
-                                                shared_item_group.1.get(1).unwrap_or(&String::default())
-                                            ));
-                                        }
-                                        ui.selectable_value(ig, (ItemType::None, vec!["(new)".to_string(),"(new)".to_string(),"(new)".to_string()]), "(custom)");
-                                    });
-
-                                    if !old_shared_item_groups.iter().any(|old_item| ig.0.eq(&old_item.0) && ig.1.concat().eq_ignore_ascii_case(&old_item.1.concat())) {
-                                        egui::ComboBox::from_id_source("new item group type")
-                                            .selected_text(ig.0.name())
-                                            .show_ui(ui, |ui| {
-                                            for it in ItemType::iterator() {
-                                                ui.selectable_value(&mut ig.0, it.clone(), it.name());
-                                            }
-                                        });
-                                        for item_name in &mut ig.1 {
-                                            ui.text_edit_singleline(item_name);
-                                        }
-                                    }
-                                });
-                            });
-                        }
-                    });
                 }
-                "Metal" => {
-                    ui.collapsing("Metals", |ui| {
-                        let old_shared_metals = self.lg_shared[0].metals.clone();
-                        let new_shared_metals = self.lg_shared[1].metals.clone();
-
-                        for (i_metal, metal) in self.lg_shared[1].metals.iter_mut().enumerate() {
-                            ui.push_id(format!("metal{}", i_metal), |ui| {
-                                ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
-                                        .selected_text(metal.name())
-                                        .show_ui(ui, |ui| {
-                                        for shared_metal in new_shared_metals.iter() {
-                                            ui.selectable_value(metal, shared_metal.clone(), shared_metal.name());
-                                        }
-                                        ui.selectable_value(metal, Metal::Custom("(new)".to_string()), "(custom)");
-                                    });
-
-                                    if let Metal::Custom(metal_name) = metal {
-                                        if !old_shared_metals.iter().any(|old_metal| old_metal.name().eq_ignore_ascii_case(&metal_name)) {
-                                            ui.text_edit_singleline(metal_name);
-                                        }
-                                    }
-                                });
-                            });
-                        }
-                    });
+                "MaterialType" => {
+ 
                 }
                 "Color" => {
-                    ui.collapsing("Colors", |ui| {
-                        let old_shared_colors = self.lg_shared[0].colors.clone();
-                        let new_shared_colors = self.lg_shared[1].colors.clone();
 
-                        for (i_color, color) in self.lg_shared[1].colors.iter_mut().enumerate() {
-                            ui.push_id(format!("color{}", i_color), |ui| {
-                                ui.horizontal(|ui| {
-                                    egui::ComboBox::from_label("")
-                                        .selected_text(color.name())
-                                        .show_ui(ui, |ui| {
-                                        for shared_color in new_shared_colors.iter() {
-                                            ui.selectable_value(color, shared_color.clone(), shared_color.name());
-                                        }
-                                        ui.selectable_value(color, Color::Custom("(new)".to_string()), "(custom)");
-                                    });
-
-                                    if let Color::Custom(color_name) = color {
-                                        if !old_shared_colors.iter().any(|old_color| old_color.name().eq_ignore_ascii_case(&color_name)) {
-                                            ui.text_edit_singleline(color_name);
-                                        }
-                                    }
-                                });
-                            });
-                        }
-                    });
                 }
                 "State" |
                 "Condition" |
@@ -2175,7 +2189,7 @@ pub enum Condition {
     Dye(Color),
     NotDyed,
     MaterialFlag(Vec<MaterialFlag>),
-    MaterialType(Metal),
+    MaterialType(MaterialType),
     ProfessionCategory(Vec<Profession>),
     RandomPartIndex(String, u32, u32),
     HaulCountMin(u32),
@@ -2251,7 +2265,11 @@ impl RAW for Condition {
                 "CONDITION_MATERIAL_TYPE" => {
                     if len >= 3 {
                         condition = Condition::MaterialType(
-                            Metal::from(line_vec[2].clone())
+                            MaterialType::from(line_vec[2].clone())
+                        )
+                    } else if len == 2 {
+                        condition = Condition::MaterialType(
+                            MaterialType::from(line_vec[1].clone())
                         )
                     } else {
                         index_err!(i_line, buffer_len, len, 3, errors);
@@ -2411,7 +2429,7 @@ impl RAW for Condition {
                 "USE_PALETTE" => {
                     if len >= 3 {
                         condition = Condition::UsePalette(
-                            Palette { name: line_vec[1].clone(), ..Default::default() },
+                            Palette { name: line_vec[1].clone(), ..Palette::new() },
                             buffer_err_wrap!(line_vec[2].parse::<u32>(), i_line, buffer_len, 2..=2, 0, errors)
                         )
                     } else {
@@ -2560,10 +2578,10 @@ impl RAW for Condition {
                 }
                 out.push_str("]\n");
             },
-            Condition::MaterialType(metal) => {
+            Condition::MaterialType(material_type) => {
                 out = format!(
-                    "\t\t\t\t[CONDITION_MATERIAL_TYPE:METAL:{}]\n",
-                    metal.name()
+                    "\t\t\t\t[CONDITION_MATERIAL_TYPE:{}]\n",
+                    material_type.name()
                 );
             },
             Condition::ProfessionCategory(professions) => {
@@ -2737,15 +2755,28 @@ impl Menu for Condition {
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                            for equip_type in Equipment::iterator() {
+                            for equip_type in EquipmentType::iterator() {
                                 ui.selectable_value(equipment, equip_type.clone(), equip_type.name());
                             }
                         });
 
                         ui.label("Item: (e.g. ITEM_HELM_HELM)");
 
-                        for item in items.iter_mut() {
-                            ui.text_edit_singleline(item);
+                        let mut remove_item = None;
+
+                        for (i_item, item) in items.iter_mut().enumerate() {
+                            ui.push_id(i_item, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.text_edit_singleline(item);
+                                    if ui.small_button("❌").clicked() {
+                                        remove_item = Some(i_item);
+                                    }
+                                });
+                            });
+                        }
+
+                        if let Some(i_item) = remove_item {
+                            items.remove(i_item);
                         }
 
                         let shared_items_iter = shared.creature_shared.items.iter();
@@ -2761,35 +2792,29 @@ impl Menu for Condition {
                                 .show_ui(ui, |ui| {
                                 for item_name in shared_items_iter {
                                     match item_name.0.clone(){
-                                        ItemType::Wield(equip) => {
-                                            if equip.eq(&equipment) {
+                                        ItemType::Wield(equip_type) |
+                                        ItemType::AnyHeld(equip_type) |
+                                        ItemType::ByCategory(_, equip_type) |
+                                        ItemType::ByToken(_, equip_type) => {
+                                            if equip_type.eq(&equipment) {
                                                 ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
                                             }
                                         }
                                         _ => {}
                                     }
                                 }
-                                for item_names in shared_item_groups_iter {
-                                    match item_names.0.clone(){
-                                        ItemType::ByCategory(cat, equip) => {
-                                            if cat.eq(&category.clone()) && equip.eq(&equipment) {
-                                                let mut names = item_names.1.clone();
-                                                names.truncate(2);
-                                                let mut name = names.join(", ");
-                                                name.push_str(", ...");
-                                                ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
+                                for item_groups in shared_item_groups_iter {
+                                    let item_names: Vec<String> = item_groups.iter().map(|ig| ig.1.clone()).collect();
+
+                                    let mut names = item_names.clone();
+                                    names.truncate(2);
+                                    let mut name = names.join(", ");
+                                    name.push_str(", ...");
+                                    ui.selectable_value(&mut shared_items, item_names.clone(), name);
                                 }
                             });
                             if !shared_items.is_empty() {
                                 items.append(&mut shared_items);
-                            }
-                            if ui.button("Remove item").clicked() && items.len() > 1
-                            {
-                                items.pop();
                             }
                         });
                     }
@@ -2801,15 +2826,28 @@ impl Menu for Condition {
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                            for equip_type in Equipment::iterator() {
+                            for equip_type in EquipmentType::iterator() {
                                 ui.selectable_value(equipment, equip_type.clone(), equip_type.name());
                             }
                         });
 
                         ui.label("Item: (e.g. ITEM_GLOVES_GAUNTLETS)");
 
-                        for item in items.iter_mut() {
-                            ui.text_edit_singleline(item);
+                        let mut remove_item = None;
+
+                        for (i_item, item) in items.iter_mut().enumerate() {
+                            ui.push_id(i_item, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.text_edit_singleline(item);
+                                    if ui.small_button("❌").clicked() {
+                                        remove_item = Some(i_item);
+                                    }
+                                });
+                            });
+                        }
+
+                        if let Some(i_item) = remove_item {
+                            items.remove(i_item);
                         }
 
                         let shared_items_iter = shared.creature_shared.items.iter();
@@ -2825,52 +2863,60 @@ impl Menu for Condition {
                                 .show_ui(ui, |ui| {
                                 for item_name in shared_items_iter {
                                     match item_name.0.clone(){
-                                        ItemType::Wield(equip) => {
-                                            if equip.eq(&equipment) {
+                                        ItemType::Wield(equip_type) |
+                                        ItemType::AnyHeld(equip_type) |
+                                        ItemType::ByCategory(_, equip_type) |
+                                        ItemType::ByToken(_, equip_type) => {
+                                            if equip_type.eq(&equipment) {
                                                 ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
                                             }
                                         }
                                         _ => {}
                                     }
                                 }
-                                for item_names in shared_item_groups_iter {
-                                    match item_names.0.clone(){
-                                        ItemType::ByToken(tok, equip) => {
-                                            if tok.eq(&token.clone()) && equip.eq(&equipment) {
-                                                let mut names = item_names.1.clone();
-                                                names.truncate(2);
-                                                let mut name = names.join(", ");
-                                                name.push_str(", ...");
-                                                ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
+                                for item_groups in shared_item_groups_iter {
+                                    let item_names: Vec<String> = item_groups.iter().map(|ig| ig.1.clone()).collect();
+
+                                    let mut names = item_names.clone();
+                                    names.truncate(2);
+                                    let mut name = names.join(", ");
+                                    name.push_str(", ...");
+                                    ui.selectable_value(&mut shared_items, item_names.clone(), name);
                                 }
                             });
                             if !shared_items.is_empty() {
                                 items.append(&mut shared_items);
                             }
-                            if ui.button("Remove item").clicked() && items.len() > 1
-                            {
-                                items.pop();
-                            }
                         });
                     }
                     ItemType::AnyHeld(equipment) => {
+                        ui.label("Note: ANY_HELD no longer functional (v51.01)");
                         ui.label("Item type: (e.g. SHIELD)");
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                            for equip_type in Equipment::iterator() {
+                            for equip_type in EquipmentType::iterator() {
                                 ui.selectable_value(equipment, equip_type.clone(), equip_type.name());
                             }
                         });
 
                         ui.label("Item: (e.g. ITEM_SHIELD_SHIELD)");
 
-                        for item in items.iter_mut() {
-                            ui.text_edit_singleline(item);
+                        let mut remove_item = None;
+
+                        for (i_item, item) in items.iter_mut().enumerate() {
+                            ui.push_id(i_item, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.text_edit_singleline(item);
+                                    if ui.small_button("❌").clicked() {
+                                        remove_item = Some(i_item);
+                                    }
+                                });
+                            });
+                        }
+
+                        if let Some(i_item) = remove_item {
+                            items.remove(i_item);
                         }
 
                         let shared_items_iter = shared.creature_shared.items.iter();
@@ -2886,55 +2932,63 @@ impl Menu for Condition {
                                 .show_ui(ui, |ui| {
                                 for item_name in shared_items_iter {
                                     match item_name.0.clone(){
-                                        ItemType::AnyHeld(equip) => {
-                                            if equip.eq(&equipment) {
+                                        ItemType::Wield(equip_type) |
+                                        ItemType::AnyHeld(equip_type) |
+                                        ItemType::ByCategory(_, equip_type) |
+                                        ItemType::ByToken(_, equip_type) => {
+                                            if equip_type.eq(&equipment) {
                                                 ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
                                             }
                                         }
                                         _ => {}
                                     }
                                 }
-                                for item_names in shared_item_groups_iter {
-                                    match item_names.0.clone(){
-                                        ItemType::Wield(equip) => {
-                                            if equip.eq(&equipment) {
-                                                let mut names = item_names.1.clone();
-                                                names.truncate(2);
-                                                let mut name = names.join(", ");
-                                                name.push_str(", ...");
-                                                ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
+                                for item_groups in shared_item_groups_iter {
+                                    let item_names: Vec<String> = item_groups.iter().map(|ig| ig.1.clone()).collect();
+
+                                    let mut names = item_names.clone();
+                                    names.truncate(2);
+                                    let mut name = names.join(", ");
+                                    name.push_str(", ...");
+                                    ui.selectable_value(&mut shared_items, item_names.clone(), name);
                                 }
                             });
                             if !shared_items.is_empty() {
                                 items.append(&mut shared_items);
                             }
-                            if ui.button("Remove item").clicked() && items.len() > 1
-                            {
-                                items.pop();
-                            }
                         });
                     }
                     ItemType::Wield(equipment) => {
+                        ui.label("Note: WIELD no longer functional (v51.01)");
                         ui.label("Item type: (WEAPON, TOOL, or ANY)");
                         egui::ComboBox::from_label("Item type")
                             .selected_text(&equipment.name())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(equipment, Equipment::Any, "Any");
-                                ui.selectable_value(equipment, Equipment::Weapon, "Weapon");
-                                ui.selectable_value(equipment, Equipment::Tool, "Tool");
+                                ui.selectable_value(equipment, EquipmentType::Any, "Any");
+                                ui.selectable_value(equipment, EquipmentType::Weapon, "Weapon");
+                                ui.selectable_value(equipment, EquipmentType::Tool, "Tool");
                         });
 
-                        if equipment == &Equipment::Any {
+                        if equipment == &EquipmentType::Any {
                             items.clear();
                         } else {
                             ui.label("Item: (e.g. ITEM_WEAPON_PICK or ANY)");
+
+                            let mut remove_item = None;
     
-                            for item in items.iter_mut() {
-                                ui.text_edit_singleline(item);
+                            for (i_item, item) in items.iter_mut().enumerate() {
+                                ui.push_id(i_item, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.text_edit_singleline(item);
+                                        if ui.small_button("❌").clicked() {
+                                            remove_item = Some(i_item);
+                                        }
+                                    });
+                                });
+                            }
+
+                            if let Some(i_item) = remove_item {
+                                items.remove(i_item);
                             }
 
                             let shared_items_iter = shared.creature_shared.items.iter();
@@ -2950,35 +3004,29 @@ impl Menu for Condition {
                                     .show_ui(ui, |ui| {
                                     for item_name in shared_items_iter {
                                         match item_name.0.clone(){
-                                            ItemType::Wield(equip) => {
-                                                if equip.eq(&equipment) {
+                                            ItemType::Wield(equip_type) |
+                                            ItemType::AnyHeld(equip_type) |
+                                            ItemType::ByCategory(_, equip_type) |
+                                            ItemType::ByToken(_, equip_type) => {
+                                                if equip_type.eq(&equipment) {
                                                     ui.selectable_value(&mut shared_items, vec![item_name.1.clone()], item_name.1.clone());
                                                 }
                                             }
                                             _ => {}
                                         }
                                     }
-                                    for item_names in shared_item_groups_iter {
-                                        match item_names.0.clone(){
-                                            ItemType::Wield(equip) => {
-                                                if equip.eq(&equipment) {
-                                                    let mut names = item_names.1.clone();
-                                                    names.truncate(2);
-                                                    let mut name = names.join(", ");
-                                                    name.push_str(", ...");
-                                                    ui.selectable_value(&mut shared_items, item_names.1.clone(), name);
-                                                }
-                                            }
-                                            _ => {}
-                                        }
+                                    for item_groups in shared_item_groups_iter {
+                                        let item_names: Vec<String> = item_groups.iter().map(|ig| ig.1.clone()).collect();
+    
+                                        let mut names = item_names.clone();
+                                        names.truncate(2);
+                                        let mut name = names.join(", ");
+                                        name.push_str(", ...");
+                                        ui.selectable_value(&mut shared_items, item_names.clone(), name);
                                     }
                                 });
                                 if !shared_items.is_empty() {
                                     items.append(&mut shared_items);
-                                }
-                                if ui.button("Remove item").clicked() && items.len() > 1
-                                {
-                                    items.pop();
                                 }
                             });
                         }
@@ -2998,62 +3046,74 @@ impl Menu for Condition {
                         ui.selectable_value(dye_color, color.clone(), color.name());
                     }
                 });
-                ui.label("Not functional in v50.05");
+                ui.label("Not functional currently (v50.05)");
             }
             Condition::NotDyed => {
                 ui.label("No additional input needed.\n\nNot functional currently (v50.05)");
             }
             Condition::MaterialFlag(flags) => {
+                let mut remove_item = None;
+
                 for (i_flag, flag) in flags.iter_mut().enumerate() {
                     ui.push_id(format!("{}{}", flag.name(), i_flag), |ui| {
-                        egui::ComboBox::from_label("Material Flag: ")
-                            .selected_text(flag.name())
-                            .show_ui(ui, |ui| {
-                            for mat_flag_type in MaterialFlag::iterator() {
-                                ui.selectable_value(flag, mat_flag_type.clone(), mat_flag_type.name());
+                        ui.horizontal(|ui| {
+                            ui.label("Material Flag:");
+                            egui::ComboBox::from_label(" ")
+                                .selected_text(flag.name())
+                                .show_ui(ui, |ui| {
+                                for mat_flag_type in MaterialFlag::iterator() {
+                                    ui.selectable_value(flag, mat_flag_type.clone(), mat_flag_type.name());
+                                }
+                            });
+
+                            if ui.small_button("❌").clicked() {
+                                remove_item = Some(i_flag);
                             }
+
                         });
                     });
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Add flag").clicked() {
-                        flags.push(MaterialFlag::default());
-                    }
-                    if ui.button("Remove flag").clicked() && flags.len() > 1 {
-                        flags.pop();
-                    }
-                });
+
+                if let Some(i_flag) = remove_item {
+                    flags.remove(i_flag);
+                }
+
+                if ui.button("Add flag").clicked() {
+                    flags.push(MaterialFlag::default());
+                }
 
                 ui.add_space(PADDING);
                 ui.hyperlink_to("List of useful flags.", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_FLAG");
-                ui.hyperlink_to("Full list of all possible flags (v50.05).", "http://www.bay12forums.com/smf/index.php?topic=169696.msg8442543#msg8442543");
             }
-            Condition::MaterialType(metal) => {
-                ui.label("Metals are the only material type known to work v50.05");
+            Condition::MaterialType(material_type) => {
+                ui.label("MaterialTypes and general INORGANIC are the only material types known to work v50.13");
                 egui::ComboBox::from_label(
-                    "Material name:   (dropdown contains vanilla weapon metals)",
+                    "Material name:   (dropdown contains vanilla weapon material_types)",
                 )
-                .selected_text(metal.name())
+                .selected_text(material_type.name())
                 .show_ui(ui, |ui| {
-                    for metal_type in Metal::iterator() {
-                        ui.selectable_value(metal, metal_type.clone(), metal_type.name());
+                    for material_type_i in MaterialType::iterator() {
+                        ui.selectable_value(material_type, material_type_i.clone(), material_type_i.name());
                     }
-                    for shared_metal in &shared.creature_shared.metals {
-                        ui.selectable_value(metal, shared_metal.clone(), shared_metal.name());
+                    for shared_material_type in &shared.creature_shared.material_types {
+                        ui.selectable_value(material_type, shared_material_type.clone(), shared_material_type.name());
                     }
-                    ui.selectable_value(metal, Metal::Custom(String::new()), "(custom)");
+                    ui.selectable_value(material_type, MaterialType::Custom(String::new()), "(custom)");
                 });
 
                 ui.add_space(PADDING);
                 ui.label(
-                    "In vanilla, only used for metal weapons and armor (e.g. METAL:IRON).",
+                    "In vanilla, only used for inorganic weapons and armor (e.g. INORGANIC or METAL:IRON).",
                 );
-                ui.hyperlink_to("Only METAL:<weapons metal> tokens are currently valid (v50.05).", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_TYPE");
+                ui.hyperlink_to("Only INORGANIC or METAL:<weapons metal> tokens are currently valid (v50.13).", "https://dwarffortresswiki.org/index.php/Graphics_token#CONDITION_MATERIAL_TYPE");
             }
             Condition::ProfessionCategory(professions) => {
-                for profession in professions.iter_mut() {
-                    ui.push_id(profession.name(), |ui| {
-                        egui::ComboBox::from_label("Profession:   (dropdown contains known working ones)")
+                let mut remove_item = None;
+
+                for (i_prof, profession) in professions.iter_mut().enumerate() {
+                    ui.push_id(i_prof, |ui| {
+                        ui.label("Profession:");
+                        egui::ComboBox::from_label(" ")
                             .selected_text(profession.name())
                             .show_ui(ui, |ui| {
                             for profession_type in Profession::iterator() {
@@ -3064,14 +3124,22 @@ impl Menu for Condition {
                         if let Profession::Custom(prof) = profession {
                             ui.text_edit_singleline(prof);
                         }
+
+                        if ui.small_button("❌").clicked() {
+                            remove_item = Some(i_prof);
+                        }
                     });
+                }
+
+                if let Some(i_prof) = remove_item {
+                    professions.remove(i_prof);
                 }
 
                 ui.horizontal(|ui| {
                     if ui.button("Add profession").clicked() {
                         professions.push(Profession::Empty);
                     }
-                    if ui.button("Remove profession").clicked() && professions.len() > 1 {
+                    if ui.button("Remove profession").clicked() {
                         professions.pop();
                     }
                 });
@@ -3139,9 +3207,11 @@ impl Menu for Condition {
             }
             Condition::Child => {
                 ui.label("No additional input needed.");
+                ui.label("For complex layered creatures, consider seperating child layers into a [LAYER_SET:CHILD:DEFAULT] instead to improve organization.");
             }
             Condition::NotChild => {
                 ui.label("No additional input needed.");
+                ui.label("For complex layered creatures, consider seperating child layers into a [LAYER_SET:CHILD:DEFAULT] instead to improve organization.");
             }
             Condition::Caste(caste) => {
                 egui::ComboBox::from_label("Caste token: ")
@@ -3180,7 +3250,7 @@ impl Menu for Condition {
                 });
             }
             Condition::TissueLayer(category, tissue) => {
-                ui.label("BY_CATEGORY assumed because it is the only selection type allowed in v50.05");
+                ui.label("BY_CATEGORY assumed because it is the only selection type tested to be functional in v50.13");
                 ui.label("Category: (e.g. HEAD or ALL)");
                 ui.text_edit_singleline(category);
                 ui.label("Tissue: (e.g. HAIR or ALL)");
@@ -3203,8 +3273,23 @@ impl Menu for Condition {
                     "Color: (e.g. GRAY, RUST, MAROON)",
                     "https://dwarffortresswiki.org/index.php/Color#Color_tokens",
                 );
-                for tissue_color in tissue_colors.iter_mut() {
-                    ui.text_edit_singleline(&mut tissue_color.name());
+
+                let mut remove_item = None;
+
+                for (i_col, tissue_color) in tissue_colors.iter_mut().enumerate() {
+                    ui.push_id(i_col, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(&mut tissue_color.name());
+                            
+                            if ui.small_button("❌").clicked() {
+                                remove_item = Some(i_col);
+                            }
+                        });
+                    });
+                }
+
+                if let Some(i_col) = remove_item {
+                    tissue_colors.remove(i_col);
                 }
 
                 let mut shared_color = Color::None;
@@ -3223,9 +3308,6 @@ impl Menu for Condition {
                     if !matches!(shared_color, Color::None) {
                         tissue_colors.push(shared_color);
                     }
-                    if ui.button("Remove color").clicked() && tissue_colors.len() > 1 {
-                        tissue_colors.pop();
-                    }
                 });
 
                 ui.add_space(PADDING);
@@ -3236,23 +3318,34 @@ impl Menu for Condition {
                     "Shaping: (e.g. NEATLY_COMBED, PONY_TAILS, CLEAN_SHAVEN)",
                     "https://dwarffortresswiki.org/index.php/Entity_token#TS_PREFERRED_SHAPING",
                 );
-                for shaping in shapings.iter_mut() {
-                    egui::ComboBox::from_label("Shaping Type")
-                        .selected_text(shaping.name())
-                        .show_ui(ui, |ui| {
-                        for shaping_type in Shaping::iterator() {
-                            ui.selectable_value(shaping, shaping_type.clone(), shaping_type.name());
-                        }
+
+                let mut remove_item = None;
+
+                for (i_shap, shaping) in shapings.iter_mut().enumerate() {
+                    ui.push_id(i_shap, |ui| {
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_label("Shaping Type")
+                                .selected_text(shaping.name())
+                                .show_ui(ui, |ui| {
+                                for shaping_type in Shaping::iterator() {
+                                    ui.selectable_value(shaping, shaping_type.clone(), shaping_type.name());
+                                }
+                            });
+                            
+                            if ui.small_button("❌").clicked() {
+                                remove_item = Some(i_shap);
+                            }
+                        });
                     });
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Add shaping").clicked() {
-                        shapings.push(Shaping::default());
-                    }
-                    if ui.button("Remove shaping").clicked() && shapings.len() > 1 {
-                        shapings.pop();
-                    }
-                });
+
+                if let Some(i_shap) = remove_item {
+                    shapings.remove(i_shap);
+                }
+
+                if ui.button("Add shaping").clicked() {
+                    shapings.push(Shaping::default());
+                }
 
                 ui.label("Additional shapings are used within graphics_creatures_creatures_layered.txt, but the complete list is not readily prepared.");
 
@@ -3266,7 +3359,7 @@ impl Menu for Condition {
             }
             Condition::TissueSwap(app_mod, amount, tile_page, [x1, y1], large_coords) => {
                 egui::ComboBox::from_label(
-                    "Appearance Modifier (only IF_MIN_CURLY supported (v50.05)):",
+                    "Appearance Modifier (only IF_MIN_CURLY supported (v50.13)):",
                 )
                 .selected_text(app_mod.clone())
                 .show_ui(ui, |ui| {
@@ -3508,7 +3601,7 @@ impl Condition {
             Condition::Dye(Color::None),
             Condition::NotDyed,
             Condition::MaterialFlag(Vec::new()),
-            Condition::MaterialType(Metal::None),
+            Condition::MaterialType(MaterialType::None),
             Condition::ProfessionCategory(Vec::new()),
             Condition::RandomPartIndex(String::new(), 0, 0),
             Condition::HaulCountMin(0),
@@ -3703,9 +3796,10 @@ impl Caste {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub enum Metal {
+pub enum MaterialType {
     #[default]
     None,
+    Inorganic,
     Copper,
     Silver,
     Bronze,
@@ -3715,50 +3809,53 @@ pub enum Metal {
     Adamantine,
     Custom(String),
 }
-impl Metal {
+impl MaterialType {
     fn name(&self) -> String {
         match self {
-            Metal::None => String::new(),
-            Metal::Copper => "COPPER".to_string(),
-            Metal::Silver => "SILVER".to_string(),
-            Metal::Bronze => "BRONZE".to_string(),
-            Metal::BlackBronze => "BLACK_BRONZE".to_string(),
-            Metal::Iron => "IRON".to_string(),
-            Metal::Steel => "STEEL".to_string(),
-            Metal::Adamantine => "ADAMANTINE".to_string(),
-            Metal::Custom(metal) => {
-                metal.with_boundaries(&[Boundary::Space])
+            MaterialType::None => String::new(),
+            MaterialType::Inorganic => "INORGANIC".to_string(),
+            MaterialType::Copper => "METAL:COPPER".to_string(),
+            MaterialType::Silver => "METAL:SILVER".to_string(),
+            MaterialType::Bronze => "METAL:BRONZE".to_string(),
+            MaterialType::BlackBronze => "METAL:BLACK_BRONZE".to_string(),
+            MaterialType::Iron => "METAL:IRON".to_string(),
+            MaterialType::Steel => "METAL:STEEL".to_string(),
+            MaterialType::Adamantine => "METAL:ADAMANTINE".to_string(),
+            MaterialType::Custom(material_type) => {
+                material_type.with_boundaries(&[Boundary::Space])
                     .to_case(Case::UpperSnake)
                     .to_string()
             },
         }
     }
 
-    fn from(string: String) -> Metal {
+    fn from(string: String) -> MaterialType {
         match string.as_str() {
-            "COPPER" => Metal::Copper,
-            "SILVER" => Metal::Silver,
-            "BRONZE" => Metal::Bronze,
-            "BLACK_BRONZE" => Metal::BlackBronze,
-            "IRON" => Metal::Iron,
-            "STEEL" => Metal::Steel,
-            "ADAMANTINE" => Metal::Adamantine,
-            metal => Metal::Custom(metal.to_string()),
+            "INORGANIC" => MaterialType::Inorganic,
+            "COPPER" => MaterialType::Copper,
+            "SILVER" => MaterialType::Silver,
+            "BRONZE" => MaterialType::Bronze,
+            "BLACK_BRONZE" => MaterialType::BlackBronze,
+            "IRON" => MaterialType::Iron,
+            "STEEL" => MaterialType::Steel,
+            "ADAMANTINE" => MaterialType::Adamantine,
+            material_type => MaterialType::Custom(material_type.to_string()),
         }
     }
 
     fn iterator() -> std::slice::Iter<'static, Self> {
-        static METALS: [Metal; 8] = [
-            Metal::None,
-            Metal::Copper,
-            Metal::Silver,
-            Metal::Bronze,
-            Metal::BlackBronze,
-            Metal::Iron,
-            Metal::Steel,
-            Metal::Adamantine,
+        static MATERIAL_TYPES: [MaterialType; 9] = [
+            MaterialType::None,
+            MaterialType::Inorganic,
+            MaterialType::Copper,
+            MaterialType::Silver,
+            MaterialType::Bronze,
+            MaterialType::BlackBronze,
+            MaterialType::Iron,
+            MaterialType::Steel,
+            MaterialType::Adamantine,
         ];
-        METALS.iter()
+        MATERIAL_TYPES.iter()
     }
 }
 
@@ -3786,7 +3883,7 @@ pub enum MaterialFlag {
     Pearl,
     Soap,
     HardMat,
-    Metal,
+    MaterialType,
     Glass,
     Sand,
     StrandTissue,
@@ -3837,7 +3934,7 @@ impl MaterialFlag {
             MaterialFlag::Pearl => "ANY_PEARL_MATERIAL".to_string(),
             MaterialFlag::Soap => "ANY_SOAP_MATERIAL".to_string(),
             MaterialFlag::HardMat => "HARD_ITEM_MATERIAL".to_string(),
-            MaterialFlag::Metal => "METAL_ITEM_MATERIAL".to_string(),
+            MaterialFlag::MaterialType => "METAL_ITEM_MATERIAL".to_string(),
             MaterialFlag::Glass => "GLASS_MATERIAL".to_string(),
             MaterialFlag::Sand => "IS_SAND_MATERIAL".to_string(),
             MaterialFlag::Lye => "CONTAINS_LYE".to_string(),
@@ -3887,7 +3984,7 @@ impl MaterialFlag {
             "ANY_PEARL_MATERIAL" => MaterialFlag::Pearl,
             "ANY_SOAP_MATERIAL" => MaterialFlag::Soap,
             "HARD_ITEM_MATERIAL" => MaterialFlag::HardMat,
-            "METAL_ITEM_MATERIAL" => MaterialFlag::Metal,
+            "METAL_ITEM_MATERIAL" => MaterialFlag::MaterialType,
             "GLASS_MATERIAL" => MaterialFlag::Glass,
             "IS_SAND_MATERIAL" => MaterialFlag::Sand,
             "CONTAINS_LYE" => MaterialFlag::Lye,
@@ -3937,7 +4034,7 @@ impl MaterialFlag {
             MaterialFlag::Pearl,
             MaterialFlag::Soap,
             MaterialFlag::HardMat,
-            MaterialFlag::Metal,
+            MaterialFlag::MaterialType,
             MaterialFlag::Glass,
             MaterialFlag::Sand,
             MaterialFlag::StrandTissue,
@@ -3971,10 +4068,10 @@ impl MaterialFlag {
 pub enum ItemType {
     #[default]
     None,
-    ByCategory(String, Equipment),
-    ByToken(String, Equipment),
-    AnyHeld(Equipment),
-    Wield(Equipment),
+    ByCategory(String, EquipmentType),
+    ByToken(String, EquipmentType),
+    AnyHeld(EquipmentType),
+    Wield(EquipmentType),
 }
 impl ItemType {
     fn name(&self) -> String {
@@ -4010,7 +4107,7 @@ impl ItemType {
                 "BY_CATEGORY" => {
                     if len >= 4 {
                         item_type = ItemType::ByCategory(line_vec[1].clone(),
-                            Equipment::from(line_vec[2].clone()));
+                            EquipmentType::from(line_vec[2].clone()));
                         buffer = line_vec[3..].to_vec();
                     } else {
                         index_err!(i_line, buffer_len, len, 4, errors);
@@ -4019,18 +4116,18 @@ impl ItemType {
                 "BY_TOKEN" => {
                     if len >= 4 {
                         item_type = ItemType::ByToken(line_vec[1].clone(),
-                            Equipment::from(line_vec[2].clone()));
+                            EquipmentType::from(line_vec[2].clone()));
                         buffer = line_vec[3..].to_vec();
                     } else {
                         index_err!(i_line, buffer_len, len, 4, errors);
                     }
                 },
                 "ANY_HELD" => {
-                    item_type = ItemType::AnyHeld(Equipment::from(line_vec[1].clone()));
+                    item_type = ItemType::AnyHeld(EquipmentType::from(line_vec[1].clone()));
                     buffer = line_vec[2..].to_vec();
                 },
                 "WIELD" => {
-                    item_type = ItemType::Wield(Equipment::from(line_vec[1].clone()));
+                    item_type = ItemType::Wield(EquipmentType::from(line_vec[1].clone()));
                     buffer = line_vec[2..].to_vec();
                 },
                 _ => {/*do nothing*/}
@@ -4044,10 +4141,10 @@ impl ItemType {
 
     fn iterator() -> std::slice::Iter<'static, Self> {
         static ITEMTYPES: [ItemType; 4] = [
-            ItemType::ByCategory(String::new(), Equipment::None),
-            ItemType::ByToken(String::new(), Equipment::None),
-            ItemType::AnyHeld(Equipment::None),
-            ItemType::Wield(Equipment::None),
+            ItemType::ByCategory(String::new(), EquipmentType::None),
+            ItemType::ByToken(String::new(), EquipmentType::None),
+            ItemType::AnyHeld(EquipmentType::None),
+            ItemType::Wield(EquipmentType::None),
         ];
         ITEMTYPES.iter()
     }
@@ -4225,7 +4322,7 @@ impl BPAppMod {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub enum Equipment {
+pub enum EquipmentType {
     #[default]
     None,
     Armor,
@@ -4238,48 +4335,48 @@ pub enum Equipment {
     Tool,
     Any,
 }
-impl Equipment {
+impl EquipmentType {
     fn name(&self) -> String {
         match self {
-            Equipment::None => String::new(),
-            Equipment::Armor => "ARMOR".to_string(),
-            Equipment::Helm => "HELM".to_string(),
-            Equipment::Gloves => "GLOVES".to_string(),
-            Equipment::Shoes => "SHOES".to_string(),
-            Equipment::Pants => "PANTS".to_string(),
-            Equipment::Shield => "SHIELD".to_string(),
-            Equipment::Weapon => "WEAPON".to_string(),
-            Equipment::Tool => "TOOL".to_string(),
-            Equipment::Any => "ANY".to_string(),
+            EquipmentType::None => String::new(),
+            EquipmentType::Armor => "ARMOR".to_string(),
+            EquipmentType::Helm => "HELM".to_string(),
+            EquipmentType::Gloves => "GLOVES".to_string(),
+            EquipmentType::Shoes => "SHOES".to_string(),
+            EquipmentType::Pants => "PANTS".to_string(),
+            EquipmentType::Shield => "SHIELD".to_string(),
+            EquipmentType::Weapon => "WEAPON".to_string(),
+            EquipmentType::Tool => "TOOL".to_string(),
+            EquipmentType::Any => "ANY".to_string(),
         }
     }
 
-    fn from(string: String) -> Equipment {
+    fn from(string: String) -> EquipmentType {
         match string.as_str() {
-            "ARMOR" => Equipment::Armor,
-            "HELM" => Equipment::Helm,
-            "GLOVES" => Equipment::Gloves,
-            "SHOES" => Equipment::Shoes,
-            "PANTS" => Equipment::Pants,
-            "SHIELD" => Equipment::Shield,
-            "WEAPON" => Equipment::Weapon,
-            "TOOL" => Equipment::Tool,
-            "ANY" => Equipment::Any,
-            _ => Equipment::None,
+            "ARMOR" => EquipmentType::Armor,
+            "HELM" => EquipmentType::Helm,
+            "GLOVES" => EquipmentType::Gloves,
+            "SHOES" => EquipmentType::Shoes,
+            "PANTS" => EquipmentType::Pants,
+            "SHIELD" => EquipmentType::Shield,
+            "WEAPON" => EquipmentType::Weapon,
+            "TOOL" => EquipmentType::Tool,
+            "ANY" => EquipmentType::Any,
+            _ => EquipmentType::None,
         }
     }
 
     fn iterator() -> std::slice::Iter<'static, Self> {
-        static EQUIPMENT: [Equipment; 9] = [
-            Equipment::Armor,
-            Equipment::Helm,
-            Equipment::Gloves,
-            Equipment::Shoes,
-            Equipment::Pants,
-            Equipment::Shield,
-            Equipment::Weapon,
-            Equipment::Tool,
-            Equipment::Any,
+        static EQUIPMENT: [EquipmentType; 9] = [
+            EquipmentType::Armor,
+            EquipmentType::Helm,
+            EquipmentType::Gloves,
+            EquipmentType::Shoes,
+            EquipmentType::Pants,
+            EquipmentType::Shield,
+            EquipmentType::Weapon,
+            EquipmentType::Tool,
+            EquipmentType::Any,
         ];
         EQUIPMENT.iter()
     }
@@ -4291,7 +4388,7 @@ pub enum Profession {
     Empty,
     Stoneworker,
     Miner,
-    Metalsmith,
+    MaterialTypesmith,
     Engineer,
     Farmer,
     Woodworker,
@@ -4311,7 +4408,7 @@ impl Profession {
             Profession::Empty => String::new(),
             Profession::Stoneworker => "STONEWORKER".to_string(),
             Profession::Miner => "MINER".to_string(),
-            Profession::Metalsmith => "METALSMITH".to_string(),
+            Profession::MaterialTypesmith => "METALSMITH".to_string(),
             Profession::Engineer => "ENGINEER".to_string(),
             Profession::Farmer => "FARMER".to_string(),
             Profession::Woodworker => "WOODWORKER".to_string(),
@@ -4335,7 +4432,7 @@ impl Profession {
         match string.as_str() {
             "STONEWORKER" => Profession::Stoneworker,
             "MINER" => Profession::Miner,
-            "METALSMITH" => Profession::Metalsmith,
+            "METALSMITH" => Profession::MaterialTypesmith,
             "ENGINEER" => Profession::Engineer,
             "FARMER" => Profession::Farmer,
             "WOODWORKER" => Profession::Woodworker,
@@ -4355,7 +4452,7 @@ impl Profession {
             Profession::Standard,
             Profession::Stoneworker,
             Profession::Miner,
-            Profession::Metalsmith,
+            Profession::MaterialTypesmith,
             Profession::Engineer,
             Profession::Farmer,
             Profession::Woodworker,
@@ -4649,9 +4746,9 @@ impl Menu for Statue {
         if let State::Custom(cust_state) = state {
             ui.label("Custom state:");
             ui.text_edit_singleline(cust_state);
-            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Conditions");
+            ui.hyperlink_to("Custom states that may work.", "https://dwarffortresswiki.org/index.php/Graphics_token#Layered_Conditions");
         }
-        ui.label("Note: only DEFAULT is known to work v50.05");
+        ui.label("Note: only DEFAULT is known to work v51.01");
 
         let mut caste_bool = caste_opt.is_some();
 
@@ -4792,10 +4889,12 @@ impl Menu for TileGraphic {
     fn menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
         //todo
         ui.label("tile graphic menu");
-        let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
-        for tile_name in tile_names {
-            ui.label(tile_name);
-        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let tile_names: Vec<&String> = shared.tile_page_info.keys().collect();
+            for tile_name in tile_names {
+                ui.label(tile_name);
+            }
+        });
     }
 }
 
@@ -4947,12 +5046,12 @@ pub struct CreatureShared {
     palettes: Vec<Palette>,
     colors: Vec<Color>,
     items: Vec<(ItemType, String)>,
-    item_groups: Vec<(ItemType, Vec<String>)>,
+    item_groups: Vec<Vec<(ItemType, String)>>,
     castes: Vec<Caste>,
     states: Vec<State>,
     conditions: Vec<Condition>,
     random_part_groups: Vec<(String, u32)>,
-    metals: Vec<Metal>,
+    material_types: Vec<MaterialType>,
 }
 impl CreatureShared {
     fn new() -> Self {
@@ -4965,7 +5064,7 @@ impl CreatureShared {
             states: Vec::new(),
             conditions: Vec::new(),
             random_part_groups: Vec::new(),
-            metals: Vec::new(),
+            material_types: Vec::new(),
         }
     }
 
@@ -4978,7 +5077,7 @@ impl CreatureShared {
         self.states.append(&mut creature_shared.states.clone());
         self.conditions.append(&mut creature_shared.conditions.clone());
         self.random_part_groups.append(&mut creature_shared.random_part_groups.clone());
-        self.metals.append(&mut creature_shared.metals.clone());
+        self.material_types.append(&mut creature_shared.material_types.clone());
     }
 
     fn fields(&self) -> Vec<String> {
@@ -5001,8 +5100,8 @@ impl CreatureShared {
         if !self.item_groups.is_empty() {
             out.push("Item Group".to_string());
         }
-        if !self.metals.is_empty() {
-            out.push("Metal".to_string());
+        if !self.material_types.is_empty() {
+            out.push("MaterialType".to_string());
         }
         if !self.colors.is_empty() {
             out.push("Color".to_string());
@@ -5039,10 +5138,10 @@ impl CreatureShared {
             }
         }
         for (i_ig, i) in shared[0].item_groups.iter().enumerate() {
-            let default = &(ItemType::default(), Vec::new());
+            let default = &vec![(ItemType::default(), String::new())];
             let other = shared[1].item_groups.get(i_ig).unwrap_or(default);
-            if !format!("{}{}",i.0.equipment_name(),i.1.concat())
-                .eq_ignore_ascii_case(&format!("{}{}", other.0.equipment_name(), other.1.concat())) {
+            if !i.iter().map(|ig| format!("{}{}", ig.0.equipment_name(), ig.1)).collect::<String>()
+            .eq_ignore_ascii_case(&other.iter().map(|ig| format!("{}{}", ig.0.equipment_name(), ig.1)).collect::<String>()) {
                 difference[0].item_groups.push(i.clone());
                 difference[1].item_groups.push(other.clone());
             }
@@ -5073,62 +5172,62 @@ impl CreatureShared {
                 difference[1].random_part_groups.push(other.clone());
             }
         }
-        for (i_m, m) in shared[0].metals.iter().enumerate() {
-            if !m.name().eq_ignore_ascii_case(&shared[1].metals.get(i_m).unwrap_or(&Metal::default()).name()) {
-                difference[0].metals.push(m.clone());
-                difference[1].metals.push(shared[1].metals.get(i_m).unwrap_or(&Metal::default()).clone());
+        for (i_m, m) in shared[0].material_types.iter().enumerate() {
+            if !m.name().eq_ignore_ascii_case(&shared[1].material_types.get(i_m).unwrap_or(&MaterialType::default()).name()) {
+                difference[0].material_types.push(m.clone());
+                difference[1].material_types.push(shared[1].material_types.get(i_m).unwrap_or(&MaterialType::default()).clone());
             }
         }
 
         difference
     }
 
-    // fn save_c_shared(creature: &mut Creature) {
-    //     let difference = CreatureShared::difference(&creature.creature_shared);
+    fn save_c_shared(creature: &mut Creature) {
+        let difference = CreatureShared::difference(&creature.creature_shared);
 
-    //     if let Some(caste) = &mut creature.caste {
-    //         if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
-    //             creature.caste.replace(difference[1].castes[i_shared].clone());
-    //         }
-    //     }
+        if let Some(caste) = &mut creature.caste {
+            if let Some(i_shared) = difference[0].castes.iter().position(|c| c.name().eq_ignore_ascii_case(&caste.name())) {
+                creature.caste.replace(difference[1].castes[i_shared].clone());
+            }
+        }
 
-    //     for simple_layer in &mut creature.simple_layers {
-    //         if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&simple_layer.state.name())) {
-    //             simple_layer.state.clone_from(&difference[1].states[i_shared]);
-    //         }
-    //         if let Some(state) = &mut simple_layer.sub_state {
-    //             if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&state.name())) {
-    //                 state.clone_from(&difference[1].states[i_shared]);
-    //             }
-    //         }
-    //     }
+        for simple_layer in &mut creature.simple_layers {
+            if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&simple_layer.state.name())) {
+                simple_layer.state.clone_from(&difference[1].states[i_shared]);
+            }
+            if let Some(state) = &mut simple_layer.sub_state {
+                if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&state.name())) {
+                    state.clone_from(&difference[1].states[i_shared]);
+                }
+            }
+        }
 
-    //     for layer_set in &mut creature.layer_sets {
-    //         layer_set.ls_shared.clone_from(&difference);
+        for layer_set in &mut creature.layer_sets {
+            layer_set.ls_shared.clone_from(&difference);
 
-    //         CreatureShared::save_ls_shared(layer_set);
-    //     }
-    // }
+            CreatureShared::save_ls_shared(layer_set);
+        }
+    }
 
-    // fn save_ls_shared(layer_set: &mut LayerSet) {
-    //     let difference = CreatureShared::difference(&layer_set.ls_shared);
+    fn save_ls_shared(layer_set: &mut LayerSet) {
+        let difference = CreatureShared::difference(&layer_set.ls_shared);
 
-    //     if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&layer_set.state.name())) {
-    //         layer_set.state.clone_from(&difference[1].states[i_shared]);
-    //     }
+        if let Some(i_shared) = difference[0].states.iter().position(|s| s.name().eq_ignore_ascii_case(&layer_set.state.name())) {
+            layer_set.state.clone_from(&difference[1].states[i_shared]);
+        }
 
-    //     for palette in &mut layer_set.palettes {
-    //         if let Some(i_shared) = difference[0].palettes.iter().position(|p| p.name.eq_ignore_ascii_case(&palette.name)) {
-    //             palette.clone_from(&difference[1].palettes[i_shared]);
-    //         }
-    //     }
+        for palette in &mut layer_set.palettes {
+            if let Some(i_shared) = difference[0].palettes.iter().position(|p| p.name.eq_ignore_ascii_case(&palette.name)) {
+                palette.clone_from(&difference[1].palettes[i_shared]);
+            }
+        }
 
-    //     for layer_group in &mut layer_set.layer_groups {
-    //         layer_group.lg_shared.clone_from(&difference);
+        for layer_group in &mut layer_set.layer_groups {
+            layer_group.lg_shared.clone_from(&difference);
 
-    //         CreatureShared::save_lg_shared(layer_group);
-    //     }
-    // }
+            CreatureShared::save_lg_shared(layer_group);
+        }
+    }
 
     fn save_lg_shared(layer_group: &mut LayerGroup) {
         let mut difference = CreatureShared::difference(&layer_group.lg_shared);
@@ -5141,18 +5240,21 @@ impl CreatureShared {
                         let mut item_names_sort = item_names.clone();
                         item_names_sort.sort();
                         item_names_sort.dedup();
+                        let len = item_names_sort.len();
 
                         for (i_replace, item_name) in item_names_sort.iter_mut().enumerate() {
                             if let Some(i_shared) = difference[0].items.iter().position(|i| format!("{}{}",i.0.equipment_name(),i.1).eq_ignore_ascii_case(&format!("{}{}", item_type.equipment_name(), item_name))) {
                                 item_type.clone_from(&difference[1].items[i_shared].0);
                                 item_names.get_mut(i_replace).replace(&mut difference[1].items[i_shared].1);
                             }
-                        }
 
-                        if item_names_sort.len() >= 3 {
-                            if let Some(i_shared) = difference[0].item_groups.iter().position(|ig| format!("{}{}", ig.0.equipment_name(), ig.1.concat()).eq_ignore_ascii_case(&format!("{}{}", item_type.equipment_name(), item_names_sort.concat()))) {
-                                item_type.clone_from(&difference[1].item_groups[i_shared].0);
-                                item_names.clone_from(&difference[1].item_groups[i_shared].1);
+                            if len >= 3 {
+                                if let Some(i_shared) = difference[0].item_groups.iter().position(|ig| 
+                                ig.iter().map(|i| format!("{}{}", i.0.equipment_name(), i.1)).collect::<String>()
+                                .eq_ignore_ascii_case(&item_names.iter().map(|i_n| format!("{}{}", item_type.equipment_name(), i_n)).collect::<String>())) {
+                                    item_type.clone_from(&difference[1].item_groups[i_shared].first().unwrap_or(&(ItemType::None, String::new())).0);
+                                    item_names.clone_from(&difference[1].item_groups.iter().flat_map(|ig| ig.iter().map(|item| item.1.clone())).collect::<Vec<String>>());
+                                }
                             }
                         }
                     }
@@ -5161,9 +5263,9 @@ impl CreatureShared {
                             caste.clone_from(&difference[1].castes[i_shared]);
                         }
                     }
-                    Condition::MaterialType(metal) => {
-                        if let Some(i_shared) = difference[0].metals.iter().position(|c| c.name().eq_ignore_ascii_case(&metal.name())) {
-                            metal.clone_from(&difference[1].metals[i_shared]);
+                    Condition::MaterialType(material_type) => {
+                        if let Some(i_shared) = difference[0].material_types.iter().position(|c| c.name().eq_ignore_ascii_case(&material_type.name())) {
+                            material_type.clone_from(&difference[1].material_types[i_shared]);
                         }
                     }
                     Condition::RandomPartIndex(name, _, range) => {
@@ -5254,7 +5356,7 @@ impl CreatureShared {
                             layer_group_shared.items.push((item_type.clone(), item.clone()));
                         }
                         if c_items_sort.len() >= 3 {
-                            layer_group_shared.item_groups.push((item_type.clone(), c_items_sort));
+                            layer_group_shared.item_groups.push(c_items_sort.iter().map(|c| (item_type.clone(), c.clone())).collect::<Vec<(ItemType, String)>>());
                         }
                     }
                     Condition::Caste(caste) => {
@@ -5262,9 +5364,9 @@ impl CreatureShared {
                             layer_group_shared.castes.push(Caste::Custom(caste_name.clone()));
                         }
                     }
-                    Condition::MaterialType(metal) => {
-                        if let Metal::Custom(metal_name) = metal {
-                            layer_group_shared.metals.push(Metal::Custom(metal_name.clone()));
+                    Condition::MaterialType(material_type) => {
+                        if let MaterialType::Custom(material_type_name) = material_type {
+                            layer_group_shared.material_types.push(MaterialType::Custom(material_type_name.clone()));
                         }
                     }
                     Condition::RandomPartIndex(name, _, range) => {
@@ -5300,12 +5402,20 @@ impl CreatureShared {
         self.items.dedup_by(|a, b| 
             format!("{}{}",a.0.equipment_name(),a.1)
             .eq_ignore_ascii_case(&format!("{}{}",b.0.equipment_name(),b.1)));
+        for ig in self.item_groups.iter_mut() {
+            ig.sort_by(|a, b| 
+                format!("{}{}", a.0.equipment_name(), a.1)
+                .cmp(&format!("{}{}",b.0.equipment_name(), b.1)));
+            ig.dedup_by(|a, b| 
+                format!("{}{}",a.0.equipment_name(),a.1)
+                .eq_ignore_ascii_case(&format!("{}{}",b.0.equipment_name(),b.1)));
+        }
         self.item_groups.sort_by(|a, b| 
-            format!("{}{}", a.0.equipment_name(), a.1.concat())
-            .cmp(&format!("{}{}", b.0.equipment_name(), b.1.concat())));
+            a.iter().map(|ig| format!("{}{}", ig.0.equipment_name(), ig.1)).collect::<String>()
+            .cmp(&b.iter().map(|ig| format!("{}{}", ig.0.equipment_name(), ig.1)).collect()));
         self.item_groups.dedup_by(|a, b| 
-            format!("{}{}", a.0.equipment_name(), a.1.concat())
-            .eq_ignore_ascii_case(&format!("{}{}", b.0.equipment_name(), b.1.concat())));
+            a.iter().map(|ig| format!("{}{}", ig.0.equipment_name(), ig.1)).collect::<String>()
+            .eq_ignore_ascii_case(&b.iter().map(|ig| format!("{}{}", ig.0.equipment_name(), ig.1)).collect::<String>()));
         self.castes.sort_by(|a, b| a.name().cmp(&b.name()));
         self.castes.dedup_by(|a, b| a.name().eq_ignore_ascii_case(&b.name()));
         self.states.sort();
@@ -5316,7 +5426,7 @@ impl CreatureShared {
             format!("{}{}", a.0, a.1).cmp(&format!("{}{}", b.0, b.1)));
         self.random_part_groups.dedup_by(|a, b| 
             format!("{}{}", a.0, a.1).eq_ignore_ascii_case(&format!("{}{}", b.0, b.1)));
-        self.metals.sort_by(|a, b| a.name().cmp(&b.name()));
-        self.metals.dedup_by(|a, b| a.name().eq_ignore_ascii_case(&b.name()));
+        self.material_types.sort_by(|a, b| a.name().cmp(&b.name()));
+        self.material_types.dedup_by(|a, b| a.name().eq_ignore_ascii_case(&b.name()));
     }
 }
