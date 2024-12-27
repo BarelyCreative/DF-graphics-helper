@@ -4924,11 +4924,12 @@ impl RAW for Palette {
     fn display(&self) -> String {
         format!(
             "\t\t[LS_PALETTE:{}]
-            \t\t\t[LS_PALETTE_FILE:{}.png]
+            \t\t\t[LS_PALETTE_FILE:images/{}.png]
             \t\t\t[LS_PALETTE_DEFAULT:{}]\n\n",
             self.name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::UpperSnake),
             self.file_name.replace(".png", "")
+                .replace("images/", "")
                 .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::Snake),
             self.default_index
@@ -4945,7 +4946,7 @@ impl Menu for Palette {
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.label("File name:");
+            ui.label("File name:images/");
             ui.text_edit_singleline(&mut self.file_name);
         });
 
