@@ -1549,7 +1549,7 @@ impl RAW for LayerSet {
                         if len >= 2 {
                             let mut default_pal = Palette::new();
                             let last_palette = layer_set.palettes.last_mut().unwrap_or(&mut default_pal);
-                            let file_name = line_vec[1].clone();
+                            let file_name = line_vec[1].clone().replace("images/", "");
 
                             //set palette max dimensions based on file if possible
                             if file_name.ne(&String::new()) {
@@ -4924,8 +4924,8 @@ impl RAW for Palette {
     fn display(&self) -> String {
         format!(
             "\t\t[LS_PALETTE:{}]
-            \t\t\t[LS_PALETTE_FILE:images/{}.png]
-            \t\t\t[LS_PALETTE_DEFAULT:{}]\n\n",
+            \t[LS_PALETTE_FILE:images/{}.png]
+            \t[LS_PALETTE_DEFAULT:{}]\n\n",
             self.name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::UpperSnake),
             self.file_name.replace(".png", "")
