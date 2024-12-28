@@ -355,7 +355,7 @@ impl RAW for TilePageFile {
     }
 
     fn display(&self) -> String {
-        let mut output = format!(
+        let mut out = format!(
             "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
             self.name.clone()
             .with_boundaries(&[Boundary::Space])
@@ -365,39 +365,10 @@ impl RAW for TilePageFile {
         );
     
         for tile_page in self.tile_pages.iter() {
-            output.push_str(&tile_page.display());
+            out.push_str(&tile_page.display());
         }
 
-        output
-
-
-        // let tile_page_file = fs::File::create(
-        //     path
-        //     .join("graphics")
-        //     .join(format!("tile_page_{}.txt",
-        //     self.name.clone()
-        //     .with_boundaries(&[Boundary::Space])
-        //     .to_case(Case::Snake)))
-        // )?;
-
-        // let mut tile_page_writer = io::LineWriter::new(tile_page_file);
-        
-        // tile_page_writer.write_all(format!(
-        //     "tile_page_{}\n\n[OBJECT:TILE_PAGE]\n\n",
-        //     self.name
-        //     .with_boundaries(&[Boundary::Space])
-        //     .to_case(Case::Snake)
-        //     ).as_bytes()
-        // )?;
-
-        // for tile in self.tiles.iter() {
-        //     tile_page_writer.write_all(tile.display()
-        //         .as_bytes())?;
-        // }
-        
-        // tile_page_writer.flush()?;
-
-        // Ok(String)
+        out
     }
 }
 impl TilePageFile {
@@ -428,7 +399,7 @@ impl TilePageFile {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TilePage {
     pub name: String,
-    pub file_name: String,
+    pub file_name: PathBuf,
     pub image_size: [u32; 2],
     pub tile_size: [u32; 2],
 }
@@ -436,13 +407,12 @@ impl RAW for TilePage {
     fn new() -> Self {
         TilePage {
             name: "(new)".to_string(),
-            file_name: String::new(),
+            file_name: PathBuf::new(),
             image_size: [0, 0],
             tile_size: [32, 32],
         }
     }
 
-    ///Takes a vector of line vectors and generates a tile from them.
     fn read(buffer: Vec<Vec<String>>, _raw_buffer: Vec<String>, path: &PathBuf) -> (Self, Vec<DFGHError>) {
         let mut tile_page = TilePage::new();
         let mut errors: Vec<DFGHError> = Vec::new();
@@ -456,14 +426,7 @@ impl RAW for TilePage {
                         tile_page.name = line_vec[1].clone();
                     },
                     "FILE" => {
-                        if line_vec[1].contains("egg") {
-                            dbg!(line_vec.clone());
-
-                        }
-                        tile_page.file_name = line_vec[1].clone()
-                            .replace(".png", "")
-                            .replace("images", "")
-                            .split_off(1);
+                        tile_page.file_name = line_vec[1].clone().split(&['\\','/']).collect::<PathBuf>();
                     },
                     "TILE_DIM" => {
                         if len >= 3 {
@@ -476,10 +439,9 @@ impl RAW for TilePage {
                     },
                     "PAGE_DIM_PIXELS" => {
                         // if the image file name is already read attempt to correct the image size based on it.
-                        if !tile_page.file_name.is_empty() {
+                        if path.parent().is_some_and(|p| p.join(&tile_page.file_name).exists()) {
                             let image_path = path
                                 .parent().expect("This file should have a parent graphics directory if we are reading from it.")
-                                .join("images")
                                 .join(&tile_page.file_name)
                                 .with_extension("png");
                             
@@ -510,9 +472,9 @@ impl RAW for TilePage {
 
     fn display(&self) -> String {
         format!(
-            "[TILE_PAGE:{}]\n\t[FILE:images/{}.png]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
+            "[TILE_PAGE:{}]\n\t[FILE:{}]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
             self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-            self.file_name.replacen("images/", "", 1).replace(".png", ""),
+            self.file_name.as_os_str().to_string_lossy().replace("\\", "/"),
             self.tile_size[0],
             self.tile_size[1],
             self.image_size[0],
@@ -529,8 +491,14 @@ impl Menu for TilePage {
 
         ui.label("Image file path:");
         ui.horizontal(|ui| {
-            ui.label("/graphics/images/");
-            ui.text_edit_singleline(&mut self.file_name);
+            ui.label("graphics/");
+
+            let mut file_name = self.file_name.clone().as_mut_os_string().to_string_lossy().replace("\\", "/");
+            ui.text_edit_singleline(&mut file_name);
+
+            self.file_name.clear();
+            self.file_name.push(file_name.split(&['\\','/']).collect::<PathBuf>());
+
             if ui.button("⏷").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_title(&self.name)
@@ -540,13 +508,12 @@ impl Menu for TilePage {
                         let mut internal_path = path.components()
                             .rev()
                             .map(|c| c.as_os_str())
-                            .take_while(|c| !c.eq_ignore_ascii_case("images"))
+                            .take_while(|c| !c.eq_ignore_ascii_case("graphics"))
                             .collect::<Vec<_>>();
                         internal_path.reverse();
                         self.file_name = internal_path.iter()
                             .map(|&p| p.to_string_lossy().to_string())
-                            .collect::<Vec<_>>()
-                            .join("/");
+                            .collect::<PathBuf>();
                     }
                 }
             }
@@ -1551,7 +1518,7 @@ impl RAW for LayerSet {
                     },
                     "LS_PALETTE" => {
                         if len >= 2 {
-                            layer_set.palettes.push(Palette{name: line_vec[1].clone(), file_name: "".to_string(), default_index: 0, ..Default::default()});
+                            layer_set.palettes.push(Palette{name: line_vec[1].clone(), ..Default::default()});
                         } else {
                             index_err!(i_rel_line, buffer_len, len, 2, errors);
                         }
@@ -1560,13 +1527,12 @@ impl RAW for LayerSet {
                         if len >= 2 {
                             let mut default_pal = Palette::new();
                             let last_palette = layer_set.palettes.last_mut().unwrap_or(&mut default_pal);
-                            let file_name = line_vec[1].clone().replacen("images/", "", 1).replace(".png", "");
+                            let file_name = line_vec[1].clone().split(&['\\','/']).collect::<PathBuf>();
 
                             //set palette max dimensions based on file if possible
-                            if file_name.ne(&String::new()) {
+                            if path.parent().is_some_and(|p| p.join(&file_name).exists()) {
                                 let image_path = path
                                     .parent().expect("This file should have a parent graphics directory if we are reading from it.")
-                                    .join("images")
                                     .join(&file_name)
                                     .with_extension("png");
                                 
@@ -1675,7 +1641,7 @@ impl Menu for LayerSet {
 
         ui.add_space(PADDING);
         if ui.button("New Palette").clicked() {
-            self.palettes.push(Palette {name: "(new)".to_string(), file_name: String::new(), default_index: 0, max_row: 63});
+            self.palettes.push(Palette {name: "(new)".to_string(), file_name: PathBuf::new(), default_index: 0, max_row: 63});
         }
 
         let mut delete = None;
@@ -2737,7 +2703,7 @@ impl Menu for Condition {
         egui::ComboBox::from_label("Condition type")
             .selected_text(&self.name())
             .show_ui(ui, |ui| {
-            for condition in Condition::iterator() {
+            for condition in Condition::vector() {
                 ui.selectable_value(self, condition.clone(), condition.name());
             }
         });
@@ -3605,41 +3571,38 @@ impl Condition {
         }
     }
 
-    fn iterator() -> std::slice::Iter<'static, Self> {
-        static CONDITIONS: [Condition; 31] = [
-            Condition::ItemWorn(ItemType::None, Vec::new()),
-            Condition::ShutOffIfItemPresent(ItemType::None, Vec::new()),
-            Condition::Dye(Color::None),
-            Condition::NotDyed,
-            Condition::MaterialFlag(Vec::new()),
-            Condition::MaterialType(MaterialType::None),
-            Condition::ProfessionCategory(Vec::new()),
-            Condition::RandomPartIndex(String::new(), 0, 0),
-            Condition::HaulCountMin(0),
-            Condition::HaulCountMax(0),
-            Condition::Child,
-            Condition::NotChild,
-            Condition::Caste(Caste::Female),
-            Condition::Ghost,
-            Condition::SynClass(SyndromeClass::Zombie),
-            Condition::TissueLayer(String::new(), String::new()),
-            Condition::TissueMinLength(0),
-            Condition::TissueMaxLength(0),
-            Condition::TissueMayHaveColor(Vec::new()),
-            Condition::TissueMayHaveShaping(Vec::new()),
-            Condition::TissueNotShaped,
-            Condition::TissueSwap(String::new(), 0, String::new(), [0,0], None),
-            Condition::ItemQuality(0),
-            Condition::UsePalette(Palette {name: String::new(), file_name: String::new(), default_index: 0, max_row: 255}, 0),
-            Condition::UseStandardPalette,
-            Condition::ConditionBP(BodyPartType::None),
-            Condition::LGConditionBP(BodyPartType::None),
-            Condition::BPAppearanceModifierRange(BPAppMod::None, 0, 0),
-            Condition::BPPresent,
-            Condition::BPScarred,
-            Condition::Custom(String::new()),
-        ];
-        CONDITIONS.iter()
+    fn vector() -> Vec<Self> {
+        vec![Condition::ItemWorn(ItemType::None, Vec::new()),
+        Condition::ShutOffIfItemPresent(ItemType::None, Vec::new()),
+        Condition::Dye(Color::None),
+        Condition::NotDyed,
+        Condition::MaterialFlag(Vec::new()),
+        Condition::MaterialType(MaterialType::None),
+        Condition::ProfessionCategory(Vec::new()),
+        Condition::RandomPartIndex(String::new(), 0, 0),
+        Condition::HaulCountMin(0),
+        Condition::HaulCountMax(0),
+        Condition::Child,
+        Condition::NotChild,
+        Condition::Caste(Caste::Female),
+        Condition::Ghost,
+        Condition::SynClass(SyndromeClass::Zombie),
+        Condition::TissueLayer(String::new(), String::new()),
+        Condition::TissueMinLength(0),
+        Condition::TissueMaxLength(0),
+        Condition::TissueMayHaveColor(Vec::new()),
+        Condition::TissueMayHaveShaping(Vec::new()),
+        Condition::TissueNotShaped,
+        Condition::TissueSwap(String::new(), 0, String::new(), [0,0], None),
+        Condition::ItemQuality(0),
+        Condition::UsePalette(Palette {name: String::new(), file_name: PathBuf::new(), default_index: 0, max_row: 255}, 0),
+        Condition::UseStandardPalette,
+        Condition::ConditionBP(BodyPartType::None),
+        Condition::LGConditionBP(BodyPartType::None),
+        Condition::BPAppearanceModifierRange(BPAppMod::None, 0, 0),
+        Condition::BPPresent,
+        Condition::BPScarred,
+        Condition::Custom(String::new())]
     }
 }
 
@@ -4912,7 +4875,7 @@ impl Menu for TileGraphic {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Palette {
     name: String,
-    file_name: String,
+    file_name: PathBuf,
     default_index: u32,
     max_row: u32,
 }
@@ -4920,7 +4883,7 @@ impl RAW for Palette {
     fn new() -> Self {
         Self {
             name: "(new)".to_string(),
-            file_name: String::new(),
+            file_name: PathBuf::new(),
             default_index: 0,
             max_row: 255,
         }
@@ -4931,18 +4894,12 @@ impl RAW for Palette {
         //handled within layer set read function
         (Palette::new(), errors)
     }
-
     fn display(&self) -> String {
         format!(
-            "\t\t[LS_PALETTE:{}]
-            \t[LS_PALETTE_FILE:images/{}.png]
-            \t[LS_PALETTE_DEFAULT:{}]\n\n",
+            "\t\t[LS_PALETTE:{}]\n\t\t\t[LS_PALETTE_FILE:images/{}.png]\n\t\t\t[LS_PALETTE_DEFAULT:{}]\n\n",
             self.name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::UpperSnake),
-            self.file_name.replace(".png", "")
-                .replacen("images/", "", 1)
-                .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
-                .to_case(Case::Snake),
+            self.file_name.as_os_str().to_string_lossy().replace("\\", "/"),
             self.default_index
         )
     }
@@ -4958,8 +4915,14 @@ impl Menu for Palette {
 
         ui.label("Palette file path:");
         ui.horizontal(|ui| {
-            ui.label("/graphics/images/");
-            ui.text_edit_singleline(&mut self.file_name);
+            ui.label("graphics/");
+
+            let mut file_name = self.file_name.clone().as_mut_os_string().to_string_lossy().replace("\\", "/");
+            ui.text_edit_singleline(&mut file_name);
+
+            self.file_name.clear();
+            self.file_name.push(file_name.split(&['\\','/']).collect::<PathBuf>());
+
             if ui.button("⏷").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_title(&self.name)
@@ -4969,13 +4932,12 @@ impl Menu for Palette {
                         let mut internal_path = path.components()
                             .rev()
                             .map(|c| c.as_os_str())
-                            .take_while(|c| !c.eq_ignore_ascii_case("images"))
+                            .take_while(|c| !c.eq_ignore_ascii_case("graphics"))
                             .collect::<Vec<_>>();
                         internal_path.reverse();
                         self.file_name = internal_path.iter()
                             .map(|&p| p.to_string_lossy().to_string())
-                            .collect::<Vec<_>>()
-                            .join("/");
+                            .collect::<PathBuf>();
                     }
                 }
             }
@@ -5040,7 +5002,7 @@ impl Shared {
     }
 
     fn tile_page_info(tp: &TilePage, folder: &PathBuf) -> TilePageInfo {
-        let image_path = folder.join("graphics").join("images")
+        let image_path = folder.join("graphics")
             .join(tp.file_name.clone()).with_extension("png");
         let image = image::open(&image_path).ok();
         let image_size: [u32; 2];
