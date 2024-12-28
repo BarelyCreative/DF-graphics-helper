@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 use std::fmt::Debug;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::{fs, io};
@@ -155,14 +155,18 @@ impl Graphics {
         let mut errors: Vec<DFGHError> = Vec::new();
         let mut shared = Shared::new();
 
-        //Check if the path includes or is inside a graphics directory and adjust path to show full mod folder.
-        if folder.ends_with("graphics") {
-            folder.pop();
-        } else if folder.ends_with("images") && folder.parent().get_or_insert(Path::new("")).ends_with("graphics") {
-            folder.pop();
-            folder.pop();
-        } else if !folder.read_dir().is_ok_and(|mut f| f.any(|f| f.is_ok_and(|f| f.path().ends_with("graphics")))) {
-            //if no graphics directory in mod folder throw error.
+        if folder.read_dir().is_ok_and(|mut d| d.any(|r| r.is_ok_and(|f| f.path().ends_with("graphics")))) {
+            //folder contains graphics subfolder, so can be assumed to be mod folder
+        } else if folder.components().any(|c| c.as_os_str().eq("graphics")) {
+            //selected folder is a subfolder of mod, back out to main mod folder
+            let temp_folder = folder.components()
+                .map(|c| c.as_os_str())
+                .take_while(|c| !c.eq_ignore_ascii_case("graphics"))
+                .collect::<PathBuf>();
+            folder.clear();
+            folder.push(temp_folder);
+        } else {
+            //no graphics directory found in mod folder => throw error.
             errors.push(DFGHError::NoGraphicsDirectory(folder.clone()));
             return (
                 Graphics {tile_page_files, graphics_files, shared},
@@ -170,8 +174,6 @@ impl Graphics {
                 errors
             );
         }
-
-        
 
         //read graphics directory from mod folder.
         match fs::read_dir(&folder.join("graphics")) {
@@ -510,7 +512,7 @@ impl RAW for TilePage {
         format!(
             "[TILE_PAGE:{}]\n\t[FILE:images/{}.png]\n\t[TILE_DIM:{}:{}]\n\t[PAGE_DIM_PIXELS:{}:{}]\n\n",
             self.name.with_boundaries(&[Boundary::Space]).to_case(Case::UpperSnake),
-            self.file_name.with_boundaries(&[Boundary::Space]).to_case(Case::Snake),
+            self.file_name.replacen("images/", "", 1).replace(".png", ""),
             self.tile_size[0],
             self.tile_size[1],
             self.image_size[0],
@@ -534,8 +536,17 @@ impl Menu for TilePage {
                     .set_title(&self.name)
                     .add_filter("png", &["png"])
                     .pick_file() {
-                    if let Some(file_name) = path.file_name() {
-                        self.file_name = file_name.to_string_lossy().to_string();
+                    if path.file_name().is_some() {
+                        let mut internal_path = path.components()
+                            .rev()
+                            .map(|c| c.as_os_str())
+                            .take_while(|c| !c.eq_ignore_ascii_case("images"))
+                            .collect::<Vec<_>>();
+                        internal_path.reverse();
+                        self.file_name = internal_path.iter()
+                            .map(|&p| p.to_string_lossy().to_string())
+                            .collect::<Vec<_>>()
+                            .join("/");
                     }
                 }
             }
@@ -1549,7 +1560,7 @@ impl RAW for LayerSet {
                         if len >= 2 {
                             let mut default_pal = Palette::new();
                             let last_palette = layer_set.palettes.last_mut().unwrap_or(&mut default_pal);
-                            let file_name = line_vec[1].clone().replace("images/", "");
+                            let file_name = line_vec[1].clone().replacen("images/", "", 1).replace(".png", "");
 
                             //set palette max dimensions based on file if possible
                             if file_name.ne(&String::new()) {
@@ -4929,7 +4940,7 @@ impl RAW for Palette {
             self.name.with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::UpperSnake),
             self.file_name.replace(".png", "")
-                .replace("images/", "")
+                .replacen("images/", "", 1)
                 .with_boundaries(&[Boundary::Space, Boundary::LowerUpper])
                 .to_case(Case::Snake),
             self.default_index
@@ -4945,17 +4956,37 @@ impl Menu for Palette {
 
         ui.separator();
 
+        ui.label("Palette file path:");
         ui.horizontal(|ui| {
-            ui.label("File name:images/");
+            ui.label("/graphics/images/");
             ui.text_edit_singleline(&mut self.file_name);
+            if ui.button("⏷").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title(&self.name)
+                    .add_filter("png", &["png"])
+                    .pick_file() {
+                    if path.file_name().is_some() {
+                        let mut internal_path = path.components()
+                            .rev()
+                            .map(|c| c.as_os_str())
+                            .take_while(|c| !c.eq_ignore_ascii_case("images"))
+                            .collect::<Vec<_>>();
+                        internal_path.reverse();
+                        self.file_name = internal_path.iter()
+                            .map(|&p| p.to_string_lossy().to_string())
+                            .collect::<Vec<_>>()
+                            .join("/");
+                    }
+                }
+            }
         });
 
         ui.add_space(PADDING);
 
         ui.label("Palette Rows:");
         ui.horizontal(|ui| {
-            ui.add(egui::Slider::new(&mut self.default_index, 0..=self.max_row).prefix("Default Row: "));
-            ui.add(egui::Slider::new(&mut self.max_row, 0..=255).prefix("Max Row: "));
+            ui.add(egui::Slider::new(&mut self.default_index, 0..=self.max_row).drag_value_speed(1.0).prefix("Default Row: "));
+            ui.add(egui::Slider::new(&mut self.max_row, 0..=255).drag_value_speed(1.0).prefix("Max Row: "));
         });
 
         ui.add_space(PADDING);
