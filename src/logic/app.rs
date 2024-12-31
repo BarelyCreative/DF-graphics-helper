@@ -141,6 +141,7 @@ enum PreviewZoom {
     Selected,
     HorizontalFit,
     VerticalFit,
+    Creature([u32; 2]),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -808,7 +809,7 @@ impl DFGraphicsHelper {
                 PreviewZoom::All => {
                     min = [-0.02*size[0], -1.02*size[1]];
                     max = [1.02*size[0], 0.02*size[1]];
-                },
+                }
                 PreviewZoom::Selected => {
                     if let [Some(xy1), opt_xy2] = self.selected_region {
                         let xy2 = opt_xy2.unwrap_or([0,0]);
@@ -828,15 +829,19 @@ impl DFGraphicsHelper {
                         min = [-0.02*size[0], -1.02*size[1]];
                         max = [1.02*size[0], 0.02*size[1]];
                     }
-                },
+                }
                 PreviewZoom::HorizontalFit => {
                     min = [-0.02*size[0], -1.02*size[0]];
                     max = [1.02*size[0], 0.02*size[0]];
-                },
+                }
                 PreviewZoom::VerticalFit => {
                     min = [-0.02*size[1], -1.02*size[1]];
                     max = [1.02*size[1], 0.02*size[1]];
-                },
+                }
+                PreviewZoom::Creature(tile_size) => {
+                    min = [-0.02*tile_size[1] as f64, -2.02*tile_size[0] as f64];
+                    max = [3.02*tile_size[1] as f64, 0.02*tile_size[0] as f64];
+                }
                 PreviewZoom::None => {},
             }
             self.preview_bounds = Some(egui_plot::PlotBounds::from_min_max(min, max));

@@ -896,6 +896,7 @@ pub struct Creature {
     pub simple_layers: Vec<SimpleLayer>,
     pub layer_sets: Vec<LayerSet>,
     pub creature_shared: [CreatureShared; 2],
+    pub active_layers: Option<Vec<(String, [[usize;2];2])>>,
 }
 impl RAW for Creature {
     fn new() -> Creature {
@@ -905,6 +906,7 @@ impl RAW for Creature {
             simple_layers: Vec::new(),
             layer_sets: Vec::new(),
             creature_shared: [CreatureShared::new(), CreatureShared::new()],
+            active_layers: None,
         }
     }
 
@@ -1132,6 +1134,48 @@ impl Menu for Creature {
                 layer_sets.remove(i_ls);//checked
             }
         });
+
+        self.creature_active_layers(ui, shared);
+    }
+}
+impl Creature {
+    fn creature_active_layers(&mut self, ui: &mut Ui, shared: &mut Shared) -> Vec<(String, [[u32;2];2])> {
+        let mut out = Vec::new();
+        if self.layer_sets.is_empty() {
+            //simple layer default graphics & state / caste dropdowns
+            let mut simple_layers = self.simple_layers.clone();
+            simple_layers.retain(|sl| matches!(sl.state, State::Default) && sl.sub_state.is_none());
+            let default = SimpleLayer { state: State::Default, tile_name: "(empty)".to_string(), coords: [0,0], large_coords: None, sub_state: None };
+            let simple_layer = simple_layers.first().unwrap_or(&default);
+
+            let mut coords = [[0,0],[95,63]];
+            if let Some(tp_info) = shared.tile_page_info.get(&simple_layer.tile_name) {
+                let upper_left = [simple_layer.coords[0]*tp_info.tile_size[0], simple_layer.coords[1]*tp_info.tile_size[1]];
+                let large = simple_layer.large_coords.unwrap_or([1,1]);
+                let lower_right = [large[0]*tp_info.tile_size[0]+upper_left[0], large[1]*tp_info.tile_size[1]+upper_left[1]];
+                coords = [upper_left,lower_right];
+            }
+
+            out.push((simple_layer.tile_name.clone(), coords));
+        } else {
+            /*            
+            layered graphics defaults and dropdowns for state, caste, items (as many as desired),
+            traits of the items (material, metal, quality, etc.), syndrome, tissue (length, color,
+            shaping, swap), dye, profession, random part group and index, haul count, child/adult,
+            body part (app mod, present, lg present, scarred), shut-off, ghost, custom condition
+            
+            filter out the ones that are not relevant to the current creature/modifiers not relevant
+            to the current item, bp, or tissue
+
+            go through layer sets -> groups -> layers and determine first valid layer/swap/none per
+            layer group. Add tile page name and pixel coordinates of upper left and lower right
+            corner to output vector.
+            */
+            let coords = [[0,0],[95,63]];
+            out.push(("(empty)".to_string(), coords));
+        }
+
+        out
     }
 }
 
@@ -4913,6 +4957,7 @@ impl Shared {
             .join(tp.file_name.clone()).with_extension("png");
         let image = image::open(&image_path).ok();
         let image_size: [u32; 2];
+        let tile_size = tp.tile_size;
 
         if let Some(dyn_image) = &image {
             image_size = [dyn_image.width() as u32, dyn_image.height() as u32];
@@ -4920,7 +4965,7 @@ impl Shared {
             image_size = tp.image_size;
         }
 
-        TilePageInfo {image_path, image_size, image, ..Default::default()}
+        TilePageInfo {image_path, image_size, tile_size, image, ..Default::default()}
     }
 }
 
@@ -4928,6 +4973,7 @@ impl Shared {
 pub struct TilePageInfo {
     image_path: PathBuf,
     image_size: [u32; 2],
+    tile_size: [u32; 2],
     image: Option<image::DynamicImage>,
     texture: Option<egui::TextureHandle>,
 }
@@ -4936,6 +4982,7 @@ impl Debug for TilePageInfo {
         f.debug_struct("TilePageInfo")
             .field("image_path", &self.image_path)
             .field("image_size", &self.image_size)
+            .field("tile_size", &self.tile_size)
             .field("image", &self.image)
             .field("texture", &self.texture.clone().map(|t| t.name()))
             .finish()
